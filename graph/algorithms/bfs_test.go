@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 func TestBFS_EmptyGraph(t *testing.T) {

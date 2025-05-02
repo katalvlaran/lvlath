@@ -3,7 +3,7 @@ package matrix
 import (
 	"testing"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 func TestIncidenceMatrixBasic(t *testing.T) {

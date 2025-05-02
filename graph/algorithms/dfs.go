@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 /*

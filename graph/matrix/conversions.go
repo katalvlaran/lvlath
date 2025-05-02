@@ -3,7 +3,7 @@
 
 package matrix
 
-import "lvl_algorithms/graph/core"
+import "lvlath/graph/core"
 
 // EdgeListItem is a simple exportable edge record.
 type EdgeListItem struct {

@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 func TestDijkstra_UnweightedError(t *testing.T) {

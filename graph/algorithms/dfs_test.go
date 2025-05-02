@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 func TestDFS_EmptyGraph(t *testing.T) {

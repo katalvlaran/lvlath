@@ -5,7 +5,7 @@ package matrix
 import (
 	"errors"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 /*

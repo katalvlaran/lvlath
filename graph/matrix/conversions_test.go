@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 func TestToEdgeList(t *testing.T) {

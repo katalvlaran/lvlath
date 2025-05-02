@@ -6,7 +6,7 @@ import (
 	"errors"
 	"math"
 
-	"lvl_algorithms/graph/core"
+	"lvlath/graph/core"
 )
 
 /*

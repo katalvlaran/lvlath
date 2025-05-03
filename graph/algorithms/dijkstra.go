@@ -1,14 +1,4 @@
 // Package algorithms implements graph algorithms on core.Graph.
-package algorithms
-
-import (
-	"container/heap"
-	"errors"
-	"math"
-
-	"github.com/katalvlaran/lvlath/graph/core"
-)
-
 /*
 Dijkstra — Shortest Paths in Weighted Graphs
 
@@ -44,6 +34,15 @@ Algorithm outline:
 Time complexity: O((V + E) log V)
 Memory:     O(V + E)
 */
+package algorithms
+
+import (
+	"container/heap"
+	"errors"
+	"math"
+
+	"github.com/katalvlaran/lvlath/graph/core"
+)
 
 // ErrDijkstraNotWeighted indicates that Dijkstra requires a weighted graph.
 var ErrDijkstraNotWeighted = errors.New("graph: Dijkstra requires weighted graph")

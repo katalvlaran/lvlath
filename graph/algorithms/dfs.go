@@ -1,13 +1,4 @@
 // Package algorithms implements graph algorithms on core.Graph.
-package algorithms
-
-import (
-	"context"
-	"fmt"
-
-	"github.com/katalvlaran/lvlath/graph/core"
-)
-
 /*
 DFS — Depth‐First Search
 
@@ -31,6 +22,14 @@ Steps:
 Complexity: O(V + E)
 Memory:     O(V) for visited + call stack up to depth V.
 */
+package algorithms
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/katalvlaran/lvlath/graph/core"
+)
 
 // ErrDFSVertexNotFound is returned when the start vertex does not exist.
 var ErrDFSVertexNotFound = ErrVertexNotFound

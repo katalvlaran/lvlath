@@ -1,3 +1,8 @@
+// Package core defines the central Graph, Vertex and Edge types,
+// and provides thread-safe primitives for building and cloning graphs.
+//
+// All core APIs use sync.RWMutex internally—so you can safely mutate your
+// graphs across goroutines without extra locking.
 package core
 
 import "sync"
@@ -11,7 +16,7 @@ type Vertex struct {
 
 // Edge represents a connection between two vertices.
 // From → To, with an int64 Weight.
-// Note: Weight is stored regardless of Graph.weighted; algorithms decide whether to use it.
+// Note: Weight is stored always, but only honored if Graph.Weighted() == true; algorithms decide whether to use it.
 type Edge struct {
 	From   *Vertex
 	To     *Vertex
@@ -19,10 +24,11 @@ type Edge struct {
 }
 
 // Graph is the core data structure for a (multi)graph.
+// It supports directed vs undirected, weighted vs unweighted edges,
 // - directed: if true, edges have orientation.
 // - weighted: if true, edge weights are meaningful.
-// Internally uses an adjacency list.
-// mu protects concurrent access.
+// and uses an adjacency list under the hood.
+// All mutations are protected by an internal mutex.
 type Graph struct {
 	mu            sync.RWMutex
 	directed      bool

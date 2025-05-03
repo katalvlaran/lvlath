@@ -1,14 +1,4 @@
 // Package algorithms implements graph algorithms on core.Graph.
-package algorithms
-
-import (
-	"container/heap"
-	"errors"
-	"sort"
-
-	"github.com/katalvlaran/lvlath/graph/core"
-)
-
 /*
 Prim & Kruskal — Minimum Spanning Tree (MST)
 
@@ -42,6 +32,15 @@ Algorithms:
    - Complexity: O(E log E + E·α(V)) ≈ O(E log V)
    - Memory:     O(E + V)
 */
+package algorithms
+
+import (
+	"container/heap"
+	"errors"
+	"sort"
+
+	"github.com/katalvlaran/lvlath/graph/core"
+)
 
 // ErrNotWeighted indicates MST algorithms require an undirected, weighted graph.
 var ErrNotWeighted = errors.New("graph: MST requires weighted undirected graph")

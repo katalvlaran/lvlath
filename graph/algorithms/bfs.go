@@ -1,14 +1,4 @@
 // Package algorithms implements graph algorithms on core.Graph.
-package algorithms
-
-import (
-	"context"
-	"errors"
-	"fmt"
-
-	"github.com/katalvlaran/lvlath/graph/core"
-)
-
 /*
 BFS — Breadth‐First Search
 
@@ -35,6 +25,15 @@ Steps:
 Complexity: O(V + E)
 Memory:     O(V)
 */
+package algorithms
+
+import (
+	"context"
+	"errors"
+	"fmt"
+
+	"github.com/katalvlaran/lvlath/graph/core"
+)
 
 // ErrVertexNotFound is returned when the start vertex is absent.
 var ErrVertexNotFound = errors.New("graph: start vertex not found")

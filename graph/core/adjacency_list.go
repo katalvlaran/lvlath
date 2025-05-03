@@ -1,3 +1,4 @@
+// Package core provides the fundamental in-memory Graph implementation.
 package core
 
 // AddVertex inserts v into the graph if absent.

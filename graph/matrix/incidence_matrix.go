@@ -1,5 +1,4 @@
 // Package matrix: incidence matrix representation and conversion.
-
 package matrix
 
 import (
@@ -12,21 +11,21 @@ import (
 IncidenceMatrix
 
 Description:
-  Represents a graph as a vertex‐by‐edge matrix.
-  Rows correspond to vertices, columns to edges.
 
-  For directed graphs:
-    Data[i][j] = -1 if vertex i is the source ("from"),
-                 +1 if vertex i is the target ("to"),
-                 0 otherwise.
-  For undirected:
-    Data[i][j] = 1 for both endpoints.
+	Represents a graph as a vertex‐by‐edge matrix.
+	Rows correspond to vertices, columns to edges.
+
+	For directed graphs:
+	  Data[i][j] = -1 if vertex i is the source ("from"),
+	               +1 if vertex i is the target ("to"),
+	               0 otherwise.
+	For undirected:
+	  Data[i][j] = 1 for both endpoints.
 
 Use cases:
   - Quick incidence queries.
   - Graph‐theoretic matrix operations.
 */
-
 type IncidenceMatrix struct {
 	VertexIndex map[string]int // vertex ID → row index
 	Edges       []*core.Edge   // column order

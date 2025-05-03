@@ -1,6 +1,5 @@
 // Package matrix provides converters from core.Graph
 // to simpler matrix or edge‐list representations.
-
 package matrix
 
 import "github.com/katalvlaran/lvlath/graph/core"

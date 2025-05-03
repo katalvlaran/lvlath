@@ -5,7 +5,7 @@ import (
 	"context"
 	"fmt"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 /*

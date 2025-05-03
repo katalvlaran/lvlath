@@ -4,7 +4,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 func TestAdjacencyMatrixBasic(t *testing.T) {

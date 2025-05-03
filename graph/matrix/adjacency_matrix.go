@@ -34,7 +34,7 @@ package matrix
 import (
 	"fmt"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 // AdjacencyMatrix holds a graph in matrix form.

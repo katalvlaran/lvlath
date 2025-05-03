@@ -6,7 +6,7 @@ import (
 	"errors"
 	"math"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 /*

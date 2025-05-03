@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 // helper to build a simple triangle graph: A–B(1), B–C(2), A–C(3)

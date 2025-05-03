@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"lvlath/graph/core"
+	"github.com/katalvlaran/lvlath/graph/core"
 )
 
 func TestDijkstra_UnweightedError(t *testing.T) {

@@ -1,8 +1,15 @@
 ![img.png](img.png)
 
 ---
-# lvlath
-
+# 
+```
+┌─────────────────────────────────┐
+│  o       o            o    o    │
+│  ║ o   o ║   o───╖  o─╫─o  ║    │
+│  ║  \ /  ║   o───╢    ║    ╟──╖ │
+│  ╙o  o   ╙o  ╙───o    ╙o   o  o │
+└─────────────────────────────────┘
+```
 [![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-reference-blue?logo=go)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
 [![Go Report Card](https://goreportcard.com/badge/github.com/katalvlaran/lvlath)](https://goreportcard.com/report/github.com/katalvlaran/lvlath)
 [![Go version](https://img.shields.io/badge/go-%3E%3D1.23-blue)](https://golang.org)
@@ -34,10 +41,9 @@ go get github.com/katalvlaran/lvlath@latest
 
 ```
 lvlath/
-├── graph/
-│   ├── core/         # Graph, Vertex, Edge, concurrent-safe primitives
-│   ├── matrix/       # AdjacencyMatrix, IncidenceMatrix, converters
-│   └── algorithms/   # BFS, DFS, Dijkstra, Prim & Kruskal, etc.
+├── core/         # Graph, Vertex, Edge, concurrent-safe primitives
+├── matrix/       # AdjacencyMatrix, IncidenceMatrix, converters
+├── algorithms/   # BFS, DFS, Dijkstra, Prim & Kruskal, etc.
 ├── go.mod
 ├── LICENSE
 └── README.md         # This file
@@ -52,8 +58,8 @@ package main
 import (
   "fmt"
 
-  "github.com/katalvlaran/lvlath/graph/core"
-  "github.com/katalvlaran/lvlath/graph/algorithms"
+  "github.com/katalvlaran/lvlath/core"
+  "github.com/katalvlaran/lvlath/algorithms"
 )
 
 func main() {
@@ -88,17 +94,17 @@ func main() {
 
 ## 🚀 Features
 
-* **Core Graph** (`graph/core`)
+* **Core Graph** (`core`)
 
   * Thread-safe adjacency-list implementation
   * Directed & undirected, weighted & unweighted support
   * Clone, clone-empty, multiedges, self-loops
-* **Matrix Representations** (`graph/matrix`)
+* **Matrix Representations** (`matrix`)
 
   * Adjacency matrix with O(1) edge lookup
   * Incidence matrix for algebraic operations
   * Converters: `ToMatrix`, `ToEdgeList`
-* **Algorithms** (`graph/algorithms`)
+* **Algorithms** (`algorithms`)
 
   * **BFS**: breadth-first search with hooks & cancellation
   * **DFS**: depth-first search with pre- and post-visit hooks
@@ -167,3 +173,25 @@ For bugs, feature requests, or general inquiries:
 ---
 
 *Happy graphing!*
+
+
+
+
+| Файл                                         | Демонстрируемые алгоритмы/функции                                                                   | Сложность                                                                                   | Комментарии                                                               | Playground badge |
+| -------------------------------------------- | --------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------- | ---------------- |
+| **`algorithms/example_test.go`**             | • BFS (SimpleChain, MediumDiamond)                                                                  |                                                                                             |                                                                           |                  |
+| • DFS (SimpleChain, MediumDiamond)           |                                                                                                     |                                                                                             |                                                                           |                  |
+| • Dijkstra (Triangle, MediumGraph)           |                                                                                                     |                                                                                             |                                                                           |                  |
+| • Prim (Triangle, MediumGraph)               |                                                                                                     |                                                                                             |                                                                           |                  |
+| • Kruskal (Triangle, MediumGraph)            | basic → medium                                                                                      | Хорошие сценарии, но **отсутствуют** ссылки на playground; базовые описания, без «why/when» | ❌                                                                         |                  |
+| **`core/example_test.go`**                   | • Graph: создание, добавление/удаление вершин и рёбер                                               |                                                                                             |                                                                           |                  |
+| • Self-loops, multiedges                     | basic                                                                                               | Короткие, понятные, но **без** real-world context и без бейджей                             | ❌                                                                         |                  |
+| **`dtw/example_test.go`**                    | • DTW medium: выравнивание небольших сигналов (3 примера: medium, medium2, medium\_window, special) | medium                                                                                      | Детализировано, есть сценарии «use case», но **нет** ссылок на playground | ❌                |
+| **`flow/example_test.go`**                   | • Ford–Fulkerson (simple, medium)                                                                   |                                                                                             |                                                                           |                  |
+| • Dinic (simple, medium)                     | basic → medium                                                                                      | Есть описания сценария, **нет** бейджей, без объяснения «когда применять»                   | ❌                                                                         |                  |
+| **`matrix/example_test.go`**                 | • Matrix roundtrip (Graph→Matrix→Graph)                                                             |                                                                                             |                                                                           |                  |
+| • AdjacencyMatrix ops (Add/Remove/Neighbors) | basic                                                                                               | Понятно, но тоже **без** playground; узкая сфера применения                                 | ❌                                                                         |                  |
+| **`gridgraph/example_test.go`**              | • ConnectedComponents (4-dir)                                                                       |                                                                                             |                                                                           |                  |
+| • ExpandIsland path/cost                     | medium                                                                                              | Грамотный пример, но **без** бейджа; нет разборов special-кейсов                            | ❌                                                                         |                  |
+| **`tsp/example_test.go`**                    | • Exact TSP (Small, Medium, Disconnected)                                                           |                                                                                             |                                                                           |                  |
+| • Approx TSP (Small, Medium, Disconnected)   | medium → advanced                                                                                   | Сценарии понятны, но **нет** бейджей; без глубоких пояснений для non-experts                | ❌                                                                         |                  |

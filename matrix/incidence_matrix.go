@@ -1,134 +1,125 @@
+// Package matrix provides graph-aware wrappers for incidence matrix operations.
 package matrix
 
 import (
-	"errors"
+	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// IncidenceMatrix represents a graph as a vertex-by-edge matrix.
-// Rows correspond to vertices in core.Graph.Vertices() order;
-// columns correspond to a filtered, unique edge list.
+// IncidenceMatrix represents a graph as a V×E matrix mapping vertices to edges.
+// VertexIndex maps vertex ID → row index in Data (immutable).
+// Edges holds the ordered list of *core.Edge corresponding to columns.
+// Data[i][j] holds:
+//   - For directed: -1 if row i is source, +1 if target, 0 otherwise.
+//   - For undirected: 1 for both endpoints, 0 otherwise.
 //
-// For directed graphs:
-//
-//	Data[i][j] = -1 if vertex i is the source of edge j,
-//	             +1 if vertex i is the target,
-//	              0 otherwise.
-//
-// For undirected graphs:
-//
-//	Data[i][j] = 1 for both endpoints.
-//
-// Use cases: incidence queries, algebraic graph operations.
-//
-// Time Complexity: O(V + E)
-// Memory: O(V·E)
+// Construction options (loops, multi-edges) are stored in opts for fidelity.
+// Use NewIncidenceMatrix to build with validation and reproducibility.
 type IncidenceMatrix struct {
-	// VertexIndex maps vertex ID → row index in Data.
-	VertexIndex map[string]int
-	// Edges is the ordered slice of *core.Edge columns.
-	Edges []*core.Edge
-	// Data[row][col] holds the incidence value as above.
-	Data [][]int
+	VertexIndex map[string]int // vertex to row map
+	Edges       []*core.Edge   // column-edge mapping
+	Data        [][]int        // V×E incidence matrix
+	opts        MatrixOptions  // original build options
 }
 
-// NewIncidenceMatrix builds an incidence matrix from g.
-// In undirected mode, only one representative per edge is used;
-// self-loops are skipped automatically.
-//
-// Time Complexity: O(V + E)
-func NewIncidenceMatrix(g *core.Graph) *IncidenceMatrix {
+// NewIncidenceMatrix builds an IncidenceMatrix from a core.Graph and options.
+// It returns ErrNilGraph if g is nil, ErrUnknownVertex for missing vertices,
+// and ErrNonBinaryIncidence if an unweighted matrix contains non-±1 entries.
+// Time: O(V+E); Memory: O(V·E).
+func NewIncidenceMatrix(g *core.Graph, opts MatrixOptions) (IncidenceMatrix, error) {
+	if g == nil {
+		return IncidenceMatrix{}, ErrNilGraph
+	}
 	verts := g.Vertices()
-	n := len(verts)
-	edges := filterUniqueEdges(g)
-	m := len(edges)
-
-	// map vertex IDs to rows
-	vIdx := make(map[string]int, n)
-	for i, v := range verts {
-		vIdx[v.ID] = i
+	rawEdges := g.Edges()
+	// buildIncidenceData applies options and filters edges
+	vIdx, cols, data, err := BuildIncidenceData(verts, rawEdges, opts)
+	if err != nil {
+		return IncidenceMatrix{}, err
 	}
-
-	// allocate data
-	data := make([][]int, n)
-	for i := range data {
-		data[i] = make([]int, m)
-	}
-
-	// fill in incidence
-	for j, e := range edges {
-		iFrom := vIdx[e.From.ID]
-		iTo := vIdx[e.To.ID]
-		if g.Directed() {
-			data[iFrom][j] = -1
-			data[iTo][j] = 1
-		} else {
-			data[iFrom][j] = 1
-			data[iTo][j] = 1
+	// Validate binary entries for unweighted graphs
+	if !opts.Weighted {
+		for i := range data {
+			for _, val := range data[i] {
+				if val != -1 && val != 0 && val != 1 {
+					return IncidenceMatrix{}, ErrNonBinaryIncidence
+				}
+			}
 		}
 	}
-
-	return &IncidenceMatrix{
-		VertexIndex: vIdx,
-		Edges:       edges,
-		Data:        data,
+	// Sort edges by ID for reproducibility and reorder columns accordingly
+	sort.SliceStable(cols, func(i, j int) bool {
+		return cols[i].ID < cols[j].ID
+	})
+	// Rebuild data to match sorted order
+	eCount := len(cols)
+	newData := make([][]int, len(verts))
+	for i := range newData {
+		newData[i] = make([]int, eCount)
 	}
+	for j, e := range cols {
+		iF := vIdx[e.From]
+		iT := vIdx[e.To]
+		if opts.Directed {
+			newData[iF][j] = -1
+			newData[iT][j] = +1
+		} else {
+			newData[iF][j] = +1
+			newData[iT][j] = +1
+		}
+	}
+	// Clone vertex index
+	vIdxCopy := make(map[string]int, len(vIdx))
+	for k, v := range vIdx {
+		vIdxCopy[k] = v
+	}
+	// Clone edges slice to avoid external mutation
+	edgesCopy := make([]*core.Edge, len(cols))
+	for i, e := range cols {
+		edgesCopy[i] = e
+	}
+
+	return IncidenceMatrix{
+		VertexIndex: vIdxCopy,
+		Edges:       edgesCopy,
+		Data:        newData,
+		opts:        opts,
+	}, nil
 }
 
-// VertexIncidence returns the incidence row for vertexID,
-// or an error if the vertex is unknown.
-//
-// Time Complexity: O(1)
-func (m *IncidenceMatrix) VertexIncidence(vertexID string) ([]int, error) {
+// VertexCount returns the number of vertices (rows).
+func (m IncidenceMatrix) VertexCount() int {
+	return len(m.VertexIndex)
+}
+
+// EdgeCount returns the number of edges (columns).
+func (m IncidenceMatrix) EdgeCount() int {
+	return len(m.Edges)
+}
+
+// VertexIncidence returns the incidence row for vertexID.
+// Returns ErrUnknownVertex if the vertex is not indexed.
+// Time: O(1).
+func (m IncidenceMatrix) VertexIncidence(vertexID string) ([]int, error) {
 	i, ok := m.VertexIndex[vertexID]
 	if !ok {
-		return nil, errors.New("matrix: unknown vertex")
+		return nil, ErrUnknownVertex
 	}
+	row := make([]int, len(m.Data[i]))
+	copy(row, m.Data[i])
 
-	return m.Data[i], nil
+	return row, nil
 }
 
-// EdgeEndpoints returns the (fromID, toID) of the edge at column j,
-// or an error if j is out of bounds.
-//
-// Time Complexity: O(1)
-func (m *IncidenceMatrix) EdgeEndpoints(j int) (fromID, toID string, err error) {
+// EdgeEndpoints returns the source and target IDs of the edge at column j.
+// Returns ErrDimensionMismatch if j is out of range.
+// Time: O(1).
+func (m IncidenceMatrix) EdgeEndpoints(j int) (fromID, toID string, err error) {
 	if j < 0 || j >= len(m.Edges) {
-		return "", "", errors.New("matrix: edge index out of range")
+		return "", "", ErrDimensionMismatch
 	}
 	e := m.Edges[j]
-	return e.From.ID, e.To.ID, nil
-}
 
-// filterUniqueEdges returns one representative per undirected edge.
-// Self-loops are skipped. In directed graphs, all edges are returned.
-//
-// Time Complexity: O(E)
-func filterUniqueEdges(g *core.Graph) []*core.Edge {
-	all := g.Edges()
-	if g.Directed() {
-		return all
-	}
-	seen := make(map[string]map[string]bool, len(all))
-	var unique []*core.Edge
-
-	for _, e := range all {
-		u, v := e.From.ID, e.To.ID
-		if u == v {
-			continue // skip self-loops
-		}
-		if u > v {
-			u, v = v, u
-		}
-		if seen[u] == nil {
-			seen[u] = make(map[string]bool)
-		}
-		if !seen[u][v] {
-			seen[u][v] = true
-			unique = append(unique, e)
-		}
-	}
-
-	return unique
+	return e.From, e.To, nil
 }

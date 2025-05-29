@@ -9,17 +9,24 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
+// TestIncidenceMatrixBasic covers basic integration scenarios for IncidenceMatrix.
 func TestIncidenceMatrixBasic(t *testing.T) {
-	// Build a directed graph A→B(1), B→C(2)
-	g := core.NewGraph(true, true)
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 2)
+	// Build a directed, weighted graph A→B(1), B→C(2)
+	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 2)
 
-	m := matrix.NewIncidenceMatrix(g)
+	opts := matrix.NewMatrixOptions(
+		matrix.WithDirected(true),
+		matrix.WithWeighted(true),
+	)
+	m, err := matrix.NewIncidenceMatrix(g, opts)
+	require.NoError(t, err)
 
-	// Dimensions: 3 vertices × 2 edges
-	require.Len(t, m.Data, 3)
-	require.Len(t, m.Data[0], 2)
+	// Dimensions: V rows × E columns
+	expectedVerts := len(g.Vertices())
+	require.Equal(t, expectedVerts, m.VertexCount())
+	require.Equal(t, 2, m.EdgeCount())
 
 	// EdgeEndpoints
 	from, to, err := m.EdgeEndpoints(1)
@@ -27,15 +34,26 @@ func TestIncidenceMatrixBasic(t *testing.T) {
 	require.Equal(t, "B", from)
 	require.Equal(t, "C", to)
 
-	// VertexIncidence for "B" contains exactly one -1 and one +1
+	// VertexIncidence for "B": contains exactly one -1 and one +1
 	row, err := m.VertexIncidence("B")
 	require.NoError(t, err)
-	require.Contains(t, row, -1)
-	require.Contains(t, row, 1)
+	countNeg1, countPos1 := 0, 0
+	for _, v := range row {
+		switch v {
+		case -1:
+			countNeg1++
+		case +1:
+			countPos1++
+		}
+	}
+	require.Equal(t, 1, countNeg1)
+	require.Equal(t, 1, countPos1)
 
-	// Unknown vertex / edge errors
+	// Unknown vertex error
 	_, err = m.VertexIncidence("X")
-	require.Error(t, err)
+	require.ErrorIs(t, err, matrix.ErrUnknownVertex)
+
+	// EdgeEndpoints out-of-range error
 	_, _, err = m.EdgeEndpoints(5)
-	require.Error(t, err)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }

@@ -1,18 +1,59 @@
 // Package core defines the central Graph, Vertex, and Edge types,
 // and provides thread-safe primitives for building, querying, and cloning graphs.
 //
-// All core APIs use sync.RWMutex internally, so you can safely mutate your
-// graphs across goroutines without extra locking.
+// All core APIs use separate sync.RWMutex locks internally (muVert for vertices,
+// muEdgeAdj for edges and adjacency), so you can safely mutate your graphs across
+// goroutines with minimal contention.
+//
+// This file declares Vertex, Edge, Graph, GraphOption, EdgeOption,
+// sentinel errors, and the NewGraph constructor.
+//
+// Errors:
+//
+//	ErrNilVertex         – vertex pointer is nil.
+//	ErrEmptyVertexID     – vertex ID is the empty string.
+//	ErrVertexNotFound    – requested vertex does not exist.
+//	ErrEdgeNotFound      – requested edge does not exist.
+//	ErrBadWeight         – non-zero weight provided to an unweighted graph.
+//	ErrLoopNotAllowed    – self-loop when loops are disabled.
+//	ErrMultiEdgeNotAllowed – attempt to add parallel edge when multi-edges disabled.
 package core
 
-import "sync"
+import (
+	"errors"
+	"sync"
+)
+
+// Sentinel errors for core graph operations.
+var (
+	// ErrEmptyVertexID indicates that the provided Vertex has an empty ID.
+	ErrEmptyVertexID = errors.New("core: vertex ID is empty")
+
+	// ErrVertexNotFound indicates an operation referenced a non-existent vertex.
+	ErrVertexNotFound = errors.New("core: vertex not found")
+
+	// ErrEdgeNotFound indicates an operation referenced a non-existent edge.
+	ErrEdgeNotFound = errors.New("core: edge not found")
+
+	// ErrBadWeight indicates a non-zero weight provided to an unweighted graph.
+	ErrBadWeight = errors.New("core: bad weight for unweighted graph")
+
+	// ErrLoopNotAllowed indicates a self-loop was attempted when loops are disabled.
+	ErrLoopNotAllowed = errors.New("core: self-loop not allowed")
+
+	// ErrMultiEdgeNotAllowed indicates a parallel edge was attempted when multi-edges are disabled.
+	ErrMultiEdgeNotAllowed = errors.New("core: multi-edges not allowed")
+
+	// ErrMixedEdgesNotAllowed indicates a mixed direction in edges when mixed-edges are disabled.
+	ErrMixedEdgesNotAllowed = errors.New("core: mixed-mode per-edge overrides not allowed")
+)
 
 // Vertex represents a node in the graph.
 //
-// ID is a unique identifier within its Graph.
-// Metadata can hold arbitrary key-value data and is shared on shallow clones.
+// ID uniquely identifies this Vertex within its Graph.
+// Metadata stores arbitrary key-value data and is shared on shallow clones.
 type Vertex struct {
-	// ID uniquely identifies this Vertex.
+	// ID is the unique identifier for this Vertex.
 	ID string
 
 	// Metadata stores arbitrary user data. It is not deep-copied by Clone.
@@ -21,139 +62,101 @@ type Vertex struct {
 
 // Edge represents a connection between two vertices.
 //
-// From → To, with an integer Weight. Weight is stored regardless of
-// whether the Graph is marked weighted; algorithms decide whether to use it.
+// Each Edge has a unique ID, endpoints From→To, integer Weight, and a Directed flag
+// that overrides the Graph's default directedness when mixed edges are enabled.
 type Edge struct {
-	// From is the source vertex.
-	From *Vertex
+	// ID uniquely identifies this edge in the Graph.
+	ID string
 
-	// To is the destination vertex.
-	To *Vertex
+	// From is the source vertex ID.
+	From string
 
-	// Weight of the edge. Algorithms may ignore this if Graph.Weighted() is false.
+	// To is the destination vertex ID.
+	To string
+
+	// Weight is the cost or capacity of the edge.
 	Weight int64
+
+	// Directed indicates this edge is one-way (true) or bidirectional (false)
+	// when the Graph was constructed with mixed edge support.
+	Directed bool
+}
+
+// GraphOption configures behavior of a Graph before creation.
+type GraphOption func(g *Graph)
+
+// WithDirected sets the default directedness for all new edges
+// (true = directed, false = undirected).
+func WithDirected(defaultDirected bool) GraphOption {
+	return func(g *Graph) { g.directed = defaultDirected }
+}
+
+// WithWeighted allows non-zero edge weights in the Graph.
+func WithWeighted() GraphOption {
+	return func(g *Graph) { g.weighted = true }
+}
+
+// WithMultiEdges permits parallel edges between the same vertices.
+func WithMultiEdges() GraphOption {
+	return func(g *Graph) { g.allowMulti = true }
+}
+
+// WithLoops permits self-loops (edges from a vertex to itself).
+func WithLoops() GraphOption {
+	return func(g *Graph) { g.allowLoops = true }
+}
+
+// WithMixedEdges GraphOption to let per-edge directedness overrides take effect:
+func WithMixedEdges() GraphOption {
+	return func(g *Graph) { g.allowMixed = true }
+}
+
+// EdgeOption configures properties of individual edges when added.
+type EdgeOption func(*Edge)
+
+// WithEdgeDirected overrides the Graph's default directedness for this edge.
+func WithEdgeDirected(directed bool) EdgeOption {
+	return func(e *Edge) { e.Directed = directed }
 }
 
 // Graph is the core in-memory graph data structure.
 //
-// It supports directed vs. undirected and weighted vs. unweighted graphs.
-// Internally uses an adjacency list protected by a sync.RWMutex for
-// concurrent safety. Methods either acquire a read lock (RLock) for queries
-// or a write lock (Lock) for mutations.
+// It supports: directed vs. undirected, weighted vs. unweighted,
+// parallel edges (multi-edges) and self-loops.
+// muVert protects vertices map; muEdgeAdj protects edges map and adjacencyList.
+// nextEdgeID is an atomic counter for unique Edge.ID generation.
 type Graph struct {
-	mu            sync.RWMutex
-	directed      bool
-	weighted      bool
-	vertices      map[string]*Vertex
-	adjacencyList map[string]map[string][]*Edge
+	muVert    sync.RWMutex // guards vertices
+	muEdgeAdj sync.RWMutex // guards edges and adjacency
+
+	// Configuration flags
+	directed   bool // default directedness
+	weighted   bool // allow non-zero weights
+	allowMulti bool // allow parallel edges
+	allowLoops bool // allow self-loops
+	allowMixed bool // allow mixed directed edges
+
+	// Storage
+	nextEdgeID uint64             // atomic edge ID generator
+	vertices   map[string]*Vertex // vertex ID → Vertex
+	edges      map[string]*Edge   // edge ID → Edge
+
+	// adjacencyList[(from)Vertex.ID][(to)Vertex.ID][Edge.ID] = struct{}{}
+	adjacencyList map[string]map[string]map[string]struct{}
 }
 
-// NewGraph constructs an empty Graph.
-//   - directed=true  ⇒ edges have orientation.
-//   - weighted=true  ⇒ edge weights are meaningful.
-//
-// The returned Graph is safe for concurrent use.
-func NewGraph(directed, weighted bool) *Graph {
-	return &Graph{
-		directed:      directed,
-		weighted:      weighted,
+// NewGraph creates an empty Graph with the given flags and options.
+// By default, Graph is undirected, unweighted, no loops, no multi-edges.
+// Complexity: O(1)
+func NewGraph(opts ...GraphOption) *Graph {
+	g := &Graph{
 		vertices:      make(map[string]*Vertex),
-		adjacencyList: make(map[string]map[string][]*Edge),
+		edges:         make(map[string]*Edge),
+		adjacencyList: make(map[string]map[string]map[string]struct{}),
 	}
-}
-
-// CloneEmpty returns a new Graph with the same set of vertices but no edges.
-//
-// Metadata maps are shared (shallow copy). The new Graph has its own mutex
-// and adjacency structure.
-func (g *Graph) CloneEmpty() *Graph {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	clone := NewGraph(g.directed, g.weighted)
-	for id, v := range g.vertices {
-		// share Metadata map intentionally
-		clone.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
-		clone.adjacencyList[id] = make(map[string][]*Edge)
+	// Apply options
+	for _, opt := range opts {
+		opt(g)
 	}
-
-	return clone
-}
-
-// Clone returns a deep copy of the Graph: all vertices and edges.
-//
-// Vertex.Metadata maps are shared (shallow). To deep-copy Metadata,
-// iterate and copy each map yourself.
-//
-// Concurrency: holds a read lock while iterating.
-func (g *Graph) Clone() *Graph {
-	clone := g.CloneEmpty()
-
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	for fromID, nbrs := range g.adjacencyList {
-		for toID, edges := range nbrs {
-			for _, e := range edges {
-				clone.adjacencyList[fromID][toID] = append(
-					clone.adjacencyList[fromID][toID],
-					&Edge{
-						From:   clone.vertices[fromID],
-						To:     clone.vertices[toID],
-						Weight: e.Weight,
-					},
-				)
-			}
-		}
-	}
-
-	return clone
-}
-
-// VerticesMap returns a shallow copy of the internal vertex map.
-//
-// The returned map maps vertex IDs to *Vertex pointers.
-// Modifying the returned map will not affect the original Graph.
-//
-// Concurrency: acquires a read lock.
-func (g *Graph) VerticesMap() map[string]*Vertex {
-	g.mu.RLock()
-	defer g.mu.RUnlock()
-
-	// Return a shallow copy of the map so caller cannot mutate g.vertices.
-	out := make(map[string]*Vertex, len(g.vertices))
-	for id, v := range g.vertices {
-		out[id] = v
-	}
-
-	return out
-}
-
-// InternalVertices exposes the internal vertices map directly.
-//
-// This bypasses locking and is intended only for internal package use.
-func (g *Graph) InternalVertices() map[string]*Vertex {
-	return g.vertices
-}
-
-// Directed reports whether the graph treats edges as directed.
-//
-// No locking needed: directed is immutable after creation.
-func (g *Graph) Directed() bool {
-	return g.directed
-}
-
-// Weighted reports whether the graph treats edge Weights as meaningful.
-//
-// No locking needed: weighted is immutable after creation.
-func (g *Graph) Weighted() bool {
-	return g.weighted
-}
-
-// AdjacencyList exposes the internal adjacency list map.
-//
-// The returned map is the underlying structure; modifying it may corrupt
-// the Graph. Use only for read-only internal operations.
-func (g *Graph) AdjacencyList() map[string]map[string][]*Edge {
-	return g.adjacencyList
+	return g
 }

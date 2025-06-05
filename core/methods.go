@@ -115,8 +115,8 @@ func (g *Graph) AddEdge(from, to string, weight int64, opts ...EdgeOption) (stri
 	if from == to && !g.allowLoops {
 		return "", ErrLoopNotAllowed
 	}
-	// 4) If user passed any per-edge options but mixed-mode is disabled, reject
-	if len(opts) > 0 && !g.allowMixed {
+	// 4) If user passed any per-edge options but direction and mixed-mode is disabled - reject
+	if len(opts) > 0 && !g.directed && !g.allowMixed {
 		return "", ErrMixedEdgesNotAllowed
 	}
 	// 5) Ensure both endpoints exist (idempotent)
@@ -305,6 +305,11 @@ func (g *Graph) Directed() bool {
 	return g.directed
 }
 
+// Looped reports whether the graph's edges could be looped.
+func (g *Graph) Looped() bool {
+	return g.allowLoops
+}
+
 // VerticesMap returns a shallow copy of the vertex map.
 // Complexity: O(V)
 func (g *Graph) VerticesMap() map[string]*Vertex {
@@ -406,9 +411,9 @@ func (g *Graph) Vertices() []string {
 
 // Degree returns (in, out, undirected) degrees of id.
 func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
-	edges, e := g.Neighbors(id)
-	if e != nil {
-		return 0, 0, 0, e
+	edges, err := g.Neighbors(id)
+	if err != nil {
+		return 0, 0, 0, err
 	}
 	for _, e := range edges {
 		if e.From == id && e.To == id {
@@ -424,13 +429,28 @@ func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 			undirected++
 		}
 	}
+
 	return in, out, undirected, nil
+}
+
+// HasDirectedEdges reports whether there is at least one edge.Directed == true.
+func (g *Graph) HasDirectedEdges() bool {
+	g.muEdgeAdj.RLock()
+	defer g.muEdgeAdj.RUnlock()
+	for _, e := range g.edges {
+		if e.Directed {
+			return true
+		}
+	}
+
+	return false
 }
 
 // EdgeCount returns total number of edges. O(1).
 func (g *Graph) EdgeCount() int {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
+
 	return len(g.edges)
 }
 
@@ -438,6 +458,7 @@ func (g *Graph) EdgeCount() int {
 func (g *Graph) VertexCount() int {
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
+
 	return len(g.vertices)
 }
 

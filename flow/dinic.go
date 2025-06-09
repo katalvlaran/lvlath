@@ -1,36 +1,53 @@
 package flow
 
 import (
+	"context"
 	"fmt"
 	"math"
 
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// Dinic computes the maximum flow from source→sink using Dinic’s algorithm:
-//  1. Build level graph via BFS.
-//  2. Repeatedly send blocking flows via DFS on the level graph.
-//  3. Optionally rebuild the level graph every LevelRebuildInterval augmentations.
+// Dinic computes the maximum flow from `source` to `sink` in the
+// directed, weighted graph `g` using Dinic’s algorithm (level graph + blocking flows).
 //
-// Returns the maxFlow value, a residual-capacity copy of the graph, or an error.
+// It returns:
+//   - maxFlow       : the total flow value (int64)
+//   - residualGraph : a *core.Graph of remaining capacities, preserving
+//     all original graph options (directed, weighted,
+//     multi-edges, loops, mixed)
+//   - err           : ErrSourceNotFound, ErrSinkNotFound, EdgeError,
+//     or context cancellation error
 //
-// Options (nil uses defaults):
-//   - Epsilon: treat capacities ≤ Epsilon as zero (default 1e-9).
-//   - Verbose:  print each augmentation via fmt.Printf.
-//   - LevelRebuildInterval: after this many augmentations, rebuild the level graph.
+// Steps:
+//  1. Normalize options and capture context (O(1)).
+//  2. Validate that `source` and `sink` exist in `g` (O(1)).
+//  3. Build initial capacity map via buildCapMap
+//     (O(V + E·log d_max) due to neighbor sorting).
+//  4. Repeat until no more augmenting paths:
+//     a. Check for cancellation (O(1)).
+//     b. BFS to build the level graph: distance from source for each vertex (O(V + E)).
+//     c. If sink unreachable, break.
+//     d. Build adjacency list `next` for edges in level graph (O(E)).
+//     e. DFS-based blocking flow pushes until none remains,
+//     optionally rebuilding level graph every LevelRebuildInterval augmentations.
+//  5. Construct final residual graph via buildCoreResidualFromCapMap
+//     (O(V + E_res)), inheriting all flags from `g`.
 //
-// Complexity: O(E · √V)
-// Memory:     O(V + E)
+// Complexity:
+//
+//	Time:   O(min(V^(2/3), √E) · E) in general; O(E·√V) on unit‐capacity networks.
+//	Memory: O(V + E) for capMap and auxiliary maps (level, next, iter).
 func Dinic(
 	g *core.Graph,
 	source, sink string,
-	opts *FlowOptions,
-) (maxFlow float64, residual *core.Graph, err error) {
-	// --- 1) Set ε and validate
-	eps := 1e-9
-	if opts != nil && opts.Epsilon > 0 {
-		eps = opts.Epsilon
-	}
+	opts FlowOptions,
+) (maxFlow int64, residualGraph *core.Graph, err error) {
+	// 1) Normalize options (set default Ctx and Epsilon if needed)
+	opts.normalize()
+	ctx := opts.Ctx
+
+	// 2) Validate presence of source and sink
 	if !g.HasVertex(source) {
 		return 0, nil, ErrSourceNotFound
 	}
@@ -38,154 +55,129 @@ func Dinic(
 		return 0, nil, ErrSinkNotFound
 	}
 
-	// --- 2) Build residual graph (clone vertices, sum parallel edges)
-	residual = core.NewGraph(g.Directed(), true)
-	for _, v := range g.Vertices() {
-		residual.AddVertex(&core.Vertex{ID: v.ID, Metadata: v.Metadata})
-	}
-	for u, nbrs := range g.AdjacencyList() {
-		for vID, edges := range nbrs {
-			var capSum float64
-			for _, e := range edges {
-				c := float64(e.Weight)
-				if c < -eps {
-					return 0, nil, EdgeError{From: u, To: vID, Cap: c}
-				}
-				capSum += c
-			}
-			if capSum > eps {
-				residual.AddEdge(u, vID, int64(capSum))
-			}
-		}
+	// 3) Build initial capacity map: capMap[u][v] = total int64 capacity from u→v
+	capMap, err := buildCapMap(g, opts)
+	if err != nil {
+		return 0, nil, err
 	}
 
-	// helper to build level graph and neighbor lists
-	type ctx struct {
-		level map[string]int
-		next  map[string][]string
-	}
-	buildLevel := func() (c ctx, ok bool) {
-		// BFS to set level[v] = distance (#edges) from source
-		level := make(map[string]int, len(residual.Vertices()))
-		for _, v := range residual.Vertices() {
-			level[v.ID] = -1
+	// 4) Main loop: level graph + blocking flows
+	augmentCount := 0
+	for {
+		// 4a) Cancellation check before BFS
+		if err = ctx.Err(); err != nil {
+			return maxFlow, nil, err
+		}
+
+		// 4b) BFS to compute levels
+		level := make(map[string]int, len(capMap))
+		for u := range capMap {
+			level[u] = -1
 		}
 		queue := []string{source}
 		level[source] = 0
-
 		for i := 0; i < len(queue); i++ {
 			u := queue[i]
-			for _, e := range residual.AdjacencyList()[u] {
-				v := e[0].To.ID
-				if level[v] < 0 && float64(e[0].Weight) > eps {
+			for v, capUV := range capMap[u] {
+				if capUV > 0 && level[v] < 0 {
 					level[v] = level[u] + 1
 					queue = append(queue, v)
 				}
 			}
 		}
+		// 4c) If sink unreachable in level graph, we're done
 		if level[sink] < 0 {
-			return ctx{}, false
+			break
 		}
-		// build adjacency for blocking flow (only forward edges in level graph)
-		next := make(map[string][]string, len(level))
-		for u, nbrs := range residual.AdjacencyList() {
-			for _, edges := range nbrs {
-				for _, e := range edges {
-					v := e.To.ID
-					if level[v] == level[u]+1 && float64(e.Weight) > eps {
-						next[u] = append(next[u], v)
-					}
+
+		// 4d) Build level‐graph adjacency: next[u] = neighbors v at level+1
+		next := make(map[string][]string, len(capMap))
+		for u, nbrs := range capMap {
+			for v, capUV := range nbrs {
+				if capUV > 0 && level[v] == level[u]+1 {
+					next[u] = append(next[u], v)
 				}
 			}
 		}
 
-		return ctx{level: level, next: next}, true
-	}
-
-	// --- 3) Dinic main loop
-	for {
-		state, ok := buildLevel()
-		if !ok {
-			break // no more augmenting paths
-		}
-		iter := make(map[string]int, len(state.next))
-		augCount := 0
-
-		// blocking‐flow loop
+		// 4e) DFS‐based blocking flow
+		iter := make(map[string]int, len(next))
 		for {
-			// DFS push
-			pushed := dfsPush(residual, source, sink, math.Inf(1), state, iter, eps)
-			if pushed <= eps {
+			// 4e.i) Cancellation check before each DFS push
+			if err = ctx.Err(); err != nil {
+				return maxFlow, nil, err
+			}
+			pushed := dfsDinicPush(ctx, capMap, next, iter, source, sink, math.MaxInt64)
+			if pushed == 0 {
 				break
 			}
 			maxFlow += pushed
-			augCount++
-			if opts != nil && opts.Verbose {
-				fmt.Printf("Dinic push %.3g (total=%.3g)\n", pushed, maxFlow)
+			augmentCount++
+			if opts.Verbose {
+				fmt.Printf("Dinic: pushed %d, total %d\n", pushed, maxFlow)
 			}
-			// rebuild level graph on interval
-			if opts != nil && opts.LevelRebuildInterval > 0 &&
-				augCount%opts.LevelRebuildInterval == 0 {
-				var ok2 bool
-				if state, ok2 = buildLevel(); !ok2 {
-					break
-				}
-				iter = make(map[string]int, len(state.next))
+			// 4e.ii) Optionally rebuild level graph
+			if opts.LevelRebuildInterval > 0 && augmentCount%opts.LevelRebuildInterval == 0 {
+				break
 			}
 		}
 	}
 
-	return maxFlow, residual, nil
+	// 5) Construct the final residual graph from capMap,
+	//    inheriting all flags from the original graph.
+	residualGraph, err = buildCoreResidualFromCapMap(capMap, g, opts)
+	if err != nil {
+		return maxFlow, nil, err
+	}
+
+	return maxFlow, residualGraph, nil
 }
 
-// dfsPush tries to send flow f from u→sink along the level graph.
-// Returns amount actually sent (≤ f), updating residual capacities.
-func dfsPush(
-	residual *core.Graph,
-	u, sink string,
-	f float64,
-	state struct {
-		level map[string]int
-		next  map[string][]string
-	},
+// dfsDinicPush recursively pushes flow along the level graph.
+// It respects cancellation via ctx, updates capMap in-place,
+// and returns the amount actually sent.
+func dfsDinicPush(
+	ctx context.Context,
+	capMap map[string]map[string]int64,
+	next map[string][]string,
 	iter map[string]int,
-	eps float64,
-) float64 {
-	if u == sink {
-		return f
+	u, sink string,
+	available int64,
+) int64 {
+	// Check for cancellation at DFS entry
+	if err := ctx.Err(); err != nil {
+		return 0
 	}
-	neighbors := state.next[u]
-	for i := iter[u]; i < len(neighbors); i++ {
-		v := neighbors[i]
-		iter[u] = i + 1 // advance iterator
-		// check current residual capacity
-		e := residual.AdjacencyList()[u][v][0]
-		capUV := float64(e.Weight)
-		if capUV <= eps {
+	// If we reached sink, return the available flow
+	if u == sink {
+		return available
+	}
+	// Iterate over neighbors in level graph, starting from iter[u]
+	for i := iter[u]; i < len(next[u]); i++ {
+		iter[u] = i + 1
+		v := next[u][i]
+		capUV := capMap[u][v]
+		if capUV <= 0 {
 			continue
 		}
-		// compute how much we can push
-		minF := f
-		if capUV < minF {
-			minF = capUV
+		// Determine how much we can send: min(available, capUV)
+		send := available
+		if capUV < send {
+			send = capUV
 		}
-		if minF <= eps {
+		if send == 0 {
 			continue
 		}
-		// recurse
-		pushed := dfsPush(residual, v, sink, minF, state, iter, eps)
-		if pushed > eps {
-			// reduce forward capacity
-			e.Weight = int64(math.Max(0, capUV-pushed))
-			// increase reverse capacity
-			reList := residual.AdjacencyList()[v][u]
-			if len(reList) > 0 {
-				reList[0].Weight += int64(pushed)
-			} else {
-				residual.AddEdge(v, u, int64(pushed))
-			}
+		// Recurse to push from v toward sink
+		pushed := dfsDinicPush(ctx, capMap, next, iter, v, sink, send)
+		if pushed > 0 {
+			// On success, update residual capacities
+			capMap[u][v] -= pushed
+			capMap[v][u] += pushed
+
 			return pushed
 		}
 	}
+
 	return 0
 }

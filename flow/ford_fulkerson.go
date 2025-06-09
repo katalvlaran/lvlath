@@ -1,154 +1,169 @@
 package flow
 
 import (
-	"context"
 	"fmt"
 	"math"
 
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// FordFulkerson computes the maximum flow from ⟨source⟩ to ⟨sink⟩ in a capacity network.
+// FordFulkerson computes the maximum flow from `source` to `sink` in the
+// directed, weighted graph `g` using the Ford–Fulkerson method (DFS-based
+// augmenting paths).
 //
-// Ford–Fulkerson repeatedly finds a path in the residual network with
-// positive capacity and augments along it until no such path exists.
+// It returns:
+//   - maxFlow       : the total flow value (int64)
+//   - residualGraph : a *core.Graph of remaining capacities, preserving
+//     all original graph options (directed, weighted,
+//     multi-edges, loops, mixed)
+//   - err           : ErrSourceNotFound, ErrSinkNotFound, EdgeError, or
+//     context cancellation error
 //
 // Steps:
-//  1. **Validation**: ensure source and sink exist.
-//  2. **Build residual map**: for every directed (u→v),
-//     capacity[u][v] = sum of all parallel edge weights,
-//     and capacity[v][u] = 0 initially.
-//  3. **Augmentation loop**:
-//     a. Run DFS (or BFS) on residual graph to find any path ⟨p⟩
-//     from source to sink whose minimum edge‐capacity > ε.
-//     b. Let δ = bottleneck capacity along ⟨p⟩.
-//     c. For each edge (u→v) in ⟨p⟩:
-//     • capacity[u][v] -= δ
-//     • capacity[v][u] += δ
-//     d. totalFlow += δ.
-//     e. Repeat until no augmenting path found.
-//  4. **Construct residual core.Graph** (optional).
+//  1. Normalize options (O(1)).
+//  2. Validate source and sink exist (O(1)).
+//  3. Build initial capacity map via buildCapMap (O(V + E·log d_max)).
+//  4. Repeat until no augmenting path:
+//     a. Iteratively DFS to find any path s→t with positive capacity (O(E)).
+//     b. If none found, break.
+//     c. Augment along path, updating capMap (O(path length)).
+//     d. Accumulate flow; if opts.Verbose, log path and delta.
+//     e. Check ctx for cancellation.
+//  5. Reconstruct residual *core.Graph from capMap via buildCoreResidualFromCapMap (O(V + E_res)).
 //
-// Complexity: O(E · F) where F ≈ maxFlow / Epsilon
-// Memory:     O(V + E) for residual capacity map.
+// Complexity:
 //
-// Use Ford–Fulkerson when you need a straightforward max-flow
-// implementation and capacities are integral or small. For stronger
-// worst‐case guarantees, consider Edmonds–Karp or Dinic.
+//	Time:   O(E · F) where F = maxFlow (sum of all augmentations).
+//	Memory: O(V + E) for capMap and DFS stack.
 //
-// Returns:
-//   - maxFlow: the total flow value found.
-//   - residual: a copy of core.Graph annotated with residual capacities as weights.
-//   - error: ErrSourceNotFound, ErrSinkNotFound, EdgeError (negative capacity), or context cancellation.
+// Suitable for small to moderate integral networks; for stronger guarantees,
+// consider Edmonds–Karp (BFS) or Dinic (level graph + blocking flow).
 func FordFulkerson(
-	ctx context.Context,
 	g *core.Graph,
 	source, sink string,
-	opts *FlowOptions,
-) (maxFlow float64, residual *core.Graph, err error) {
-	// -- 1. Prepare context and epsilon
-	if ctx == nil {
-		ctx = context.Background()
-	}
-	eps := 1e-9
-	if opts != nil && opts.Epsilon > 0 {
-		eps = opts.Epsilon
-	}
+	opts FlowOptions,
+) (maxFlow int64, residualGraph *core.Graph, err error) {
+	// 1) Normalize options to ensure Ctx and Epsilon are set
+	opts.normalize()
+	// 1a) Capture context for cancellation checks
+	ctx := opts.Ctx
 
-	// -- 2. Validate inputs
+	// 2) Validate that source exists in graph
 	if !g.HasVertex(source) {
 		return 0, nil, ErrSourceNotFound
 	}
+	// 2a) Validate that sink exists in graph
 	if !g.HasVertex(sink) {
 		return 0, nil, ErrSinkNotFound
 	}
 
-	// -- 3. Initialize residual capacities
-	// resid[u][v] = capacity from u→v
-	resid := make(map[string]map[string]float64, len(g.Vertices()))
-	for _, v := range g.Vertices() {
-		id := v.ID
-		resid[id] = make(map[string]float64)
-	}
-	for _, e := range g.Edges() {
-		c := float64(e.Weight)
-		if c < -eps {
-			return 0, nil, EdgeError{From: e.From.ID, To: e.To.ID, Cap: c}
-		}
-		resid[e.From.ID][e.To.ID] += c
-		// ensure reverse key exists
-		if _, ok := resid[e.To.ID][e.From.ID]; !ok {
-			resid[e.To.ID][e.From.ID] = 0
-		}
+	// 3) Build the initial capacity map:
+	//    capMap[u][v] = total integer capacity from u→v after aggregating
+	//    parallel edges and filtering by opts.Epsilon.
+	capMap, err := buildCapMap(g, opts)
+	if err != nil {
+		return 0, nil, err
 	}
 
-	// -- 4. Augmentation loop
+	// 4) Main Ford–Fulkerson loop: find any augmenting path and push flow
 	for {
-		// a) find augmenting path using DFS
-		visited := make(map[string]bool, len(resid))
-		path, flow := DFSFindPath(resid, source, sink, visited, math.Inf(1), eps)
-		if len(path) == 0 {
-			break // no more augmenting path
-		}
-		if opts != nil && opts.Verbose {
-			fmt.Printf("augmenting path %v with δ=%g\n", path, flow)
-		}
-		// b) apply flow along the path
-		for i := 0; i < len(path)-1; i++ {
-			u, v := path[i], path[i+1]
-			resid[u][v] -= flow
-			resid[v][u] += flow
-		}
-		maxFlow += flow
-		// c) check cancellation
+		// 4a) Check for cancellation before each search
 		if err = ctx.Err(); err != nil {
 			return maxFlow, nil, err
 		}
-	}
 
-	// -- 5. Build residual core.Graph for return
-	residual = core.NewGraph(true, true)
-	for id := range resid {
-		residual.AddVertex(&core.Vertex{ID: id})
-	}
-	for u, m := range resid {
-		for v, c := range m {
-			if c > eps {
-				// cast back to int64 for core.Graph
-				residual.AddEdge(u, v, int64(c))
+		// 4b) Prepare for iterative DFS
+		// parent[v] = preceding vertex on the augmenting path
+		parent := make(map[string]string, len(capMap))
+		// minCap[v] = bottleneck capacity from source to v along discovered path
+		minCap := make(map[string]int64, len(capMap))
+		// visited marks which vertices have been pushed onto the stack
+		visited := make(map[string]bool, len(capMap))
+
+		// stackEntry holds a node ID and the current bottleneck to that node
+		type stackEntry struct {
+			node string // current vertex ID
+			flow int64  // bottleneck capacity so far
+		}
+		// initialize DFS from source with infinite (MaxInt64) capacity
+		stack := []stackEntry{{node: source, flow: math.MaxInt64}}
+		visited[source] = true         // mark source visited
+		minCap[source] = math.MaxInt64 // source has infinite bottleneck
+		found := false                 // indicates if sink is reached
+
+		// 4c) Iterative DFS loop
+		for len(stack) > 0 && !found {
+			// pop last entry (LIFO)
+			entry := stack[len(stack)-1]
+			stack = stack[:len(stack)-1]
+			u := entry.node
+
+			// explore each neighbor v with residual capacity capUV
+			for v, capUV := range capMap[u] {
+				// skip zero/no capacity or already visited vertices
+				if capUV <= 0 || visited[v] {
+					continue
+				}
+				// mark v visited and record its parent
+				visited[v] = true
+				parent[v] = u
+
+				// compute new bottleneck = min(entry.flow, capUV)
+				if entry.flow < capUV {
+					minCap[v] = entry.flow
+				} else {
+					minCap[v] = capUV
+				}
+
+				// if we reached sink, we can stop DFS
+				if v == sink {
+					found = true
+					break
+				}
+
+				// otherwise push v onto stack to continue search
+				stack = append(stack, stackEntry{node: v, flow: minCap[v]})
 			}
 		}
-	}
-	return maxFlow, residual, nil
-}
 
-// DFSFindPath performs a DFS in the residual capacity graph to locate
-// any source→sink path with capacity > eps. Returns the path and its
-// bottleneck flow. If none found, returns empty path.
-func DFSFindPath(
-	resid map[string]map[string]float64,
-	u, sink string,
-	visited map[string]bool,
-	available float64,
-	eps float64,
-) ([]string, float64) {
-	if u == sink {
-		return []string{sink}, available
+		// 4d) If no augmenting path found, we're done
+		if !found {
+			break
+		}
+
+		// 4e) The amount to add is the bottleneck at sink
+		delta := minCap[sink]
+
+		// 4f) Optionally log the augmenting path and flow
+		if opts.Verbose {
+			// reconstruct path for logging
+			path := []string{sink}
+			for cur := sink; cur != source; cur = parent[cur] {
+				path = append([]string{parent[cur]}, path...)
+			}
+			fmt.Printf("augmenting path %v with flow %d\n", path, delta)
+		}
+
+		// 4g) Accumulate total flow
+		maxFlow += delta
+
+		// 4h) Update residual capacities along the path
+		for v := sink; v != source; v = parent[v] {
+			u := parent[v]
+			// decrease forward edge capacity
+			capMap[u][v] -= delta
+			// increase reverse edge capacity
+			capMap[v][u] += delta
+		}
 	}
-	visited[u] = true
-	for v, capUV := range resid[u] {
-		if visited[v] || capUV <= eps {
-			continue
-		}
-		// determine new bottleneck
-		b := available
-		if capUV < b {
-			b = capUV
-		}
-		path, flow := DFSFindPath(resid, v, sink, visited, b, eps)
-		if len(path) > 0 {
-			return append([]string{u}, path...), flow
-		}
+
+	// 5) Build the final residual graph from capMap,
+	//    inheriting all configuration flags from the original graph.
+	residualGraph, err = buildCoreResidualFromCapMap(capMap, g, opts)
+	if err != nil {
+		return maxFlow, nil, err
 	}
-	return nil, 0
+
+	// return the computed max flow and the residual graph
+	return maxFlow, residualGraph, nil
 }

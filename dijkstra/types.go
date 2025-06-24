@@ -8,43 +8,30 @@
 //
 // Complexity:
 //
-//	– Time:  O((V + E) log V)   where V = |vertices|, E = |edges|
-//	   • Each vertex is extracted from the priority queue at most once (V extracts).
-//	   • Each edge relaxation may push into the priority queue (up to E pushes).
-//	   • Each heap operation (push/pop) costs O(log V) or O(log (V+E)), simplified to O(log V).
-//	– Space: O(V + E)
-//	   • O(V) to store distance and predecessor maps.
-//	   • O(E) in the priority queue in the worst case (lazy decrease-key).
+//   - Time:  O((V + E) log V)   where V = |vertices|, E = |edges|
+//   - Each vertex is extracted from the priority queue at most once (V extracts).
+//   - Each edge relaxation may push into the priority queue (up to E pushes).
+//   - Each heap operation (push/pop) costs O(log V) or O(log (V+E)), simplified to O(log V).
+//   - Space: O(V + E)
+//   - O(V) to store distance and predecessor maps.
+//   - O(E) in the priority queue in the worst case (lazy decrease-key).
 //
 // Options:
 //
-//	– Source:           ID of the starting vertex (must be non-empty and present in the graph).
-//	– ReturnPath:       if true, return the predecessor map for path reconstruction.
-//	– MaxDistance:      optional cap on distances to explore; vertices beyond this are skipped.
-//	– InfEdgeThreshold: edges with weight >= this threshold are treated as impassable.
+//   - Source:           ID of the starting vertex (must be non-empty and present in the graph).
+//   - ReturnPath:       if true, return the predecessor map for path reconstruction.
+//   - MaxDistance:      optional cap on distances to explore; vertices beyond this are skipped.
+//   - InfEdgeThreshold: edges with weight >= this threshold are treated as impassable.
 //
 // Errors (sentinel):
 //
-//	– ErrEmptySource     if the provided source ID is empty.
-//	– ErrNilGraph        if the provided graph pointer is nil.
-//	– ErrUnweightedGraph if the graph is not configured to support weights.
-//	– ErrVertexNotFound  if the source vertex does not exist in the graph.
-//	– ErrNegativeWeight  if a negative edge weight is detected in the graph.
-//	– ErrBadMaxDistance  if MaxDistance < 0.
-//	– ErrBadInfThreshold if InfEdgeThreshold <= 0.
-//
-// Example usage:
-//
-//	// Compute distances and predecessors from "A":
-//	dist, prev, err := Dijkstra(
-//	    g,
-//	    Source("A"),
-//	    WithReturnPath(),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	fmt.Printf("Distance to B: %d, parent: %s\n", dist["B"], prev["B"])
+//   - ErrEmptySource     if the provided source ID is empty.
+//   - ErrNilGraph        if the provided graph pointer is nil.
+//   - ErrUnweightedGraph if the graph is not configured to support weights.
+//   - ErrVertexNotFound  if the source vertex does not exist in the graph.
+//   - ErrNegativeWeight  if a negative edge weight is detected in the graph.
+//   - ErrBadMaxDistance  if MaxDistance < 0.
+//   - ErrBadInfThreshold if InfEdgeThreshold <= 0.
 package dijkstra
 
 import (
@@ -86,8 +73,8 @@ var (
 // for future implementations where predecessor storage is minimized and paths are
 // reconstructed via repeated partial computation.
 //
-// MemoryModeFull    – store complete predecessor map for immediate path reconstruction.
-// MemoryModeCompact – minimize memory; omit or compress predecessor data (not yet implemented).
+// MemoryModeFull    - store complete predecessor map for immediate path reconstruction.
+// MemoryModeCompact - minimize memory; omit or compress predecessor data (not yet implemented).
 type MemoryMode int
 
 const (
@@ -101,13 +88,13 @@ const (
 
 // Options configures the behavior of the Dijkstra algorithm.
 //
-// Source           – starting vertex ID (must be non-empty and present in the graph).
-// ReturnPath       – if true, return the predecessor map; otherwise prev map is nil.
-// MaxDistance      – optional cap on distances to explore (vertices beyond are skipped).
+// Source           - starting vertex ID (must be non-empty and present in the graph).
+// ReturnPath       - if true, return the predecessor map; otherwise prev map is nil.
+// MaxDistance      - optional cap on distances to explore (vertices beyond are skipped).
 //
 //	Must be ≥ 0. Default is math.MaxInt64 (no cap).
 //
-// InfEdgeThreshold – treat edges with weight ≥ this threshold as impassable obstacles.
+// InfEdgeThreshold - treat edges with weight ≥ this threshold as impassable obstacles.
 //
 //	Must be > 0. Default is math.MaxInt64 (no obstacles).
 type Options struct {

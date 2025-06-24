@@ -16,37 +16,39 @@
 //
 // Why use core.Graph?
 //
-//   - Single type, composable flags — no explosion of separate graph types.
-//   - Deterministic iteration — Vertices(), Edges(), NeighborIDs() all return sorted results.
-//   - Flexible mixing — combine directed, undirected, loops, weights, multi-edges in one graph.
-//   - Clone support — CloneEmpty (vertices+flags), Clone (deep copy of edges+adjacency).
-//   - Extensible utility methods — degree counts, clear, filter, path-prelude, …
+//   - Single type, composable flags - no explosion of separate graph types.
+//   - Deterministic iteration - Vertices(), Edges(), NeighborIDs() all return sorted results.
+//   - Flexible mixing - combine directed, undirected, loops, weights, multi-edges in one graph.
+//   - Clone support - CloneEmpty (vertices+flags), Clone (deep copy of edges+adjacency).
+//   - Extensible utility methods - degree counts, clear, filter, path-prelude, …
 //
 // Configuration Options (GraphOption):
 //
-//	– WithDirected(defaultDirected bool)
-//	    Sets the default orientation of new edges.
-//	    • Directed graphs store only “from→to” pointers.
-//	    • Undirected graphs mirror edges in adjacencyList[to][from].
+//   - WithDirected(defaultDirected bool)
+//     Sets the default orientation of new edges.
 //
-//	– WithMixedEdges()
-//	    Allows per-edge overrides via EdgeOption.WithEdgeDirected().
-//	    Without it, any override returns ErrMixedEdgesNotAllowed.
+//   - Directed graphs store only “from→to” pointers.
 //
-//	– WithWeighted()
-//	    Permits non-zero weights globally; otherwise AddEdge(weight≠0) → ErrBadWeight.
+//   - Undirected graphs mirror edges in adjacencyList[to][from].
 //
-//	– WithMultiEdges()
-//	    Allows multiple parallel edges between the same endpoints.
-//	    Otherwise a second AddEdge(from,to) → ErrMultiEdgeNotAllowed.
+//   - WithMixedEdges()
+//     Allows per-edge overrides via EdgeOption.WithEdgeDirected().
+//     Without it, any override returns ErrMixedEdgesNotAllowed.
 //
-//	– WithLoops()
-//	    Permits self-loops (from == to); otherwise AddEdge(v,v) → ErrLoopNotAllowed.
+//   - WithWeighted()
+//     Permits non-zero weights globally; otherwise AddEdge(weight≠0) → ErrBadWeight.
+//
+//   - WithMultiEdges()
+//     Allows multiple parallel edges between the same endpoints.
+//     Otherwise a second AddEdge(from,to) → ErrMultiEdgeNotAllowed.
+//
+//   - WithLoops()
+//     Permits self-loops (from == to); otherwise AddEdge(v,v) → ErrLoopNotAllowed.
 //
 // EdgeOptions:
 //
-//	– WithEdgeDirected(directed bool)
-//	    Override the graph’s default direction per-edge (mixed mode only).
+//   - WithEdgeDirected(directed bool)
+//     Override the graph’s default direction per-edge (mixed mode only).
 //
 // Core Methods:
 //
@@ -94,13 +96,13 @@
 //
 // Errors:
 //
-//		ErrEmptyVertexID       – zero-length vertex ID
-//		ErrVertexNotFound      – missing vertex
-//		ErrEdgeNotFound        – missing edge
-//		ErrBadWeight           – non-zero weight on unweighted graph
-//		ErrLoopNotAllowed      – self-loop when loops disabled
-//		ErrMultiEdgeNotAllowed – parallel edge when multi-edges disabled
-//		ErrMixedEdgesNotAllowed – per-edge override without mixed-mode
+//		ErrEmptyVertexID       - zero-length vertex ID
+//		ErrVertexNotFound      - missing vertex
+//		ErrEdgeNotFound        - missing edge
+//		ErrBadWeight           - non-zero weight on unweighted graph
+//		ErrLoopNotAllowed      - self-loop when loops disabled
+//		ErrMultiEdgeNotAllowed - parallel edge when multi-edges disabled
+//		ErrMixedEdgesNotAllowed - per-edge override without mixed-mode
 //
 //	 also amortized constant time: atomic ID generation + nested-map insertion.
 //

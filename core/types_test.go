@@ -188,6 +188,7 @@ func extractIDs(edges []*core.Edge) []string {
 	for i, e := range edges {
 		out[i] = e.ID
 	}
+
 	return out
 }
 

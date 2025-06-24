@@ -150,6 +150,7 @@ func BenchmarkBFS_HookOverhead(b *testing.B) {
 				sum += i
 			}
 			_ = sum
+
 			return nil
 		}
 

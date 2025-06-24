@@ -1,11 +1,10 @@
-// Package core: high-performance Graph method implementations
+// Package core: high-performance, thread-safe Graph implementations.
 //
-// This file provides thread-safe, O(1) (amortized) operations for
-// vertex and edge management on the Graph type defined in types.go.
-// We leverage separate RWMutex locks for vertices (muVert) and
-// edges+adjacency (muEdgeAdj) to minimize contention.
-// Adjacency is stored as a nested map: adjacencyList[from][to][edgeID] = struct{}{},
-// allowing constant-time existence, insertion, and deletion of edges.
+// This file implements all Graph methods using two RWMutexes to minimize lock
+// contention: muVert for vertex map, muEdgeAdj for edges+adjacency.
+// Adjacency is a nested map: adjacencyList[from][to][edgeID] = struct{}{}
+// providing O(1) existence, insertion, and deletion. Edge IDs are atomic
+// counters (“e1”, “e2”, …). All iteration APIs return sorted results.
 
 package core
 
@@ -15,20 +14,22 @@ import (
 	"sync/atomic"
 )
 
-const (
-	edgeIDPrefix = "e"
-)
+const edgeIDPrefix = "e"
 
-// AddVertex inserts a new vertex with the given ID into the Graph.
-// Returns ErrEmptyVertexID if id is empty.
-// If the vertex already exists, this is a no-op (idempotent).
+//–– Public API ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+// AddVertex inserts a vertex if missing.
+// Steps:
+//  1. Validate non-empty ID (ErrEmptyVertexID).
+//  2. Lock muVert, check idempotent add.
+//  3. Lazy-init adjacencyList[id] under muEdgeAdj.
+//
 // Complexity: O(1) amortized.
 func (g *Graph) AddVertex(id string) error {
 	// Validate input: empty IDs are not allowed
 	if id == "" {
-		return ErrEmptyVertexID // empty ID
+		return ErrEmptyVertexID
 	}
-	// Acquire write lock on vertices only
 	g.muVert.Lock()
 	defer g.muVert.Unlock()
 
@@ -39,31 +40,37 @@ func (g *Graph) AddVertex(id string) error {
 	// Insert new Vertex struct with empty Metadata map
 	g.vertices[id] = &Vertex{ID: id, Metadata: make(map[string]interface{})}
 
-	// Initialize adjacencyList entry for this vertex (lazy map-of-maps)
+	// ensure top-level adjacency map exists
 	g.muEdgeAdj.Lock()
-	g.ensureAdjID(id)
+	ensureAdjacency(g, id, id)
 	g.muEdgeAdj.Unlock()
 
 	return nil
 }
 
-// HasVertex reports whether a vertex with the given ID exists in the graph.
+// HasVertex returns true if the ID exists. Empty ID ⇒ false.
 // Complexity: O(1).
 func (g *Graph) HasVertex(id string) bool {
 	if id == "" {
-		return false // empty ID considered absent
+		return false
 	}
 	// Acquire read lock on vertices
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
-	_, exists := g.vertices[id]
+	_, ok := g.vertices[id]
 
-	return exists
+	return ok
 }
 
-// RemoveVertex deletes the vertex and all incident edges from the graph.
-// Returns ErrEmptyVertexID if id is empty, ErrVertexNotFound if vertex does not exist.
-// Complexity: O(deg(v) + M) where deg(v) is total edges incident and M is unique neighbors.
+// RemoveVertex deletes a vertex and all incident edges.
+// Steps:
+//  1. Validate non-empty.
+//  2. Lock muVert+muEdgeAdj.
+//  3. Iterate edges map once: if e.From==id or (undirected or directed) e.To==id, call removeAdjacency(e).
+//  4. Delete from g.edges.
+//  5. Delete from g.vertices, then prune empty adjacency with cleanupAdjacency().
+//
+// Complexity: O(E + V) worst-case.
 func (g *Graph) RemoveVertex(id string) error {
 	if id == "" {
 		return ErrEmptyVertexID
@@ -78,48 +85,53 @@ func (g *Graph) RemoveVertex(id string) error {
 	if _, exists := g.vertices[id]; !exists {
 		return ErrVertexNotFound
 	}
-	// Remove all edges where id is either from or to
+
+	// Remove all incident edges
 	for eid, e := range g.edges {
-		if e.From == id || (e.To == id && !e.Directed) || (e.To == id && e.Directed) {
-			removeEdgeFromAdj(g, eid, e)
+		if e.From == id || (!e.Directed && e.To == id) || (e.Directed && e.To == id) {
+			removeAdjacency(g, e) // remove both directions appropriately
 			delete(g.edges, eid)
 		}
 	}
 
-	// Remove vertex itself
+	// Delete vertex itself
 	delete(g.vertices, id)
-	// Cleanup empty adjacency entries
-	errorCleanupAdjacency(g)
+	// prune any empty nested maps
+	cleanupAdjacency(g)
 
 	return nil
 }
 
-// AddEdge creates a new edge with optional per-edge directed override(from 'from' to 'to' by default),
-// and with the given weight and options, returns its unique Edge.ID.
-// Handles parallel edges, loops, weights per configuration.
-// For undirected (Directed=false), we mirror adjacency two ways,
-// also enforces that per-edge directedness overrides (EdgeOption) are only allowed when the graph was constructed with WithMixedEdges().
+// AddEdge creates a new edge, optionally directed in a mixed graph.
+// Steps:
+//  1. Validate IDs, weight, loops.
+//  2. If opts present without allowMixed ⇒ ErrMixedEdgesNotAllowed.
+//  3. Ensure endpoints via AddVertex.
+//  4. Lock muEdgeAdj, check multi-edge constraint.
+//  5. Generate eid atomically.
+//  6. Build Edge struct (global g.directed default), apply opts.
+//  7. Store in g.edges.
+//  8. ensureAdjacency(from,to); add.
+//  9. If !e.Directed && from!=to ⇒ ensureAdjacency(to,from); add (mirror).
 //
-// Returns ErrEmptyVertexID, ErrBadWeight, ErrLoopNotAllowed, ErrMultiEdgeNotAllowed, ErrMixedEdgesNotAllowed.
-// Complexity: O(1).
+// Complexity: O(1) amortized.
 func (g *Graph) AddEdge(from, to string, weight int64, opts ...EdgeOption) (string, error) {
 	// 1) Input validation
 	if from == "" || to == "" {
 		return "", ErrEmptyVertexID
 	}
-	// 2) Weight constraint
-	if !g.weighted && weight != 0 {
+	if !g.weighted && weight != 0 { // weight constraint
 		return "", ErrBadWeight
 	}
-	// 3) Loop constraint
-	if from == to && !g.allowLoops {
+	if from == to && !g.allowLoops { // loop constraint
 		return "", ErrLoopNotAllowed
 	}
-	// 4) If user passed any per-edge options but direction and mixed-mode is disabled - reject
+	// If user passed any per-edge options but direction and mixed-mode is disabled - reject
 	if len(opts) > 0 && !g.directed && !g.allowMixed {
 		return "", ErrMixedEdgesNotAllowed
 	}
-	// 5) Ensure both endpoints exist (idempotent)
+
+	// 2) Ensure vertices exist
 	if err := g.AddVertex(from); err != nil {
 		return "", err
 	}
@@ -127,53 +139,51 @@ func (g *Graph) AddEdge(from, to string, weight int64, opts ...EdgeOption) (stri
 		return "", err
 	}
 
-	// 6) Lock everything around edges & adjacency
+	// 3) Insert edge under lock
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
 
-	// 7) Multi-edge existence check
-	if !g.allowMulti {
-		if inner, ok := g.adjacencyList[from][to]; ok && len(inner) > 0 {
+	if !g.allowMulti { // Multi-edge existence check
+		if inner := g.adjacencyList[from][to]; len(inner) > 0 {
 			return "", ErrMultiEdgeNotAllowed
 		}
 	}
 
-	// 8) Generate a new atomic Edge.ID
+	// 4) Generate and apply overrides
 	eid := fmt.Sprintf("%s%d", edgeIDPrefix, atomic.AddUint64(&g.nextEdgeID, 1))
 
-	// 9) Construct the Edge with the _global_ default directedness
+	// Construct the Edge with the _global_ default directedness
 	e := &Edge{ID: eid, From: from, To: to, Weight: weight, Directed: g.directed}
-	// 10) Apply any per-edge overrides (only WithEdgeDirected exists today)
+	// Apply any per-edge overrides (only WithEdgeDirected exists today)
 	for _, opt := range opts {
 		opt(e)
 	}
-	// 11) Re-check loops in case WithEdgeDirected changed nothing here,
-	//     but best to keep the guard in case future options interfere.
+	// Re-check loops in case WithEdgeDirected changed nothing here, but best to keep the guard in case future options interfere.
 	if e.From == e.To && !g.allowLoops {
 		return "", ErrLoopNotAllowed
 	}
 
-	// 12) Store in the global map
+	// 5) Store and link adjacency
 	g.edges[eid] = e
-
-	// 13) Insert into nested adjacencyList[from][to][eid]
-	g.ensureAdjMap(from, to)
+	ensureAdjacency(g, from, to)
 	g.adjacencyList[from][to][eid] = struct{}{}
 
-	// 14) If this edge is undirected, mirror it for the reverse adjacency
-	//     (loops skip the mirror)
+	// 6) Mirror undirected
 	if !e.Directed && from != to {
-		g.ensureAdjMap(to, from)
+		ensureAdjacency(g, to, from)
 		g.adjacencyList[to][from][eid] = struct{}{}
 	}
 
 	return eid, nil
 }
 
-// RemoveEdge deletes the edge with the given ID (and its mirror) from the graph,
-// updating both global map and adjacency nested maps.
-// Returns ErrEdgeNotFound if no such edge exists.
-// Complexity: O(1).
+// RemoveEdge deletes one edge and its mirror.
+// Steps:
+//  1. Lock muEdgeAdj.
+//  2. Lookup e, ErrEdgeNotFound if missing.
+//  3. delete(g.edges, eid), removeAdjacency(e), cleanupAdjacency().
+//
+// Complexity: O(1) + O(V+E) on cleanup.
 func (g *Graph) RemoveEdge(eid string) error {
 	// Lock edges+adjacency
 	g.muEdgeAdj.Lock()
@@ -183,33 +193,31 @@ func (g *Graph) RemoveEdge(eid string) error {
 	if !ok {
 		return ErrEdgeNotFound
 	}
-	delete(g.edges, eid)         // Delete from global edges map
-	removeEdgeFromAdj(g, eid, e) // Remove from adjacencyList[from][to]
-	errorCleanupAdjacency(g)     // Mirror removal for undirected
+	delete(g.edges, eid)  // Delete from global edges map
+	removeAdjacency(g, e) // Remove from adjacencyList[from][to]
+	cleanupAdjacency(g)   // Mirror removal for undirected
 
 	return nil
 }
 
-// HasEdge reports true if at least one edge from 'from' to 'to' exists.
-// Complexity: O(1).
+// HasEdge checks for any edge from→to in O(1).
+// Mirrors inserted in AddEdge so this works for undirected too.
 func (g *Graph) HasEdge(from, to string) bool {
 	if from == "" || to == "" {
 		return false
 	}
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
-	// Check nested map existence and non-empty
-	if inner, ok := g.adjacencyList[from][to]; ok && len(inner) > 0 {
-		return true
-	}
 
-	return false
+	return len(g.adjacencyList[from][to]) > 0
 }
 
-// Neighbors returns all edges incident to vertex 'id'.
-// For directed edges, returns outgoing; for undirected, returns both directions.
-// Result is a slice of *Edge pointers, sorted by Edge.ID for determinism.
-// Complexity: O(d log d), where d is number of incident edges.
+// Neighbors lists *all* edges touching id.
+//   - Directed edges: only those with e.From==id.
+//   - Undirected edges: both directions, but loop appears once.
+//
+// Sorted by Edge.ID.
+// Complexity: O(d log d).
 func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 	if id == "" {
 		return nil, ErrEmptyVertexID
@@ -245,9 +253,12 @@ func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 	return out, nil
 }
 
-// NeighborIDs returns the IDs of all adjacent vertices to id,
-// honoring directed, undirected, and per-edge overrides.
-// Complexity: O(d log d)
+// NeighborIDs returns unique, sorted vertex IDs adjacent to id.
+//
+//	e.From==id ⇒ include e.To.
+//	e.To==id && !e.Directed ⇒ include e.From.
+//
+// Complexity: O(d log d).
 func (g *Graph) NeighborIDs(id string) ([]string, error) {
 	edges, err := g.Neighbors(id)
 	if err != nil {
@@ -261,13 +272,57 @@ func (g *Graph) NeighborIDs(id string) ([]string, error) {
 			seen[e.From] = struct{}{}
 		}
 	}
-	var ids []string
+	ids := make([]string, 0, len(seen))
 	for v := range seen {
 		ids = append(ids, v)
 	}
 	sort.Strings(ids)
 
 	return ids, nil
+}
+
+//–– Helpers ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
+
+func ensureAdjacency(g *Graph, from, to string) {
+	if g.adjacencyList[from] == nil {
+		g.adjacencyList[from] = make(map[string]map[string]struct{})
+	}
+	if g.adjacencyList[from][to] == nil {
+		g.adjacencyList[from][to] = make(map[string]struct{})
+	}
+}
+
+// removeAdjacency deletes eid from both directions:
+//   - from→to, and if undirected (e.Directed==false && from!=to), also to→from.
+func removeAdjacency(g *Graph, e *Edge) {
+	if m := g.adjacencyList[e.From][e.To]; m != nil {
+		delete(m, e.ID)
+		if len(m) == 0 {
+			delete(g.adjacencyList[e.From], e.To)
+		}
+	}
+	if !e.Directed && e.From != e.To {
+		if m := g.adjacencyList[e.To][e.From]; m != nil {
+			delete(m, e.ID)
+			if len(m) == 0 {
+				delete(g.adjacencyList[e.To], e.From)
+			}
+		}
+	}
+}
+
+// cleanupAdjacency prunes any empty nested maps so HasEdge stays correct.
+func cleanupAdjacency(g *Graph) {
+	for u, m := range g.adjacencyList {
+		for v, em := range m {
+			if len(em) == 0 {
+				delete(m, v)
+			}
+		}
+		if len(m) == 0 {
+			delete(g.adjacencyList, u)
+		}
+	}
 }
 
 // Additional methods:
@@ -481,62 +536,9 @@ func (g *Graph) FilterEdges(pred func(*Edge) bool) {
 	defer g.muEdgeAdj.Unlock()
 	for eid, e := range g.edges {
 		if !pred(e) {
-			removeEdgeFromAdj(g, eid, e)
+			removeAdjacency(g, e)
 			delete(g.edges, eid)
 		}
 	}
-	errorCleanupAdjacency(g)
-}
-
-// Internal helper methods:
-////////////////////
-
-// ensureAdjID makes adjacencyList[id] non-nil.
-func (g *Graph) ensureAdjID(id string) {
-	if _, ok := g.adjacencyList[id]; !ok {
-		// Create outer map for "from" key
-		g.adjacencyList[id] = make(map[string]map[string]struct{})
-	}
-}
-
-// ensureAdjMap ensures adjacencyList[from][to] initialized.
-func (g *Graph) ensureAdjMap(from, to string) {
-	g.ensureAdjID(from)
-	if g.adjacencyList[from][to] == nil {
-		g.adjacencyList[from][to] = make(map[string]struct{})
-	}
-}
-
-// removeEdgeFromAdj deletes eid from both directions if needed.
-func removeEdgeFromAdj(g *Graph, eid string, e *Edge) {
-	// from -> to
-	if m := g.adjacencyList[e.From][e.To]; m != nil {
-		delete(m, eid)
-		if len(m) == 0 {
-			delete(g.adjacencyList[e.From], e.To)
-		}
-	}
-	// mirror when undirected
-	if !e.Directed && e.From != e.To {
-		if m := g.adjacencyList[e.To][e.From]; m != nil {
-			delete(m, eid)
-			if len(m) == 0 {
-				delete(g.adjacencyList[e.To], e.From)
-			}
-		}
-	}
-}
-
-// errorCleanupAdjacency removes empty nested maps.
-func errorCleanupAdjacency(g *Graph) {
-	for u, m := range g.adjacencyList {
-		for v, em := range m {
-			if len(em) == 0 {
-				delete(m, v)
-			}
-		}
-		if len(m) == 0 {
-			delete(g.adjacencyList, u)
-		}
-	}
+	cleanupAdjacency(g)
 }

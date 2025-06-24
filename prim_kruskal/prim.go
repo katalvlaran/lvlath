@@ -23,9 +23,9 @@ import (
 //     If len(vertices)==1, check that root matches the single vertex → return trivial empty MST.
 //  3. Validate root: root != "", graph.HasVertex(root).
 //  4. Initialize:
-//     – visited map to track which vertices are already in MST.
-//     – pq (min‐heap) to hold candidate edges ordered by weight.
-//     – mark root as visited and push all edges adjacent to root into pq.
+//     - visited map to track which vertices are already in MST.
+//     - pq (min‐heap) to hold candidate edges ordered by weight.
+//     - mark root as visited and push all edges adjacent to root into pq.
 //  5. While pq not empty and MST has < |V|-1 edges:
 //     a. Pop the smallest‐weight edge (u→v) from pq.
 //     b. If v is already visited, skip (this edge would form a cycle).

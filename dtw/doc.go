@@ -1,41 +1,42 @@
-// Package dtw computes Dynamic Time Warping (DTW) distances between
-// numeric time series, with optional alignment path and memory optimizations.
+// Package dtw computes Dynamic Time Warping (DTW) distances between two numeric time series,
+// optionally returning the optimal alignment path, with configurable memory-time trade-offs.
 //
-// 🚀 What is DTW?
+// What:
 //
-//	DTW finds the best match between two sequences by warping the time
-//	axis to minimize cumulative distance.  It’s widely used in:
-//	  • Speech recognition & audio alignment
-//	  • Gesture / motion matching
-//	  • Signature & handwriting verification
-//	  • Time-series clustering & anomaly detection
+//	DTW measures similarity by warping the time axis to minimize cumulative distance between series.
+//	Commonly used in:
+//	  • Speech/audio alignment
+//	  • Gesture and motion matching
+//	  • Time-series clustering and anomaly detection
+//	  • Signature/handwriting verification
 //
-// ✨ Key features:
-//   - full-matrix mode: exact O(N·M) time & memory
-//   - rolling mode: O(min(N,M)) memory (choose via MemoryMode)
-//   - optional Sakoe–Chiba window (|i−j| ≤ w) for speed & constraint
-//   - slope penalty to discourage excessive stretching
-//   - on-demand alignment path (ReturnPath=true)
+// Why:
+//   - Handles sequences of unequal lengths or variable speed.
+//   - Provides interpretable alignment path for post-analysis.
+//   - Flexible memory usage for large-scale data.
 //
-// ⚙️ Usage:
+// Complexity:
+//   - Time:   O(N·M)  (N = len(a), M = len(b))
+//   - Memory:
+//   - FullMatrix: O(N·M) — exact distance + path
+//   - TwoRows:    O(min(N, M)) — distance only
+//   - None:       O(1)        — minimal overhead
 //
-//	import "github.com/katalvlaran/lvlath/dtw"
+// Options:
 //
-//	opts := &dtw.DTWOptions{
-//	  Window:       10,     // Sakoe–Chiba band ±10
-//	  SlopePenalty: 0.5,    // penalty for 1×2 vs 2×1 steps
-//	  ReturnPath:   true,   // also return warp path
-//	  MemoryMode:   dtw.Rolling,
-//	}
+//	Options struct with fields:
+//	  • Window       int         // Sakoe-Chiba band: max |i-j| allowed (<=0 = no constraint)
+//	  • SlopePenalty float64     // cost for insertion/deletion steps; controls stretch bias
+//	  • ReturnPath   bool        // include optimal path; requires MemoryMode=FullMatrix
+//	  • MemoryMode   MemoryMode  // select None, TwoRows, or FullMatrix storage
+//	Use DefaultOptions() for sensible defaults.
 //
-//	// compute
-//	dist, path, err := dtw.DTW(a, b, opts)
+// Errors:
+//   - ErrEmptyInput      — input sequences must be non-empty
+//   - ErrPathNeedsMatrix — ReturnPath=true requires FullMatrix mode
+//   - ErrIncompletePath  — backtracking failed to reach origin
+//   - ErrBadInput        — invalid combination of options
 //
-// Performance:
-//
-//   - Time:   O(N·M)
-//   - Memory: O(N·M) (FullMatrix) or O(min(N,M)) (Rolling)
-//
-// See examples in example_test.go and the tutorial in docs/TUTORIAL.md
+// See examples in example_test.go and the tutorial in docs/DTW.md
 // for detailed walkthrough and pseudocode.
 package dtw

@@ -9,8 +9,8 @@ import (
 
 // ExampleKruskal_Triangle demonstrates Kruskal’s algorithm on the same triangle graph.
 // The MST is the same set {A–B, B–C} with total weight = 3.
-// Playground: [![Playground – Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/cWR3GQU2luz)
-func ExampleKruskal_Triangle() {
+// Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/cWR3GQU2luz)
+func ExampleKruskal_triangle() {
 	// 1. Construct a new weighted, undirected graph.
 	g := core.NewGraph(core.WithWeighted())
 	// 2. Add edges to form the triangle:
@@ -40,7 +40,7 @@ func ExampleKruskal_Triangle() {
 // ExamplePrim_Pentagon demonstrates Prim’s algorithm on a simple 5‐vertex pentagon graph.
 // Vertices: A, B, C, D, E. Edges: A–B (1), B–C (2), C–D (3), D–E (5), A–E (12)
 // The MST in this graph is edges {A–B, B–C, C-D, D-E} with total weight = 11.
-// Playground: [![Playground – Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/2P5c7LC2Ac-)
+// Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/2P5c7LC2Ac-)
 func ExamplePrim_Pentagon() {
 	// Construct triangle graph: A–B(1), B–C(2), C–D(3), D–E(5), A–E(12)
 	g := core.NewGraph(core.WithWeighted())
@@ -74,7 +74,7 @@ func ExamplePrim_Pentagon() {
 //	A—C (1), B—D (3).
 //
 // The MST has 3 edges: {A–C, C–B, B–D} with total weight = 6.
-// Playground: [![Playground – Kruskal_medium](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/aDggwYQ8H4Q)
+// Playground: [![Playground - Kruskal_medium](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/aDggwYQ8H4Q)
 func ExampleKruskal_MediumGraph() {
 	// Medium graph: A–B(4), A–C(1), C–B(2), B–D(3), C–D(5), D–A(4)
 	g := core.NewGraph(core.WithWeighted())
@@ -109,7 +109,7 @@ func ExampleKruskal_MediumGraph() {
 //	A—C (3), B—D (4), C—E (5), E—F (6), D—F (7).
 //
 // The MST has 6 edges: {A–B, B–C, B–D, D–E, E–G, E–F} with total weight = 16.
-// Playground: [![Playground – Prim_large](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/EwPJLIM1y31)
+// Playground: [![Playground - Prim_large](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/EwPJLIM1y31)
 func ExamplePrim_LargeGraph() {
 	// 1. Construct a new weighted, undirected graph.
 	g := core.NewGraph(core.WithWeighted())

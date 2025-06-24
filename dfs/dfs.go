@@ -11,23 +11,23 @@
 //
 // Complexity:
 //
-//	– Time:   O(V + E) for traversal (where V = vertices, E = edges), plus overhead of hooks and filters.
-//	– Memory: O(V) for recursion stack and metadata maps.
+//   - Time:   O(V + E) for traversal (where V = vertices, E = edges), plus overhead of hooks and filters.
+//   - Memory: O(V) for recursion stack and metadata maps.
 //
 // Options:
 //
-//	– WithContext(ctx)          allows cancellation via context.Context.
-//	– WithOnVisit(fn)           pre-order hook on vertex discovery; error aborts traversal.
-//	– WithOnExit(fn)            post-order hook after exploring descendants, before recording.
-//	– WithMaxDepth(limit)       stops recursion beyond given depth (>=0).
-//	– WithFilterNeighbor(fn)    filters neighbor IDs; return false to skip.
+//   - WithContext(ctx)          allows cancellation via context.Context.
+//   - WithOnVisit(fn)           pre-order hook on vertex discovery; error aborts traversal.
+//   - WithOnExit(fn)            post-order hook after exploring descendants, before recording.
+//   - WithMaxDepth(limit)       stops recursion beyond given depth (>=0).
+//   - WithFilterNeighbor(fn)    filters neighbor IDs; return false to skip.
 //
 // Errors:
 //
-//	– ErrGraphNil               if g is nil.
-//	– ErrStartVertexNotFound    if startID is missing.
-//	– context.Canceled          if ctx is done.
-//	– any error returned by OnVisit or OnExit.
+//   - ErrGraphNil               if g is nil.
+//   - ErrStartVertexNotFound    if startID is missing.
+//   - context.Canceled          if ctx is done.
+//   - any error returned by OnVisit or OnExit.
 package dfs
 
 import (

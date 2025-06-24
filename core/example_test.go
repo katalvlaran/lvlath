@@ -12,6 +12,7 @@ import (
 func sortAsc(ids []string) []string {
 	out := append([]string(nil), ids...)
 	sort.Strings(out)
+
 	return out
 }
 
@@ -21,6 +22,7 @@ func extractEdgeIDs(edges []*core.Edge) []string {
 	for i, e := range edges {
 		out[i] = e.ID
 	}
+
 	return out
 }
 
@@ -99,6 +101,7 @@ func extractNeighborInfo(edges []*core.Edge) []string {
 		out[i] = fmt.Sprintf("%s(w=%d,d=%v)", e.To, e.Weight, e.Directed)
 	}
 	sort.Strings(out)
+
 	return out
 }
 

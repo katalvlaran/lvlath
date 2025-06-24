@@ -8,8 +8,8 @@
 //
 // Complexity:
 //
-//	– Time:   O(V + E) (each vertex and edge visited once)
-//	– Memory: O(V)     (recursion stack and state map)
+//   - Time:   O(V + E) (each vertex and edge visited once)
+//   - Memory: O(V)     (recursion stack and state map)
 package dfs
 
 import (

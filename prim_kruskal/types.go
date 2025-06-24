@@ -64,8 +64,8 @@ func WithRoot(root string) Option {
 
 // DefaultOptions returns MSTOptions initialized for Kruskal by default:
 //
-//	– Method = MethodKruskal
-//	– Root   = "" (ignored by Kruskal).
+//   - Method = MethodKruskal
+//   - Root   = "" (ignored by Kruskal).
 //
 // Complexity: O(1) to construct.
 func DefaultOptions() MSTOptions {
@@ -77,9 +77,9 @@ func DefaultOptions() MSTOptions {
 
 // Compute selects and runs the MST algorithm based on opts.Method.
 //
-//	– If opts.Method == MethodKruskal: calls Kruskal(graph).
-//	– If opts.Method == MethodPrim:    calls Prim(graph, opts.Root).
-//	– Otherwise:                        returns ErrInvalidGraph.
+//   - If opts.Method == MethodKruskal: calls Kruskal(graph).
+//   - If opts.Method == MethodPrim:    calls Prim(graph, opts.Root).
+//   - Otherwise:                        returns ErrInvalidGraph.
 //
 // Returns:
 //

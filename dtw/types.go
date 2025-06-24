@@ -1,53 +1,70 @@
-// Package dtw defines options and modes for Dynamic Time Warping.
+// Package dtw defines options and sentinel errors for Dynamic Time Warping.
 package dtw
+
+import "errors"
 
 // MemoryMode controls how DTW stores its DP matrix.
 //
-//   - FullMatrix   — keep the entire (n+1)x(m+1) matrix in memory.
-//     Allows distance + full backtrace for the optimal warping path.
-//     Memory: O(n·m).
+//   - None       — no matrix stored; only compute and return distance. Memory: O(1).
+//   - TwoRows    — keep two rows (current and previous); compute distance only. Memory: O(min(N, M)).
+//   - FullMatrix — store entire (n+1)x(m+1) matrix; supports path recovery. Memory: O(N·M).
 //
-//   - RollingArray — only keep two rows (current and previous).
-//     Greatly reduces memory to O(min(n, m)), but cannot recover the path.
-//     Use when you only need the distance.
+// Use FullMatrix when you need to retrieve the optimal warping path.
 type MemoryMode int
 
 const (
-	// FullMatrix mode: store all rows, support path recovery, uses O(N·M) memory.
-	FullMatrix MemoryMode = iota
+	// None mode: minimal overhead, no path, constant memory.
+	None MemoryMode = iota
 
-	// RollingArray mode: keep only two rows, no path recovery, uses O(min(N,M)) memory.
-	RollingArray
+	// TwoRows mode: rolling array of two rows, no path recovery.
+	TwoRows
+
+	// FullMatrix mode: full DP matrix, supports backtracking for path.
+	FullMatrix
 )
 
-// DTWOptions configures Dynamic Time Warping.
+// Sentinel errors for DTW input validation and path requirements.
+var (
+	// ErrEmptyInput indicates one or both input sequences are empty.
+	ErrEmptyInput = errors.New("dtw: input sequences must be non-empty")
+
+	// ErrPathNeedsMatrix indicates ReturnPath=true requires FullMatrix mode.
+	ErrPathNeedsMatrix = errors.New("dtw: ReturnPath requires MemoryMode=FullMatrix")
+
+	// ErrIncompletePath indicates path backtrace failed to reach (0,0).
+	ErrIncompletePath = errors.New("dtw: path computation incomplete")
+
+	// ErrBadInput indicates an invalid combination of options.
+	ErrBadInput = errors.New("dtw: invalid options combination")
+)
+
+// Options configures the Dynamic Time Warping algorithm.
 //
 // Fields:
-//   - Window       — maximum deviation |i-j| allowed (Sakoe–Chiba band).
-//     A value of 0 (or negative) means no windowing constraint.
-//   - SlopePenalty — penalty cost for insertion/deletion steps (controls locality bias).
-//   - ReturnPath   — if true, DTW will backtrack and return the optimal warping path.
-//     Requires MemoryMode=FullMatrix.
-//   - MemoryMode   — choose FullMatrix or RollingArray storage.
 //
-// Example:
-//
-//	opts := &DTWOptions{
-//	  Window:       10,           // only compare elements within ±10 steps
-//	  SlopePenalty: 0.5,          // small penalty for non-diagonal moves
-//	  ReturnPath:   true,         // we need the path, not just the distance
-//	  MemoryMode:   FullMatrix,   // must be FullMatrix to support ReturnPath
-//	}
-//
-//	dist, path, err := DTW(seqA, seqB, opts)
-//	if err != nil {
-//	  // handle ErrEmptySequence or ErrPathNeedsFullMatrix
-//	}
-//	fmt.Println("DTW distance:", dist)
-//	fmt.Println("Warping path:", path)
-type DTWOptions struct {
+//	Window       — Sakoe-Chiba band size: maximum |i-j| allowed. Window <= 0 means no constraint.
+//	SlopePenalty — penalty cost for insertion/deletion steps; controls stretch bias.
+//	ReturnPath   — if true, DTW backtracks and returns the optimal warping path.
+//	                Requires MemoryMode=FullMatrix.
+//	MemoryMode   — choose None, TwoRows, or FullMatrix for DP storage.
+type Options struct {
 	Window       int
 	SlopePenalty float64
 	ReturnPath   bool
 	MemoryMode   MemoryMode
+}
+
+// DefaultOptions returns an Options struct with sensible defaults:
+//
+//	Window:       -1 (no window constraint)
+//	SlopePenalty: 0.0
+//	ReturnPath:   false
+//	MemoryMode:   TwoRows
+func DefaultOptions() Options {
+	return Options{
+		Window:       -1,
+		SlopePenalty: 0.0,
+		ReturnPath:   false,
+		MemoryMode:   TwoRows,
+	}
 }

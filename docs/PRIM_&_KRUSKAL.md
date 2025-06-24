@@ -222,4 +222,4 @@ func main() {
 ---
 
 
-Next: [7. Max-Flow: Ford–Fulkerson / Edmonds-Karp / Dinic →](MAX_FLOW.md)
+Next: [7. Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic →](MAX_FLOW.md)

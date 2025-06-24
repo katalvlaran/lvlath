@@ -1,182 +1,188 @@
 package dtw
 
 import (
-	"errors"
 	"math"
 )
 
-// DTW — Dynamic Time Warping
-//
-// Description:
-//
-//	DTW measures similarity between two sequences that may vary
-//	in time or speed by finding an optimal “warping path”.
-//	It is widely used in speech recognition, time-series analysis,
-//	gesture recognition, and many other domains.
-//
-// Algorithm Outline (Full-Matrix):
-//  1. Let n = len(a), m = len(b). Allocate (n+1)x(m+1) DP matrix D.
-//  2. Initialize:
-//     D[0][0] = 0
-//     D[i][0] = +∞ for i=1..n
-//     D[0][j] = +∞ for j=1..m
-//  3. For i = 1..n:
-//     For j = 1..m (and |i-j| ≤ Window, if constrained):
-//     cost = |a[i-1] - b[j-1]|
-//     ins   = D[i-1][j]   + SlopePenalty
-//     del   = D[i][j-1]   + SlopePenalty
-//     match = D[i-1][j-1]
-//     D[i][j] = cost + min(ins, del, match)
-//  4. distance = D[n][m].
-//  5. If ReturnPath && MemoryMode==FullMatrix, backtrack from (n,m) to (0,0)
-//     following the predecessor with minimal D-value.
-//
-// Memory Modes:
-//   - FullMatrix   — store full D, support ReturnPath. Memory: O(n·m).
-//   - RollingArray — store only two rows (current & previous). Memory: O(min(n,m)).
-//     ReturnPath is not supported.
-//
-// Complexity:
-//
-//	Time   = O(n·m)
-//	Memory = O(n·m) (FullMatrix) or O(min(n,m)) (RollingArray)
-//
-// Errors:
-//   - ErrEmptySequence         — if either input is empty.
-//   - ErrPathNeedsFullMatrix   — if ReturnPath=true with RollingArray mode.
-var (
-	// ErrEmptySequence indicates one or both inputs are empty.
-	ErrEmptySequence = errors.New("dtw: input sequences must be non-empty")
+// Coord represents a point (i,j) in the optimal warping path.
+type Coord struct{ I, J int }
 
-	// ErrPathNeedsFullMatrix indicates that path recovery requires FullMatrix mode.
-	ErrPathNeedsFullMatrix = errors.New("dtw: ReturnPath requires MemoryMode=FullMatrix")
-)
-
-// DTW computes the Dynamic Time Warping distance between a and b.
-// Returns (distance, path, error).
+// DTW computes the Dynamic Time Warping distance between sequences a and b.
+// It optionally returns the optimal alignment path if opts.ReturnPath is true.
 //
-// If opts.ReturnPath is true, opts.MemoryMode must be FullMatrix.
+// Time Complexity:    O(N·M)      where N=len(a), M=len(b)
+// Memory Complexity:  O(N·M)      for FullMatrix mode
 //
-// Example:
+//	O(min(N,M)) for TwoRows and None modes (distance only)
 //
-//	opts := &DTWOptions{ReturnPath: true, MemoryMode: FullMatrix}
-//	dist, path, err := DTW(seqA, seqB, opts)
-func DTW(a, b []float64, opts *DTWOptions) (distance float64, path [][2]int, err error) {
+// Returns:
+//
+//	dist float64    - cumulative minimal cost
+//	path []Coord    - nil unless ReturnPath=true (and MemoryMode=FullMatrix)
+//	err  error      - sentinel errors for input or options
+func DTW(a, b []float64, opts Options) (dist float64, path []Coord, err error) {
 	n, m := len(a), len(b)
+	// Validate input lengths
 	if n == 0 || m == 0 {
-		return 0, nil, ErrEmptySequence
+		return 0, nil, ErrEmptyInput
 	}
+	// Validate path requirements
+	if opts.ReturnPath && opts.MemoryMode != FullMatrix {
+		return 0, nil, ErrPathNeedsMatrix
+	}
+	// Alias options
+	penalty := opts.SlopePenalty
+	window := opts.Window
+	mode := opts.MemoryMode
+	needPath := opts.ReturnPath
 
-	// Apply options or defaults
-	window := math.MaxInt32
-	penalty := 0.0
-	mem := FullMatrix
-	wantPath := false
-	if opts != nil {
-		if opts.Window > 0 {
-			window = opts.Window
-		}
-		penalty = opts.SlopePenalty
-		mem = opts.MemoryMode
-		wantPath = opts.ReturnPath
-	}
-	if wantPath && mem != FullMatrix {
-		return 0, nil, ErrPathNeedsFullMatrix
-	}
-
-	// Prepare DP storage
-	var dp [][]float64
-	if mem == FullMatrix {
-		dp = make([][]float64, n+1)
-		for i := range dp {
-			dp[i] = make([]float64, m+1)
-		}
-	} else {
-		dp = make([][]float64, 2)
-		dp[0] = make([]float64, m+1)
-		dp[1] = make([]float64, m+1)
-	}
 	inf := math.Inf(1)
-
-	// Initialize first row/col
-	if mem == FullMatrix {
-		for i := 1; i <= n; i++ {
-			dp[i][0] = inf
-		}
-		for j := 1; j <= m; j++ {
-			dp[0][j] = inf
-		}
-	} else {
-		for j := 1; j <= m; j++ {
-			dp[0][j] = inf
-		}
+	// Allocate DP storage
+	var dpFull [][]float64
+	prev := make([]float64, m+1)
+	curr := make([]float64, m+1)
+	if mode == FullMatrix {
+		dpFull = make([][]float64, n+1)
+		dpFull[0] = make([]float64, m+1)
+		copy(dpFull[0], prev)
+	}
+	// Initialize first row
+	for j := 1; j <= m; j++ {
+		prev[j] = inf
 	}
 
-	// Fill DP
+	// Fill DP rows
 	for i := 1; i <= n; i++ {
-		curr, prev := i%2, (i-1)%2
-		if mem == RollingArray {
-			dp[curr][0] = inf
-		}
+		// First column
+		curr[0] = inf
 		for j := 1; j <= m; j++ {
-			if window < math.MaxInt32 && abs(i-j) > window {
-				if mem == FullMatrix {
-					dp[i][j] = inf
-				} else {
-					dp[curr][j] = inf
-				}
+			// Sakoe-Chiba window constraint
+			if window >= 0 && abs(i-j) > window {
+				curr[j] = inf
 				continue
 			}
-			cost := math.Abs(a[i-1] - b[j-1])
-			var ins, del, match float64
-			if mem == FullMatrix {
-				ins = dp[i-1][j] + penalty
-				del = dp[i][j-1] + penalty
-				match = dp[i-1][j-1]
+			// Local cost
+			c := math.Abs(a[i-1] - b[j-1])
+			// Recurrence: insertion, deletion, match
+			if window >= 0 {
+				// Chebyshev mode
+				insR := prev[j]
+				delR := curr[j-1]
+				matR := prev[j-1]
+				insV := math.Max(insR, penalty)
+				delV := math.Max(delR, penalty)
+				matV := math.Max(matR, c)
+				curr[j] = min3(insV, delV, matV)
 			} else {
-				ins = dp[prev][j] + penalty
-				del = dp[curr][j-1] + penalty
-				match = dp[prev][j-1]
-			}
-			best := min3(ins, del, match)
-			if mem == FullMatrix {
-				dp[i][j] = cost + best
-			} else {
-				dp[curr][j] = cost + best
-			}
-		}
-	}
-
-	// Extract final distance
-	if mem == FullMatrix {
-		distance = dp[n][m]
-	} else {
-		distance = dp[n%2][m]
-	}
-
-	// Backtrack path if requested
-	if wantPath {
-		i, j := n, m
-		for i > 0 || j > 0 {
-			path = append(path, [2]int{i - 1, j - 1})
-			prevCost := dp[i][j] - math.Abs(a[i-1]-b[j-1])
-			// choose predecessor
-			if i > 0 && dp[i-1][j] == prevCost-penalty {
-				i--
-			} else if j > 0 && dp[i][j-1] == prevCost-penalty {
-				j--
-			} else {
-				i--
-				j--
+				// Sum-of-cost mode
+				ins := prev[j] + penalty
+				del := curr[j-1] + penalty
+				match := prev[j-1]
+				best := min3(ins, del, match)
+				curr[j] = c + best
 			}
 		}
-		// reverse path in-place
-		for l, r := 0, len(path)-1; l < r; l, r = l+1, r-1 {
-			path[l], path[r] = path[r], path[l]
+		// Save row if needed
+		if mode == FullMatrix {
+			dpFull[i] = make([]float64, m+1)
+			copy(dpFull[i], curr)
+		}
+		// Rotate buffers
+		prev, curr = curr, prev
+	}
+	// Distance in last filled row
+	dist = prev[m]
+	// Backtrack for path if requested
+	if needPath {
+		path, err = backtrack(dpFull, a, b, opts)
+	}
+	return dist, path, err
+}
+
+// backtrack reconstructs the optimal path from dpFull matrix.
+func backtrack(dp [][]float64, a, b []float64, opts Options) ([]Coord, error) {
+	i, j := len(a), len(b)
+	path := make([]Coord, 0, i+j)
+	//inf := math.Inf(1)
+	for i > 0 || j > 0 {
+		// Append current alignment
+		path = append(path, Coord{I: i - 1, J: j - 1})
+		// Determine move: match vs insertion vs deletion
+		moved := false
+		if opts.Window >= 0 { // Chebyshev backtrack
+			// match
+			if i > 0 && j > 0 {
+				c := math.Abs(a[i-1] - b[j-1])
+				if almostEqual(dp[i][j], math.Max(dp[i-1][j-1], c)) {
+					i, j = i-1, j-1
+					moved = true
+				}
+			}
+			// insertion
+			if !moved && i > 0 {
+				if almostEqual(dp[i][j], math.Max(dp[i-1][j], opts.SlopePenalty)) {
+					i--
+					moved = true
+				}
+			}
+			// deletion
+			if !moved && j > 0 {
+				if almostEqual(dp[i][j], math.Max(dp[i][j-1], opts.SlopePenalty)) {
+					j--
+					moved = true
+				}
+			}
+		} else { // Sum-of-cost backtrack
+			// match
+			if i > 0 && j > 0 {
+				c := math.Abs(a[i-1] - b[j-1])
+				if almostEqual(dp[i][j], dp[i-1][j-1]+c) {
+					i, j = i-1, j-1
+					moved = true
+				}
+			}
+			// insertion
+			if !moved && i > 0 {
+				if almostEqual(dp[i][j], dp[i-1][j]+opts.SlopePenalty) {
+					i--
+					moved = true
+				}
+			}
+			// deletion
+			if !moved && j > 0 {
+				if almostEqual(dp[i][j], dp[i][j-1]+opts.SlopePenalty) {
+					j--
+					moved = true
+				}
+			}
+		}
+
+		if !moved {
+			return nil, ErrIncompletePath
 		}
 	}
+	// Reverse path to start at (0,0)
+	for l, r := 0, len(path)-1; l < r; l, r = l+1, r-1 {
+		path[l], path[r] = path[r], path[l]
+	}
 
-	return distance, path, nil
+	return path, nil
+}
+
+// min3 returns the minimum of three floats.
+func min3(a, b, c float64) float64 {
+	if a < b {
+		if a < c {
+			return a
+		}
+
+		return c
+	}
+	if b < c {
+		return b
+	}
+
+	return c
 }
 
 // abs returns the absolute value of an int.
@@ -184,19 +190,12 @@ func abs(x int) int {
 	if x < 0 {
 		return -x
 	}
+
 	return x
 }
 
-// min3 returns the minimum of three float64 values.
-func min3(a, b, c float64) float64 {
-	if a < b {
-		if a < c {
-			return a
-		}
-		return c
-	}
-	if b < c {
-		return b
-	}
-	return c
+// almostEqual compares floats within a small epsilon.
+func almostEqual(a, b float64) bool {
+	const eps = 1e-9
+	return math.Abs(a-b) <= eps
 }

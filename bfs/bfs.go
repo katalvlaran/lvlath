@@ -81,6 +81,7 @@ func BFS(g *core.Graph, startID string, opts ...Option) (*BFSResult, error) {
 
 	// Seed queue with start vertex (no parent)
 	w.enqueue(startID, 0, "")
+
 	// Main loop
 	return w.res, w.loop()
 }
@@ -115,6 +116,7 @@ func (w *walker) loop() error {
 			return err
 		}
 	}
+
 	return nil
 }
 
@@ -123,6 +125,7 @@ func (w *walker) dequeue() queueItem {
 	item := w.queue[0]
 	w.queue = w.queue[1:]
 	w.opts.OnDequeue(item.id, item.depth)
+
 	return item
 }
 
@@ -132,6 +135,7 @@ func (w *walker) visit(item queueItem) error {
 	if err := w.opts.OnVisit(item.id, item.depth); err != nil {
 		return fmt.Errorf("bfs: OnVisit error at %q: %w", item.id, err)
 	}
+
 	return nil
 }
 
@@ -164,5 +168,6 @@ func (w *walker) enqueueNeighbors(item queueItem) error {
 			w.enqueue(nbr, nextDepth, item.id)
 		}
 	}
+
 	return nil
 }

@@ -7,8 +7,8 @@
 //
 // Complexity:
 //
-//	– Time:   O(V + E + C·L)   (V=#vertices, E=#edges, C=#cycles, L=avg cycle length)
-//	– Memory: O(V + L_max)     (recursion stack + state map + cycle storage)
+//   - Time:   O(V + E + C·L)   (V=#vertices, E=#edges, C=#cycles, L=avg cycle length)
+//   - Memory: O(V + L_max)     (recursion stack + state map + cycle storage)
 package dfs
 
 import (
@@ -57,6 +57,7 @@ func DetectCycles(g *core.Graph) (bool, [][]string, error) {
 	if len(cycles) == 0 {
 		return false, nil, nil
 	}
+
 	return true, cycles, nil
 }
 
@@ -110,7 +111,7 @@ func dfsVisit(
 		switch state[nbr] {
 		case White:
 			// 4c.i) Unvisited: recurse deeper
-			if err := dfsVisit(g, nbr, id, state, path, seen, cycles); err != nil {
+			if err = dfsVisit(g, nbr, id, state, path, seen, cycles); err != nil {
 				return err // propagate error
 			}
 		case Gray:
@@ -138,6 +139,7 @@ func dfsVisit(
 	// 5) Backtrack: pop 'id' from path stack and mark it Black (fully explored)
 	*path = (*path)[:len(*path)-1]
 	state[id] = Black
+
 	return nil
 }
 
@@ -159,6 +161,7 @@ func shouldSkipEdge(e *core.Edge, id, parent string, g *core.Graph) bool {
 	if e.Directed && e.From != id {
 		return true
 	}
+
 	return false
 }
 
@@ -236,5 +239,6 @@ func getNeighborID(e *core.Edge, id string, g *core.Graph) string {
 	if !g.Directed() && !e.Directed && e.To == id {
 		return e.From
 	}
+
 	return e.To
 }

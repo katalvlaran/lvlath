@@ -153,6 +153,7 @@ func ExampleBFS_HooksAndCancellation() {
 		if d == 4 {
 			cancel() // force mid-traversal cancellation
 		}
+
 		return nil
 	}
 

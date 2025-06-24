@@ -7,34 +7,20 @@
 //
 // Complexity:
 //
-//	– Time:  O((V + E) log V)
-//	  • Each vertex is extracted at most once: V extractions from the heap.
-//	  • Each edge relaxation may push a new entry into the heap: up to E pushes.
-//	  • Each heap operation (Push/Pop) costs O(log N), where N ≤ V + E. Simplified to O(log V).
-//	– Space: O(V + E)
-//	  • O(V) for distance and predecessor maps.
-//	  • O(E) worst-case for entries in the heap under “lazy-decrease-key”.
+//   - Time:  O((V + E) log V)
+//   - Each vertex is extracted at most once: V extractions from the heap.
+//   - Each edge relaxation may push a new entry into the heap: up to E pushes.
+//   - Each heap operation (Push/Pop) costs O(log N), where N ≤ V + E. Simplified to O(log V).
+//   - Space: O(V + E)
+//   - O(V) for distance and predecessor maps.
+//   - O(E) worst-case for entries in the heap under “lazy-decrease-key”.
 //
 // Notes on implementation choices:
 //
-//	– We perform an upfront scan of all edges (O(E)) to detect negative weights and fail fast.
-//	– We treat any edge with weight ≥ InfEdgeThreshold as an impassable “wall”.
-//	– We stop exploring once the minimum distance in the heap exceeds MaxDistance.
-//	– We use a “lazy” decrease-key strategy: pushing duplicates into the heap and ignoring stale entries.
-//
-// Example usage:
-//
-//	g := core.NewGraph(core.WithWeighted())
-//	// Add weighted edges...
-//	dist, prev, err := Dijkstra(
-//	    g,
-//	    Source("A"),
-//	    WithReturnPath(),
-//	)
-//	if err != nil {
-//	    log.Fatal(err)
-//	}
-//	fmt.Printf("Shortest distance to B: %d, parent: %s\n", dist["B"], prev["B"])
+//   - We perform an upfront scan of all edges (O(E)) to detect negative weights and fail fast.
+//   - We treat any edge with weight ≥ InfEdgeThreshold as an impassable “wall”.
+//   - We stop exploring once the minimum distance in the heap exceeds MaxDistance.
+//   - We use a “lazy” decrease-key strategy: pushing duplicates into the heap and ignoring stale entries.
 package dijkstra
 
 import (
@@ -51,11 +37,11 @@ import (
 //
 // Returns:
 //
-//	– dist: map from vertex ID to minimum distance (math.MaxInt64 if unreachable).
-//	– prev: optional predecessor map if ReturnPath=true (nil otherwise).
-//	        prev[v] == u means the shortest path to v goes through u.
-//	        For unreachable v, prev[v] == "".
-//	– err:  error if inputs are invalid or if a negative weight is detected.
+//   - dist: map from vertex ID to minimum distance (math.MaxInt64 if unreachable).
+//   - prev: optional predecessor map if ReturnPath=true (nil otherwise).
+//     prev[v] == u means the shortest path to v goes through u.
+//     For unreachable v, prev[v] == "".
+//   - err:  error if inputs are invalid or if a negative weight is detected.
 //
 // Preconditions and validation (in order):
 //  1. Source string must be non-empty (ErrEmptySource).
@@ -66,14 +52,14 @@ import (
 //
 // Options customization:
 //
-//	– WithReturnPath(): return predecessor map.
-//	– WithMaxDistance(x): vertices with distance > x are not explored (x ≥ 0).
-//	– WithInfEdgeThreshold(t): edges with weight ≥ t are skipped (t > 0).
+//   - WithReturnPath(): return predecessor map.
+//   - WithMaxDistance(x): vertices with distance > x are not explored (x ≥ 0).
+//   - WithInfEdgeThreshold(t): edges with weight ≥ t are skipped (t > 0).
 //
 // Complexity:
 //
-//	– Time:  O((V + E) log V)
-//	– Space: O(V + E)
+//   - Time:  O((V + E) log V)
+//   - Space: O(V + E)
 func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]string, error) {
 	// 1) Build and validate Options
 	cfg := DefaultOptions("")  // default options
@@ -112,8 +98,7 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 	for _, e := range g.Edges() {
 		if e.Weight < 0 {
 			// Return the sentinel error with context of which edge failed.
-			return nil, nil, fmt.Errorf("%w: edge %s→%s weight=%d",
-				ErrNegativeWeight, e.From, e.To, e.Weight)
+			return nil, nil, fmt.Errorf("%w: edge %s→%s weight=%d", ErrNegativeWeight, e.From, e.To, e.Weight)
 		}
 	}
 
@@ -209,8 +194,8 @@ func (r *runner) init() {
 //
 // Loop termination conditions:
 //
-//	– The heap becomes empty (all reachable vertices processed).
-//	– The minimum distance in the heap exceeds MaxDistance (no need to explore farther).
+//   - The heap becomes empty (all reachable vertices processed).
+//   - The minimum distance in the heap exceeds MaxDistance (no need to explore farther).
 //
 // Returns an error if any invalid edge weight is found during relaxation (should not happen due to pre-scan).
 func (r *runner) process() error {

@@ -19,6 +19,7 @@
 
 ## 2 Math Formulation
 Shortest‐path distance in an unweighted graph is the minimum number of edges between two vertices:
+
 ![\displaystyle \mathrm{dist}(s,v)=\min_{\text{paths }s\to v}\sum_{e\in\text{path}}1](https://latex.codecogs.com/svg.image?\displaystyle%20\mathrm{dist}(s,v)%3D\min_{\text{paths}%20s\to%20v}\sum_{e\in\text{path}}1)
 
 Complexity:

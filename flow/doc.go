@@ -6,22 +6,34 @@
 // The key algorithms offered are:
 //
 //   - Ford–Fulkerson
-//     – Method: depth-first search to find any augmenting path.
-//     – Time:   O(E · F), where F is the total flow pushed (integral networks).
-//     – Memory: O(V + E) for the residual capacity map and DFS stack.
-//     – Use when simplicity and moderate capacities suffice.
+//
+//   - Method: depth-first search to find any augmenting path.
+//
+//   - Time:   O(E · F), where F is the total flow pushed (integral networks).
+//
+//   - Memory: O(V + E) for the residual capacity map and DFS stack.
+//
+//   - Use when simplicity and moderate capacities suffice.
 //
 //   - Edmonds–Karp
-//     – Method: breadth-first search for shortest (fewest-edge) augmenting paths.
-//     – Time:   O(V · E²) in the worst case with integer capacities.
-//     – Memory: O(V + E) for residual map and BFS queues.
-//     – Guarantees polynomial worst-case behavior.
+//
+//   - Method: breadth-first search for shortest (fewest-edge) augmenting paths.
+//
+//   - Time:   O(V · E²) in the worst case with integer capacities.
+//
+//   - Memory: O(V + E) for residual map and BFS queues.
+//
+//   - Guarantees polynomial worst-case behavior.
 //
 //   - Dinic
-//     – Method: level graph construction + blocking-flow via DFS.
-//     – Time:   O(E · √V) on unit-capacity networks (general networks often near O(E·√V)).
-//     – Memory: O(V + E) for level map, adjacency slices, and recursion state.
-//     – High practical performance on dense or high-capacity graphs.
+//
+//   - Method: level graph construction + blocking-flow via DFS.
+//
+//   - Time:   O(E · √V) on unit-capacity networks (general networks often near O(E·√V)).
+//
+//   - Memory: O(V + E) for level map, adjacency slices, and recursion state.
+//
+//   - High practical performance on dense or high-capacity graphs.
 //
 // # Graph Support
 //
@@ -81,10 +93,10 @@
 //
 // # Errors
 //
-//	ErrSourceNotFound – if the source vertex is missing in the input graph.
-//	ErrSinkNotFound   – if the sink vertex is missing.
-//	EdgeError         – if a negative capacity (beyond Epsilon) is encountered.
-//	context.Canceled / context.DeadlineExceeded – if opts.Ctx is canceled.
+//	ErrSourceNotFound - if the source vertex is missing in the input graph.
+//	ErrSinkNotFound   - if the sink vertex is missing.
+//	EdgeError         - if a negative capacity (beyond Epsilon) is encountered.
+//	context.Canceled / context.DeadlineExceeded - if opts.Ctx is canceled.
 //
 // # Integration
 //

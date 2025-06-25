@@ -123,11 +123,11 @@ func main() {
 
 **`DFSResult` fields:**
 
-- `Order []string` – vertices in post-order finish.
-- `Depth map[string]int` – discovery depth from `startID`.
-- `Parent map[string]string` – DFS tree edges.
-- `Visited map[string]bool` – reachable vertices.
-- `SkippedNeighbors int` – count filtered out.
+- `Order []string` - vertices in post-order finish.
+- `Depth map[string]int` - discovery depth from `startID`.
+- `Parent map[string]string` - DFS tree edges.
+- `Visited map[string]bool` - reachable vertices.
+- `SkippedNeighbors int` - count filtered out.
 
 **Error Cases:**
 

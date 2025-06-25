@@ -97,7 +97,7 @@ const (
 )
 
 // ~~~~~~~~~~~~~~~~~~~~~ Transportation Network ~~~~~~~~~~~~~~~~~~~~~
-// contains (337+200+27=)564 segments of Ukrainian ways(Road|Rail|Air)
+// contains (334+200+27=)561 segments of Ukrainian ways(Road|Rail|Air)
 var (
 	// RoadNetwork contains (337) predefined segments of Ukrainian road network.
 	RoadNetwork = []WaySegment{
@@ -198,7 +198,6 @@ var (
 		{From: Dnipro, To: Zaporizhzhia, KM: 80.4},
 		{From: Dobropillia, To: Bakhmut, KM: 78.6},
 		{From: Dobropillia, To: Kramatorsk, KM: 103.4},
-		{From: Dobropillia, To: Pokrovsk, KM: 35.3},
 		{From: Donetsk, To: Horlivka, KM: 46.3},
 		{From: Donetsk, To: Kharkiv, KM: 285.2},
 		{From: Donetsk, To: Krasnyi_Luch, KM: 98.1},
@@ -221,7 +220,6 @@ var (
 		{From: Enerhodar, To: Nova_Kakhovka, KM: 104.4},
 		{From: Enerhodar, To: Tokmak, KM: 96.0},
 		{From: Enerhodar, To: Zaporizhzhia, KM: 126.3},
-		{From: Feodosiia, To: Dzhankoi, KM: 87.5},
 		{From: Feodosiia, To: Melitopol, KM: 326.7},
 		{From: Feodosiia, To: Simferopol, KM: 106.6},
 		{From: Henichesk, To: Kherson, KM: 161.5},
@@ -258,7 +256,7 @@ var (
 		{From: Kamianske, To: Kryvyi_Rih, KM: 132.6},
 		{From: Kaniv, To: Cherkasy, KM: 56.3},
 		{From: Kaniv, To: Kyiv, KM: 125.4},
-		{From: Kaniv, To: Zolotonosha, KM: 48.7},
+		{From: Kaniv, To: Zolotonosha, KM: 58.7},
 		{From: Kharkiv, To: Krasnyi_Luch, KM: 330.9},
 		{From: Kharkiv, To: Kremenchuk, KM: 261.0},
 		{From: Kharkiv, To: Luhansk, KM: 314.4},
@@ -436,7 +434,6 @@ var (
 		{From: Zhmerynka, To: Khmelnytskyi, KM: 127.0},
 		{From: Zhmerynka, To: Vinnytsia, KM: 35.0},
 		{From: Zolotonosha, To: Cherkasy, KM: 34.2},
-		{From: Zolotonosha, To: Kaniv, KM: 71.9},
 		{From: Zolotonosha, To: Uman, KM: 158.4},
 	}
 

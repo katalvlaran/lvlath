@@ -1,119 +1,130 @@
-// File: gridgraph/expand_test.go
-package gridgraph
+package gridgraph_test
 
 import (
+	"errors"
 	"reflect"
 	"testing"
+
+	"github.com/katalvlaran/lvlath/gridgraph"
 )
 
-// helper to convert (x,y) to index
-func idx(gg *GridGraph, x, y int) int {
-	return gg.index(x, y)
-}
-
-// TestExpandIsland_BasicLine tests a simple 1×3 line with a single water cell between two land cells.
-// Grid: [1,0,1], Conn4
-// Expected: must convert the middle cell at cost 1, path indices [0,1,2].
+// Basic test on a small grid (1×3) verifying minimal water conversion.
 func TestExpandIsland_BasicLine(t *testing.T) {
 	grid := [][]int{{1, 0, 1}}
-	gg, err := From2D(grid, Conn4)
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn4
+	gg, err := gridgraph.NewGridGraph(grid, opts)
 	if err != nil {
-		t.Fatalf("From2D error: %v", err)
+		t.Fatalf("NewGridGraph failed: %v", err)
 	}
-	comps := gg.ConnectedComponents()
+
+	// Two land components at ends
+	comps := gg.ConnectedComponents()[1]
 	if len(comps) != 2 {
-		t.Fatalf("found %d components; want 2", len(comps))
+		t.Fatalf("expected 2 components of value=1; got %d", len(comps))
 	}
+	src, dst := comps[0], comps[1]
 
-	path, cost, err := gg.ExpandIsland(0, 1)
+	path, cost, err := gg.ExpandIsland(src, dst)
 	if err != nil {
 		t.Fatalf("ExpandIsland error: %v", err)
 	}
 
-	wantCost := 1
-	wantPath := []int{idx(gg, 0, 0), idx(gg, 1, 0), idx(gg, 2, 0)}
-
-	if cost != wantCost {
-		t.Errorf("cost = %d; want %d", cost, wantCost)
-	}
-	if !reflect.DeepEqual(path, wantPath) {
-		t.Errorf("path = %v; want %v", path, wantPath)
+	// Expect cost=1 and path through the single water cell
+	expected := []gridgraph.Cell{{0, 0, 1}, {1, 0, 0}, {2, 0, 1}}
+	if cost != 1 || !reflect.DeepEqual(path, expected) {
+		t.Errorf("BasicLine: got cost=%d, path=%v; want cost=1, path=%v", cost, path, expected)
 	}
 }
 
-// TestExpandIsland_MediumRow tests a 1×5 line where two land cells at ends require converting 3 water cells.
-// Grid: [1,0,0,0,1], Conn4
-// Expected cost = 3, path length = 5.
-func TestExpandIsland_MediumRow(t *testing.T) {
-	grid := [][]int{{1, 0, 0, 0, 1}}
-	gg, _ := From2D(grid, Conn4)
-	path, cost, err := gg.ExpandIsland(0, 1)
+// Medium test on a larger random-like 10×10 grid with two diagonal clusters.
+func TestExpandIsland_10x10Grid(t *testing.T) {
+	// Build a 10×10 grid: two 3×3 land blocks at corners, water elsewhere
+	n := 10
+	grid := make([][]int, n)
+	for i := range grid {
+		grid[i] = make([]int, n)
+	}
+	// Top-left 3x3 block = 1, bottom-right 3x3 block = 2
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			grid[y][x] = 1
+			grid[n-1-y][n-1-x] = 2
+		}
+	}
+
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn4
+	gg, err := gridgraph.NewGridGraph(grid, opts)
 	if err != nil {
-		t.Fatalf("ExpandIsland error: %v", err)
+		t.Fatalf("NewGridGraph failed: %v", err)
 	}
 
-	if cost != 3 {
-		t.Errorf("cost = %d; want 3", cost)
-	}
-	if len(path) != 5 {
-		t.Errorf("path length = %d; want 5", len(path))
-	}
-}
-
-// TestExpandIsland_Diagonal8 tests diagonal connectivity allowing zero-cost direct diagonal path.
-// Grid:
-//
-//	1 0
-//	0 1
-//
-// Conn8: the two land cells touch at corner.
-// Expected cost = 0, path = [0,3].
-func TestExpandIsland_Diagonal8(t *testing.T) {
-	grid := [][]int{
-		{1, 0},
-		{0, 1},
-	}
-	gg, _ := From2D(grid, Conn8)
 	comps := gg.ConnectedComponents()
-	if len(comps) != 1 {
-		// All land connected by Conn8 -> one component; treat 0→0 => cost 0, path single cell.
-		path, cost, err := gg.ExpandIsland(0, 0)
-		if err != nil {
-			t.Fatalf("ExpandIsland error: %v", err)
-		}
-		if cost != 0 {
-			t.Errorf("cost = %d; want 0", cost)
-		}
-		if len(path) != 1 || path[0] != comps[0][0] {
-			t.Errorf("path = %v; want [%d]", path, comps[0][0])
-		}
-	} else {
-		// Two separate comps (unexpected), test explicitly 0→1
-		path, cost, err := gg.ExpandIsland(0, 1)
-		if err != nil {
-			t.Fatalf("ExpandIsland error: %v", err)
-		}
-		if cost != 0 {
-			t.Errorf("cost = %d; want 0", cost)
-		}
-		want := []int{idx(gg, 0, 0), idx(gg, 1, 1)}
-		if !reflect.DeepEqual(path, want) {
-			t.Errorf("path = %v; want %v", path, want)
-		}
+	srcComps, ok1 := comps[1]
+	dstComps, ok2 := comps[2]
+	if !ok1 || !ok2 {
+		t.Fatalf("Missing components: keys1=%v, keys2=%v", ok1, ok2)
+	}
+	src, dst := srcComps[0], dstComps[0]
+
+	path, cost, err := gg.ExpandIsland(src, dst)
+	if err != nil {
+		t.Fatalf("ExpandIsland on 10x10 failed: %v", err)
+	}
+
+	// Path length should be >0 and cost ~ (distance between centers) minus contiguous land steps
+	dx := (n-3)/2*2 + 1 // approximate manhattan distance
+	expectedMinCost := dx + dx
+	if cost != expectedMinCost {
+		t.Errorf("10x10: got cost=%d; want %d", cost, expectedMinCost)
+	}
+	if len(path) == 0 {
+		t.Error("10x10: unexpected empty path")
 	}
 }
 
-// TestExpandIsland_InvalidIndices ensures invalid component indices yield ErrComponentIndex.
-func TestExpandIsland_InvalidIndices(t *testing.T) {
-	grid := [][]int{{1, 0, 1}}
-	gg, _ := From2D(grid, Conn4)
-
-	_, _, err := gg.ExpandIsland(-1, 1)
-	if err != ErrComponentIndex {
-		t.Errorf("src=-1: got %v; want ErrComponentIndex", err)
+// Diagonal connectivity allows zero-cost path on corner-touching lands under Conn8.
+func TestExpandIsland_Diagonal8(t *testing.T) {
+	grid := [][]int{{1, 0}, {0, 1}}
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn8
+	gg, err := gridgraph.NewGridGraph(grid, opts)
+	if err != nil {
+		t.Fatalf("NewGridGraph failed: %v", err)
 	}
-	_, _, err = gg.ExpandIsland(0, 2)
-	if err != ErrComponentIndex {
-		t.Errorf("dst=2: got %v; want ErrComponentIndex", err)
+
+	// Single component of value=1 under Conn8
+	comps := gg.ConnectedComponents()[1]
+	src, dst := comps[0], comps[0]
+
+	path, cost, err := gg.ExpandIsland(src, dst)
+	if err != nil {
+		t.Fatalf("ExpandIsland error: %v", err)
+	}
+	if cost != 0 {
+		t.Errorf("Diagonal8: expected cost=0; got %d", cost)
+	}
+	if len(path) != 1 {
+		t.Errorf("Diagonal8: expected single-cell path; got %v", path)
+	}
+}
+
+// TestExpandIsland_ErrorCases verifies error conditions: empty inputs.
+func TestExpandIsland_ErrorCases(t *testing.T) {
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn4
+	gg, _ := gridgraph.NewGridGraph([][]int{{1, 0, 1}}, opts)
+
+	// Empty src
+	_, _, err := gg.ExpandIsland(nil, []gridgraph.Cell{{0, 0, 1}})
+	if !errors.Is(err, gridgraph.ErrComponentIndex) {
+		t.Errorf("empty src: got %v; want ErrComponentIndex", err)
+	}
+
+	// Empty dst
+	_, _, err = gg.ExpandIsland([]gridgraph.Cell{{0, 0, 1}}, nil)
+	if !errors.Is(err, gridgraph.ErrComponentIndex) {
+		t.Errorf("empty dst: got %v; want ErrComponentIndex", err)
 	}
 }

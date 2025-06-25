@@ -29,19 +29,21 @@ Let `G = (V, E)` be a graph with weight function
 ![\Large w: E \to \mathbb{R}_{\ge0}](https://latex.codecogs.com/svg.image?\large&space;w:E\to\mathbb{R}_{\ge0}) . We maintain:
 
 * A **distance** map
-  ![\Large d: V \to [0, \infty]](https://latex.codecogs.com/svg.image?\large&space;d:V\to[0,\infty])
+  ![\Large d:_V_\to_\[0,_\infty\]](https://latex.codecogs.com/svg.image?\large&space;d:V\to[0,\infty])
+
 
 * A **predecessor** map
   ![\Large \pi: V \to V \cup \{\text{nil}\]](https://latex.codecogs.com/svg.image?\large&space;\pi:V\to&space;V\cup\{\text{nil}\})
 
+
 1. **Initialization**:
-   ![\Large d[s] = 0, \quad d[v] = +\infty \quad \forall v \neq s, \quad \pi[v] = \text{nil}](https://latex.codecogs.com/svg.image?\large&space;d[s]=0,\quad&space;d[v]=&plus;\infty\quad\forall&space;v\neq&space;s,\quad\pi[v]=\text{nil})
+   ![\Large d\[s\] = 0, \quad d\[v\] = +\infty \quad \forall v \neq s, \quad \pi\[v\] = \text{nil}](https://latex.codecogs.com/svg.image?\large&space;d[s]=0,\quad&space;d[v]=&plus;\infty\quad\forall&space;v\neq&space;s,\quad\pi[v]=\text{nil})
 
 
-2. **Relaxation**: For each edge
-   ![\Large (u, v) \in E](https://latex.codecogs.com/svg.image?\large&space;(u,v)\in&space;E) , update:
+2. **Relaxation**: For each edge ![\Large (u, v) \in E](https://latex.codecogs.com/svg.image?\large&space;(u,v)\in&space;E) , update:
 
-   ![\Large \text{if}d[u]&plus;w(u,v)<d[v]\text{then}d[v]:=d[u]&plus;w(u,v),\;\pi[v]:=u](https://latex.codecogs.com/svg.image?\large&space;\text{if}d[u]&plus;w(u,v)<d[v]\text{then}d[v]:=d[u]&plus;w(u,v),\;\pi[v]:=u&space;)
+
+   ![\Large \text{if}d\[u\]&plus;w(u,v)<d\[v\]\text{then}d\[v\]:=d\[u\]&plus;w(u,v),\;\pi\[v\]:=u](https://latex.codecogs.com/svg.image?\large&space;\text{if}d[u]&plus;w(u,v)<d[v]\text{then}d[v]:=d[u]&plus;w(u,v),\;\pi[v]:=u&space;)
 
 3. **Main Loop** (using a min‑priority queue):
 
@@ -129,7 +131,7 @@ We start from source **A** (distance 0) and compute distances to all vertices.
 |  1   | [(B,2),(C,5)]             | Relax A’s neighbors: B←2, C←5         | B=2, C=5, D=∞              |
 |  2   | [(C,5),(D,3)]             | Pop B(2), relax B→D(3), B→C(2+3=5)    | D=3 (better), C stays 5    |
 |  3   | [(D,3),(C,5)]             | Pop D(3), relax D→C(3+3=6 no change)  | distances unchanged        |
-|  4   | [(C,5)]                   | Pop C(5) – all neighbors processed    | final: A=0, B=2, D=3, C=5   |
+|  4   | [(C,5)]                   | Pop C(5) - all neighbors processed    | final: A=0, B=2, D=3, C=5   |
 
 #### Go Code Example
 
@@ -209,18 +211,18 @@ Path A→D: [A B D]
 
 #### Step-by-Step Execution Overview
 
-| Step | Frontier (min-heap)                | Extracted | Updated Distances                            |
-|------|------------------------------------|-----------|-----------------------------------------------|
-| 0    | {A:0}                              | —         | d[A]=0                                        |
-| 1    | {B:5, C:2}                         | C (2)     | d[C]=2; relax C→B (2+1=3) ⇒ d[B]=3; C→E (2+4=6) ⇒ d[E]=6; C→D (2+3=5) ⇒ d[D]=5 |
-| 2    | {B:3, D:5, E:6}                    | B (3)     | d[B]=3; relax B→D (3+2=5) ties d[D]=5; B→A, B→C already settled |
-| 3    | {D:5, E:6, A:∞?*, ...}             | D (5)     | relax D→E (5+1=6) tie d[E]=6; D→F (5+19=24) ⇒ d[F]=24       |
-| 4    | {E:6, F:24, ...}                   | E (6)     | relax E→F (6+17=23) ⇒ d[F]=23                  |
+| Step | Frontier (min-heap)                | Extracted | Updated Distances                                                               |
+|------|------------------------------------|-----------|---------------------------------------------------------------------------------|
+| 0    | {A:0}                              | —         | d[A]=0                                                                          |
+| 1    | {B:5, C:2}                         | C (2)     | d[C]=2; relax C→B (2+1=3) ⇒ d[B]=3; C→E (2+4=6) ⇒ d[E]=6; C→D (2+3=5) ⇒ d[D]=5  |
+| 2    | {B:3, D:5, E:6}                    | B (3)     | d[B]=3; relax B→D (3+2=5) ties d[D]=5; B→A, B→C already settled                 |
+| 3    | {D:5, E:6, A:∞?*, ...}             | D (5)     | relax D→E (5+1=6) tie d[E]=6; D→F (5+19=24) ⇒ d[F]=24                           |
+| 4    | {E:6, F:24, ...}                   | E (6)     | relax E→F (6+17=23) ⇒ d[F]=23                                                   |
 | 5    | {F:23, ...}                        | F (23)    | relax F→G (23+1=24) ⇒ d[G]=24; F→H (23+3=26) ⇒ d[H]=26; F→I (23+2=25) ⇒ d[I]=25 |
-| 6    | {G:24, H:26, I:25, J:∞?*, ...}      | G (24)    | G has no new relaxations                       |
-| 7    | {I:25, H:26, J:∞?*, ...}           | I (25)    | relax I→J (25+5=30) ⇒ d[J]=30; I→H (25+1=26) tie; I→F skip |
-| 8    | {H:26, J:30}                       | H (26)    | H→J (26+2=28) improves d[J]=28; H→F skip       |
-| 9    | {J:28}                            | J (28)    | no further relaxations                         |
+| 6    | {G:24, H:26, I:25, J:∞?*, ...}     | G (24)    | G has no new relaxations                                                        |
+| 7    | {I:25, H:26, J:∞?*, ...}           | I (25)    | relax I→J (25+5=30) ⇒ d[J]=30; I→H (25+1=26) tie; I→F skip                      |
+| 8    | {H:26, J:30}                       | H (26)    | H→J (26+2=28) improves d[J]=28; H→F skip                                        |
+| 9    | {J:28}                             | J (28)    | no further relaxations                                                          |
 
 > *Vertices with no direct path from the source until necessary remain ∞ (omitted for clarity).
 

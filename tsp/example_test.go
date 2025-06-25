@@ -56,10 +56,10 @@ func breakEdge(mat [][]float64, u, v int) [][]float64 {
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// Held–Karp Exact TSP Examples
+// Held-Karp Exact TSP Examples
 ////////////////////////////////////////////////////////////////////////////////
 
-// ExampleTSPExact_Small demonstrates the Held–Karp dynamic‐programming TSP
+// ExampleTSPExact_small demonstrates the Held-Karp dynamic‐programming TSP
 // on a 4‐node cycle.
 //
 // Graph (cycle):
@@ -70,7 +70,7 @@ func breakEdge(mat [][]float64, u, v int) [][]float64 {
 //
 // Complexity: O(n²·2ⁿ), Memory: O(n·2ⁿ)
 // Expected optimal tour: [0 → 1 → 2 → 3 → 0], cost = 4.
-func ExampleTSPExact_Small() {
+func ExampleTSPExact_small() {
 	mat := build4Cycle()
 	res, err := tsp.TSPExact(mat)
 	if err != nil {
@@ -81,13 +81,13 @@ func ExampleTSPExact_Small() {
 	// Exact 4-cycle cost: 4
 }
 
-// ExampleTSPExact_Medium demonstrates Held–Karp on an 8‐node cycle.
+// ExampleTSPExact demonstrates Held-Karp on an 8‐node cycle.
 //
-// Graph: nodes 0–7 arranged in a ring, unit‐distance to neighbors.
+// Graph: nodes 0-7 arranged in a ring, unit‐distance to neighbors.
 //
 // Complexity: O(n²·2ⁿ), Memory: O(n·2ⁿ)
 // Expected optimal cost = 8.
-func ExampleTSPExact_Medium() {
+func ExampleTSPExact() {
 	mat := build8Cycle()
 	res, err := tsp.TSPExact(mat)
 	if err != nil {
@@ -98,11 +98,11 @@ func ExampleTSPExact_Medium() {
 	// Exact 8-cycle cost: 8
 }
 
-// ExampleTSPExact_Disconnected shows error on an incomplete graph.
+// ExampleTSPExact_disconnected shows error on an incomplete graph.
 //
-// Start with a 5-cycle, then remove edge 1–2 (make it ∞).
+// Start with a 5-cycle, then remove edge 1-2 (make it ∞).
 // Expect ErrTSPIncompleteGraph.
-func ExampleTSPExact_Disconnected() {
+func ExampleTSPExact_disconnected() {
 	// 5-cycle using first 5 rows of build8Cycle
 	mat := build8Cycle()[0:5]
 	mat = breakEdge(mat, 1, 2)
@@ -116,13 +116,13 @@ func ExampleTSPExact_Disconnected() {
 // Christofides 1.5-Approximation Examples
 ////////////////////////////////////////////////////////////////////////////////
 
-// ExampleTSPApprox_Small demonstrates Christofides’ algorithm on a 4-cycle.
+// ExampleTSPApprox_small demonstrates Christofides’ algorithm on a 4-cycle.
 //
 // Even though approximate, on a metric cycle it finds the exact tour.
 //
 // Complexity: O(n³), Memory: O(n²)
 // Expected cost = 4.
-func ExampleTSPApprox_Small() {
+func ExampleTSPApprox_small() {
 	mat := build4Cycle()
 	res, err := tsp.TSPApprox(mat)
 	if err != nil {
@@ -137,7 +137,7 @@ func ExampleTSPApprox_Small() {
 //
 // Complexity: O(n³), Memory: O(n²)
 // Expected cost = 8.
-func ExampleTSPApprox_Medium() {
+func ExampleTSPApprox() {
 	mat := build8Cycle()
 	res, err := tsp.TSPApprox(mat)
 	if err != nil {
@@ -148,10 +148,10 @@ func ExampleTSPApprox_Medium() {
 	// Approx 8-cycle cost: 8
 }
 
-// ExampleTSPApprox_Disconnected shows Christofides error on a disconnected graph.
+// ExampleTSPApprox_disconnected shows Christofides error on a disconnected graph.
 //
 // Break one edge in a 6-node cycle, expect ErrTSPIncompleteGraph.
-func ExampleTSPApprox_Disconnected() {
+func ExampleTSPApprox_disconnected() {
 	mat := build8Cycle()[0:6]
 	mat = breakEdge(mat, 2, 3)
 	_, err := tsp.TSPApprox(mat)

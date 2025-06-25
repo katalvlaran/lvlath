@@ -97,6 +97,10 @@ An **incidence matrix** `M` of a graph with `V` vertices and `E` edges is a `V*E
 
 ![\Large M_{i,k}=\begin{cases}1&\text{if}(i=u)\text{or}(i=v),\\0&\text{otherwise.}\end{cases}](https://latex.codecogs.com/svg.image?%5Clarge%26space%3BM_%7Bi%2Ck%7D%3D%5Cbegin%7Bcases%7D1%26%5Ctext%7Bif%7D%28i%3Du%29%5Ctext%7Bor%7D%28i%3Dv%29%2C%5C%5C0%26%5Ctext%7Botherwise.%7D%5Cend%7Bcases%7D)
 
+$$
+M_{i,k}=\begin{cases}1&\text{if}(i=u)\text{or}(i=v),\\0&\text{otherwise.}\end{cases}
+$$
+
 - **Directed**: ![! Large M_{u,k}=-1, M_{v,k}=+1](https://latex.codecogs.com/svg.image?$M_{u,k}=-1$,$M_{v,k}=&plus;1$)
 - **Undirected**: ![! Large M_{u,k}=M_{v,k}=1](https://latex.codecogs.com/svg.image?$M_{u,k}=M_{v,k}=1$)
 - Other entries are 0.

@@ -1,87 +1,136 @@
-// File: gridgraph/example_test.go
 package gridgraph_test
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/katalvlaran/lvlath/gridgraph"
 )
 
-////////////////////////////////////////////////////////////////////////////////
-// Example: ConnectedComponents
-////////////////////////////////////////////////////////////////////////////////
-
+// //////////////////////////////////////////////////////////////////////////////
+// Example: ConnectedComponents on an 8×6 grid
+// //////////////////////////////////////////////////////////////////////////////
+// Diagram (8×6):
+//
+//	0 1 1 0 2 2 0 3
+//	1 1 0 2 2 2 0 3
+//	1 0 0 0 0 0 0 3
+//	4 4 4 0 5 5 5 3
+//	4 0 4 0 5 0 5 3
+//	4 4 4 0 5 5 5 3
+//
+// Values: 0=water, 1-5=land IDs
+//
+// //////////////////////////////////////////////////////////////////////////////
+// Playground: [![Playground - gridgraph](https://img.shields.io/badge/Go_Playground-gridgraph-blue?logo=go)](https://go.dev/play/p/Bv2kVqdRtI6)
+// //////////////////////////////////////////////////////////////////////////////
+//
 // ExampleGridGraph_ConnectedComponents demonstrates how to identify
-// contiguous “islands” of non-zero cells in a 2D grid.
-// Scenario:
-//
-//   - Grid values: 0 = water, 1,2,3 = different land/resource IDs
-//   - Conn4: 4-directional adjacency (N/E/S/W)
-//   - Expect three islands:
-//     – ID 1 cluster at {(1,0),(2,0),(0,1),(1,1)}
-//     – ID 2 cluster at {(4,0),(3,1),(4,1),(2,2),(3,2)}
-//     – ID 3 single cell at {(0,2)}
-//
-// Complexity: O(W·H·4), Memory: O(W·H)
+// contiguous “islands” of cells with value ≥ LandThreshold in a 2D grid.
+// It groups components by their value and lists cell coordinates.
 func ExampleGridGraph_ConnectedComponents() {
 	grid := [][]int{
-		{0, 1, 1, 0, 2},
-		{1, 1, 0, 2, 2},
-		{3, 0, 2, 2, 0},
+		{0, 1, 1, 0, 2, 2, 0, 3},
+		{1, 1, 0, 2, 2, 2, 0, 3},
+		{1, 0, 0, 0, 0, 0, 0, 3},
+		{4, 4, 4, 0, 5, 5, 5, 3},
+		{4, 0, 4, 0, 5, 0, 5, 3},
+		{4, 4, 4, 0, 5, 5, 5, 3},
 	}
-	gg, _ := gridgraph.From2D(grid, gridgraph.Conn4)
+	opts := gridgraph.DefaultGridOptions()
+	opts.LandThreshold = 1
+	opts.Conn = gridgraph.Conn4
+	gg, _ := gridgraph.NewGridGraph(grid, opts)
 
 	comps := gg.ConnectedComponents()
-	fmt.Println("components:", len(comps))
-	for i, comp := range comps {
-		fmt.Printf("component %d:", i)
-		for _, idx := range comp {
-			x, y := gg.Coordinate(idx)
-			fmt.Printf(" (%d,%d)", x, y)
-		}
-		fmt.Println()
+	// Sort keys for deterministic output
+	keys := make([]int, 0, len(comps))
+	for k := range comps {
+		keys = append(keys, k)
 	}
+	sort.Ints(keys)
+	for _, val := range keys {
+		regions := comps[val]
+		fmt.Printf("Value %d: %d region(s)\n", val, len(regions))
+		// Sort each region's cells by (Y, X)
+		for _, region := range regions {
+			sort.Slice(region, func(i, j int) bool {
+				if region[i].Y != region[j].Y {
+					return region[i].Y < region[j].Y
+				}
 
+				return region[i].X < region[j].X
+			})
+
+			for i, cell := range region {
+				if i == 0 {
+					fmt.Printf(" Region 0:")
+				}
+				fmt.Printf(" (%d,%d)", cell.X, cell.Y)
+			}
+			fmt.Println()
+		}
+	}
 	// Output:
-	// components: 3
-	// component 0: (1,0) (2,0) (0,1) (1,1)
-	// component 1: (4,0) (3,1) (4,1) (2,2) (3,2)
-	// component 2: (0,2)
+	// Value 1: 1 region(s)
+	//  Region 0: (1,0) (2,0) (0,1) (1,1) (0,2)
+	// Value 2: 1 region(s)
+	//  Region 0: (4,0) (5,0) (3,1) (4,1) (5,1)
+	// Value 3: 1 region(s)
+	//  Region 0: (7,0) (7,1) (7,2) (7,3) (7,4) (7,5)
+	// Value 4: 1 region(s)
+	//  Region 0: (0,3) (1,3) (2,3) (0,4) (2,4) (0,5) (1,5) (2,5)
+	// Value 5: 1 region(s)
+	//  Region 0: (4,3) (5,3) (6,3) (4,4) (6,4) (4,5) (5,5) (6,5)
 }
 
-////////////////////////////////////////////////////////////////////////////////
-// Example: ExpandIsland
-////////////////////////////////////////////////////////////////////////////////
-
-// ExampleGridGraph_ExpandIsland demonstrates computing the minimal
-// water‐cell conversions to connect two islands in the grid.
-// Scenario:
+// //////////////////////////////////////////////////////////////////////////////
+// Example: ExpandIsland on a 10×10 grid
+// //////////////////////////////////////////////////////////////////////////////
+// Diagram (10×10):
 //
-//   - Same grid and Conn4 as above.
-//   - Connect component 0 (ID 1 cluster) to component 1 (ID 2 cluster).
-//   - Each water cell converted costs 1.
+//	1 1 1 0 0 0 0 0 0 0
+//	1 1 1 0 0 0 0 0 0 0
+//	1 1 1 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 0 0 0
+//	0 0 0 0 0 0 0 2 2 2
+//	0 0 0 0 0 0 0 2 2 2
+//	0 0 0 0 0 0 0 2 2 2
 //
-// Expected: shortest path through water cells only, e.g. (1,1)->(1,2)->(2,2).
+// Values: 0=water, 1-2=land IDs
 //
-// Complexity: O(W·H) on average, Memory: O(W·H)
+// //////////////////////////////////////////////////////////////////////////////
+// Playground: [![Playground - gridgraph](https://img.shields.io/badge/Go_Playground-gridgraph-10x10-blue?logo=go)](https://go.dev/play/p/vt9Q2VDwvJO)
+// //////////////////////////////////////////////////////////////////////////////
+//
+// Create a 10×10 grid with two 3×3 clusters at opposite corners and connected it.
 func ExampleGridGraph_ExpandIsland() {
-	grid := [][]int{
-		{0, 1, 1, 0, 2},
-		{1, 1, 0, 2, 2},
-		{3, 0, 2, 2, 0},
+	n := 10
+	grid := make([][]int, n)
+	for i := range grid {
+		grid[i] = make([]int, n)
 	}
-	gg, _ := gridgraph.From2D(grid, gridgraph.Conn4)
-
-	_ = gg.ConnectedComponents()
-	// Connect comp 0 → comp 1:
-	path, cost, _ := gg.ExpandIsland(0, 1)
-
-	fmt.Printf("Convert %d water cells along path:\n", cost)
-	for _, idx := range path {
-		x, y := gg.Coordinate(idx)
-		fmt.Printf("(%d,%d) ", x, y)
+	// Top-left cluster: value=1; bottom-right: value=2
+	for y := 0; y < 3; y++ {
+		for x := 0; x < 3; x++ {
+			grid[y][x] = 1
+			grid[n-1-y][n-1-x] = 2
+		}
 	}
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn4
+	gg, _ := gridgraph.NewGridGraph(grid, opts)
+
+	comps := gg.ConnectedComponents()
+	src := comps[1][0]
+	dst := comps[2][0]
+
+	path, cost, _ := gg.ExpandIsland(src, dst)
+	fmt.Printf("Converted %d water cells. Path length: %d\n", cost, len(path))
+
 	// Output:
-	// Convert 2 water cells along path:
-	// (1,1) (1,2) (2,2) (2,1) (3,1)
+	// Converted 9 water cells. Path length: 11
 }

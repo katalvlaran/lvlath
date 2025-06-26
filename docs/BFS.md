@@ -21,14 +21,14 @@
 Shortest‐path distance in an unweighted graph is the minimum number of edges between two vertices:
 
 ![\displaystyle \mathrm{dist}(s,v)=\min_{\text{paths }s\to v}\sum_{e\in\text{path}}1](https://latex.codecogs.com/svg.image?\displaystyle%20\mathrm{dist}(s,v)%3D\min_{\text{paths}%20s\to%20v}\sum_{e\in\text{path}}1)
-
+$$ mathrm{dist}(s,v)=\min_{\text{paths }s\to v}\sum_{e\in\text{path}}1 $$
 Complexity:
-- **Time:** ![\mathcal{O}(V+E)](https://latex.codecogs.com/svg.image?\mathcal{O}(V+E))
-- **Memory:** ![\mathcal{O}(V)](https://latex.codecogs.com/svg.image?\mathcal{O}(V))
+- **Time:** ![\mathcal{O}(V+E)](https://latex.codecogs.com/svg.image?\mathcal{O}(V+E)) $${O}(V+E)$$
+- **Memory:** ![\mathcal{O}(V)](https://latex.codecogs.com/svg.image?\mathcal{O}(V)) $${O}(V)$$
 
 ## 3. High-Level Pseudocode
 
-```text
+~~~text
 # Initialize
 Q ← empty queue                     // O(1)
 for each u in V do                  // O(|V|)
@@ -54,7 +54,7 @@ while Q not empty do                // up to |V| iterations
 end while
 
 return (Order = dequeue sequence, Depth, Parent)
-```
+~~~
 <!-- Comments: Each step is constant time; outer loop runs |V| times, inner total over all vertices examines each edge once. -->
 
 ## 4. Directed, Undirected & Mixed Modes
@@ -71,13 +71,13 @@ Implementation detail: When iterating neighbors, determine the "true neighbor" b
 
 ## 5. Go API & Functional Options
 
-```go
+~~~go
 func BFS(
   g *core.Graph,
   startID string,
   opts ...Option,
 ) (*BFSResult, error)
-```
+~~~
 
 **Error Cases**:
 - `ErrGraphNil` if `g == nil`.
@@ -102,7 +102,7 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
 
 ## 7. Code Example
 
-```go
+~~~go
   // Build a simple diamond graph
   //    A
   //   / \
@@ -137,18 +137,18 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
   // Visited E@3
   // Visited F@3
   // Order: [A B C D E F]
-```
+~~~
 
 [![Playground - BFS_SimpleDiamond](https://img.shields.io/badge/Go_Playground-BFS_SimpleDiamond-blue?logo=go)](https://go.dev/play/p/t2lxkt-unci)
 
 ## 8. Pitfalls & Best Practices
 
-| Pitfall                                      | Recommendation                                                                          |
-|-----------------------------------------------|-----------------------------------------------------------------------------------------|
-| Calling `VerticesMap()` inside a hook         | Use the local `visited` map for O(1) checks; avoid O(V) scans in hooks (preloaded by BFS). |
-| Omitting nil-graph or missing start checks    | Always handle `ErrGraphNil` and `ErrStartVertexNotFound` before processing.              |
-| Unbounded exploration on deep or infinite graphs | Use `WithMaxDepth(n)` or `WithFilterNeighbor` to constrain memory/time.                  |
-| Ignoring context cancellation                 | Combine `WithContext` and respect `Canceled`/`DeadlineExceeded` to abort promptly.      |
+| Pitfall                                          | Recommendation                                                                             |
+|--------------------------------------------------|--------------------------------------------------------------------------------------------|
+| Calling `VerticesMap()` inside a hook            | Use the local `visited` map for O(1) checks; avoid O(V) scans in hooks (preloaded by BFS). |
+| Omitting nil-graph or missing start checks       | Always handle `ErrGraphNil` and `ErrStartVertexNotFound` before processing.                |
+| Unbounded exploration on deep or infinite graphs | Use `WithMaxDepth(n)` or `WithFilterNeighbor` to constrain memory/time.                    |
+| Ignoring context cancellation                    | Combine `WithContext` and respect `Canceled`/`DeadlineExceeded` to abort promptly.         |
 
 ---
 

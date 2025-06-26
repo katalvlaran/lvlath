@@ -1,7 +1,5 @@
 # Depth‑First Search (DFS) Tutorial
 
-# Depth‑First Search (DFS) Tutorial
-
 This document is a comprehensive guide to Depth‑First Search (DFS) on a `core.Graph`, covering algorithmic details, complexity analysis, and practical Go code examples using the `lvlath/dfs` package. It also includes cycle detection and topological sort implementations, tailored for directed graphs (and undirected where noted).
 
 ---

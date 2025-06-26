@@ -25,28 +25,23 @@ Dijkstra’s algorithm computes the minimum-cost paths from a single source vert
 ### 5.2. Mathematical Formulation
 Dijkstra maintains a set of **visited** nodes whose shortest distance from the source is finalized, and a **min‑heap** (priority queue) of frontier nodes keyed by their tentative distance.
 
-Let `G = (V, E)` be a graph with weight function
-![\Large w: E \to \mathbb{R}_{\ge0}](https://latex.codecogs.com/svg.image?\large&space;w:E\to\mathbb{R}_{\ge0}) . We maintain:
+Let `G = (V, E)` be a graph with weight function $$w: E \to \mathbb{R}_{\ge0}$$
 
 * A **distance** map
-  ![\Large d:_V_\to_\[0,_\infty\]](https://latex.codecogs.com/svg.image?\large&space;d:V\to[0,\infty])
+  $$d: V \to [0,\infty]$$
 
 
 * A **predecessor** map
-  ![\Large \pi: V \to V \cup \{\text{nil}\]](https://latex.codecogs.com/svg.image?\large&space;\pi:V\to&space;V\cup\{\text{nil}\})
+  $$\pi: V \to V \cup \{\mathrm{nil}\}$$
 
 
-1. **Initialization**: $$d[s] = 0, \quad d[v] = +\infty \quad \forall v \neq s, \quad \pi[v] = \mathrm{nil}$$
+1. **Initialization**: 
    
    $$d[s] = 0, \quad d[v] = +\infty \quad \forall v \neq s, \quad \pi[v] = \mathrm{nil}$$
 
-    ![\Large d\[s\] = 0, \quad d\[v\] = +\infty \quad \forall v \neq s, \quad \pi\[v\] = \text{nil}](https://latex.codecogs.com/svg.image?\large&space;d[s]=0,\quad&space;d[v]=&plus;\infty\quad\forall&space;v\neq&space;s,\quad\pi[v]=\text{nil})
+2. **Relaxation**: For each edge $$(u, v) \in E$$ , update:
 
-
-2. **Relaxation**: For each edge ![\Large (u, v) \in E](https://latex.codecogs.com/svg.image?\large&space;(u,v)\in&space;E) , update:
-
-
-   ![\Large \text{if}d\[u\]&plus;w(u,v)<d\[v\]\text{then}d\[v\]:=d\[u\]&plus;w(u,v),\;\pi\[v\]:=u](https://latex.codecogs.com/svg.image?\large&space;\text{if}d[u]&plus;w(u,v)<d[v]\text{then}d[v]:=d[u]&plus;w(u,v),\;\pi[v]:=u&space;)
+   $$\text{if } d[u] + w(u,v) < d[v] \text{ then } d[v] := d[u] + w(u,v),\; \pi[v] := u$$
 
 3. **Main Loop** (using a min‑priority queue):
 

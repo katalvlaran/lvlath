@@ -35,8 +35,13 @@ Use **matrices** when:
 An **adjacency matrix** `A` of a graph with `V` vertices is a `V*V` matrix where:
 
 ![\large A\_{ij}=\begin{cases}w\_{ij}&\text{if }(i,j)\in E\0&\text{otherwise}\end{cases}](https://latex.codecogs.com/svg.image?%5Clarge%20A_%7Bij%7D%3D%5Cbegin%7Bcases%7Dw_%7Bij%7D%26%5Ctext%7Bif%20%7D%28i%2Cj%29%5Cin%20E%5C%5C0%26%5Ctext%7Botherwise%7D%5Cend%7Bcases%7D)
-$$A\_{ij}=\begin{cases}w\_{ij}&\text{if }(i,j)\in E\0&\text{otherwise}\end{cases}$$
 
+$$
+A_{ij} = \begin{cases}
+w_{ij} & \text{if } (i,j) \in E \\
+0      & \text{otherwise}
+\end{cases}
+$$
 
 
 - **Directed vs. Undirected:** For undirected graphs, A is symmetric.
@@ -94,15 +99,17 @@ This directed, weighted graph captures messaging frequency among six users.
 
 ## 10.3 Incidence Matrix
 
-An **incidence matrix** `M` of a graph with `V` vertices and `E` edges is a `V*E` matrix where each column corresponds to an edge ![e_k=(u,v)](https://latex.codecogs.com/svg.image?e_k=(u,v))
+An **incidence matrix** `M` of a graph with `V` vertices and `E` edges is a `V*E` matrix where each column corresponds to an edge $$e_k=(u,v)$$ ![e_k=(u,v)](https://latex.codecogs.com/svg.image?e_k=(u,v))
 
 ![\Large M_{i,k}=\begin{cases}1&\text{if}(i=u)\text{or}(i=v),\\0&\text{otherwise.}\end{cases}](https://latex.codecogs.com/svg.image?%5Clarge%26space%3BM_%7Bi%2Ck%7D%3D%5Cbegin%7Bcases%7D1%26%5Ctext%7Bif%7D%28i%3Du%29%5Ctext%7Bor%7D%28i%3Dv%29%2C%5C%5C0%26%5Ctext%7Botherwise.%7D%5Cend%7Bcases%7D)
 $$
-M_{i,k}=\begin{cases}1&\text{if}(i=u)\text{or}(i=v),
-\\0&\text{otherwise.}\end{cases}
+M_{i,k} = \begin{cases}
+1 & \text{if } (i=u) \text{or} (i=v) \\
+0 & \text{otherwise}
+\end{cases}
 $$
 
-- **Directed**: ![! Large M_{u,k}=-1, M_{v,k}=+1](https://latex.codecogs.com/svg.image?$M_{u,k}=-1$,$M_{v,k}=&plus;1$) $$M_{u,k}=-1, M_{v,k}=+1$$
+- **Directed**: ![! Large $$M_{u,k}=-1, M_{v,k}=+1$$](https://latex.codecogs.com/svg.image?$M_{u,k}=-1$,$M_{v,k}=&plus;1$) $$M_{u,k}=-1, M_{v,k}=+1$$
 - **Undirected**: ![! Large M_{u,k}=M_{v,k}=1](https://latex.codecogs.com/svg.image?$M_{u,k}=M_{v,k}=1$) $$M_{u,k}=M_{v,k}=1$$
 - Other entries are 0.
 

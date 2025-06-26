@@ -49,11 +49,11 @@ We maintain three visitation states per vertex:
 | **TopologicalSort** | ![\Large O(V + E)](https://latex.codecogs.com/svg.image?\large&space;O(V&plus;E))                                                           | ![\Large O(V)](https://latex.codecogs.com/svg.image?\large&space;O(V))                                            |
 
 
-| Operation           | Time Complexity                        | Memory Complexity                     |
-|---------------------|----------------------------------------|---------------------------------------|
-| **DFS (traversal)** | $$O(V + E)$$                           | $$O(V)$$                              |
-| **DetectCycles**    |  $$O\bigl(V + E + C \times L^2\bigr)$$ | $$O\bigl(V + E + C \times L^2\bigr)$$ |
-| **TopologicalSort** |  $$O(V + E)$$                          | $$O(V)$$                              |
+| Operation           | Time Complexity                       | Memory Complexity                |
+|---------------------|---------------------------------------|----------------------------------|
+| **DFS (traversal)** | $$O(V + E)$$                          | $$O(V)$$                         |
+| **DetectCycles**    | $$O\bigl(V + E + C \times L^2\bigr)$$ | $$O\bigl(V + L_{\max})$$         |
+| **TopologicalSort** | $$O(V + E)$$                          | $$O(V)$$                         |
 
 - V = number of vertices, E = number of edges.
 - C = number of simple cycles, L = average cycle length.

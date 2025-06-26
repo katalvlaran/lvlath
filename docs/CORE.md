@@ -37,15 +37,26 @@
   **Let**
   * `V` be a finite set of vertices
   * ![\Large E\subseteq V\times V\times\{\text{edgeIDs}\}](https://latex.codecogs.com/svg.image?E\subseteq&space;V\times&space;V\times\{\text{edgeIDs}\}) be a finite set of edges, each carrying an integer weight ![\Large w_{uv}\in\mathbb{Z}](https://latex.codecogs.com/svg.image?w_{uv}\in\mathbb{Z}).
-  * $$E\subseteq V\times V\times\{\text{edgeIDs}\}$$ be a finite set of edges, each carrying an integer weight $$w_{uv}\in\mathbb{Z}$$.
+  * 
+    $$
+    E \subseteq V \times V \times \{\text{edgeIDs}\}
+    $$ 
+be a finite set of edges, each carrying an integer weight 
+    $$
+    w_{uv} \in \mathbb{Z}
+    $$.
 
   **Directed vs. Undirected**
   * Directed:
   ![\Large E\subseteq\{(u,v)\mid u\neq v\};\quad \text{adj}[u][v]\subseteq E,\quad\text{adj}[v][u]=\emptyset](https://latex.codecogs.com/svg.image?E\subseteq\{(u,v)\mid&space;u\neq&space;v\};\quad\text{adj}[u][v]\subseteq&space;E,\quad\text{adj}[v][u]=\emptyset) .
-  $$E\subseteq\{(u,v)\mid u\neq v\};\quad \text{adj}[u][v]\subseteq E,\quad\text{adj}[v][u]=\emptyset$$ .
+    $$
+    E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}[u][v] \subseteq E, \quad \mathrm{adj}[v][u] = \emptyset
+    $$ .
   * Undirected (mirrored storage):
   ![\Large E\subseteq\{(u,v)\mid u\neq v\};\quad \text{adj}[u][v]\subseteq E,\quad \text{adj}[v][u]\subseteq E](https://latex.codecogs.com/svg.image?E\subseteq\{(u,v)\mid&space;u\neq&space;v\};\quad\text{adj}[u][v]\subseteq&space;E,\quad\text{adj}[v][u]\subseteq&space;E) ,
-  $$E\subseteq\{(u,v)\mid u\neq v\};\quad \text{adj}[u][v]\subseteq E,\quad \text{adj}[v][u]\subseteq E$$ ,
+    $$
+    E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}[u][v] \subseteq E, \quad \mathrm{adj}[v][u] \subseteq E
+    $$ ,
   storing a single edgeID in both lists.
   * Loop `(v,v)` stored once in `adj[v][v]`.
 

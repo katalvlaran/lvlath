@@ -26,24 +26,22 @@ Dijkstra’s algorithm computes the minimum-cost paths from a single source vert
 Dijkstra maintains a set of **visited** nodes whose shortest distance from the source is finalized, and a **min‑heap** (priority queue) of frontier nodes keyed by their tentative distance.
 
 Let `G = (V, E)` be a graph with weight function
-![\Large w: E \to \mathbb{R}_{\ge0}](https://latex.codecogs.com/svg.image?\large&space;w:E\to\mathbb{R}_{\ge0}) . We maintain:
+[![\\ w: E \to \mathbb{R}_{\ge0}](https://latex.codecogs.com/svg.latex?%5C%5C%20w%3A%20E%20%5Cto%20%5Cmathbb%7BR%7D_%7B%5Cge0%7D)](#_) . We maintain:
 
 * A **distance** map
-  ![\Large d:_V_\to_\[0,_\infty\]](https://latex.codecogs.com/svg.image?\large&space;d:V\to[0,\infty])
+  [![\\ d: V \to \[0, \infty\]](https://latex.codecogs.com/svg.latex?%5C%5C%20d%3A%20V%20%5Cto%20%5C%5B0%2C%20%5Cinfty%5C%5D)](#_)
 
 
 * A **predecessor** map
-  ![\Large \pi: V \to V \cup \{\text{nil}\]](https://latex.codecogs.com/svg.image?\large&space;\pi:V\to&space;V\cup\{\text{nil}\})
+  [![\\ \pi: V \to V \cup \{\text{nil}\}](https://latex.codecogs.com/svg.latex?%5C%5C%20%5Cpi%3A%20V%20%5Cto%20V%20%5Ccup%20%5C%7B%5Ctext%7Bnil%7D%5C%7D)](#_)
 
 
 1. **Initialization**:
-   ![\Large d\[s\] = 0, \quad d\[v\] = +\infty \quad \forall v \neq s, \quad \pi\[v\] = \text{nil}](https://latex.codecogs.com/svg.image?\large&space;d[s]=0,\quad&space;d[v]=&plus;\infty\quad\forall&space;v\neq&space;s,\quad\pi[v]=\text{nil})
+   [![\\ d\[s\] = 0, \quad d\[v\] = +\infty \quad \forall v \neq s, \quad \pi\[v\] = \text{nil}](https://latex.codecogs.com/svg.latex?%5C%5C%20d%5C%5Bs%5C%5D%20%3D%200%2C%20%5Cquad%20d%5C%5Bv%5C%5D%20%3D%20%2B%5Cinfty%20%5Cquad%20%5Cforall%20v%20%5Cneq%20s%2C%20%5Cquad%20%5Cpi%5C%5Bv%5C%5D%20%3D%20%5Ctext%7Bnil%7D)](#_)
 
 
-2. **Relaxation**: For each edge ![\Large (u, v) \in E](https://latex.codecogs.com/svg.image?\large&space;(u,v)\in&space;E) , update:
-
-
-   ![\Large \text{if}d\[u\]&plus;w(u,v)<d\[v\]\text{then}d\[v\]:=d\[u\]&plus;w(u,v),\;\pi\[v\]:=u](https://latex.codecogs.com/svg.image?\large&space;\text{if}d[u]&plus;w(u,v)<d[v]\text{then}d[v]:=d[u]&plus;w(u,v),\;\pi[v]:=u&space;)
+2. **Relaxation**: For each edge [![\\ (u, v) \in E](https://latex.codecogs.com/svg.latex?%5C%5C%20(u%2C%20v)%20%5Cin%20E)](#_) , update:
+   [![\\ \text{if }d\[u\]&plus;w(u,v)<d\[v\]\text{then }d\[v\]:=d\[u\]&plus;w(u,v),\;\pi\[v\]:=u](https://latex.codecogs.com/svg.latex?%5C%5C%20%5Ctext%7Bif%20%7Dd%5C%5Bu%5C%5D%26plus%3Bw(u%2Cv)%3Cd%5C%5Bv%5C%5D%5Ctext%7Bthen%20%7Dd%5C%5Bv%5C%5D%3A%3Dd%5C%5Bu%5C%5D%26plus%3Bw(u%2Cv)%2C%5C%3B%5Cpi%5C%5Bv%5C%5D%3A%3Du)](#_)
 
 3. **Main Loop** (using a min‑priority queue):
 

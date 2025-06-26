@@ -36,24 +36,14 @@
 
   **Let**
   * `V` be a finite set of vertices
-  * 
-    $$
-    E \subseteq V \times V \times \{\text{edgeIDs}\}
-    $$ 
-be a finite set of edges, each carrying an integer weight 
-    $$
-    w_{uv} \in \mathbb{Z}
-    $$.
+  * [![\\ E \subseteq V \times V \times \{\text{edgeIDs}\}](https://latex.codecogs.com/svg.latex?%5C%5C%20E%20%5Csubseteq%20V%20%5Ctimes%20V%20%5Ctimes%20%5C%7B%5Ctext%7BedgeIDs%7D%5C%7D)](#_) be a finite set of edges, each carrying an integer weight
+    [![\\ w_{uv} \in \mathbb{Z}](https://latex.codecogs.com/svg.latex?%5C%5C%20w_%7Buv%7D%20%5Cin%20%5Cmathbb%7BZ%7D)](#_).
 
   **Directed vs. Undirected**
   * Directed:
-    $$
-    E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}\[u\]\[v\] \subseteq E, \quad \mathrm{adj}\[v\]\[u\] = \emptyset
-    $$ .
-  * Undirected (mirrored storage): 
-    $$
-    E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}\[u\]\[v\] \subseteq E, \quad \mathrm{adj}\[v\]\[u\] \subseteq E
-    $$ ,
+    [![\\ E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}\[u\]\[v\] \subseteq E, \quad \mathrm{adj}\[v\]\[u\] = \emptyset](https://latex.codecogs.com/svg.latex?%5C%5C%20E%20%5Csubseteq%20%5C%7B(u%2Cv)%5Cmid%20u%20%5Cneq%20v%5C%7D%3B%20%5Cquad%20%5Cmathrm%7Badj%7D%5C%5Bu%5C%5D%5C%5Bv%5C%5D%20%5Csubseteq%20E%2C%20%5Cquad%20%5Cmathrm%7Badj%7D%5C%5Bv%5C%5D%5C%5Bu%5C%5D%20%3D%20%5Cemptyset)](#_) .
+  * Undirected (mirrored storage):
+    [![\\ E \subseteq \{(u,v)\mid u \neq v\}; \quad \mathrm{adj}\[u\]\[v\] \subseteq E, \quad \mathrm{adj}\[v\]\[u\] \subseteq E](https://latex.codecogs.com/svg.latex?%5C%5C%20E%20%5Csubseteq%20%5C%7B(u%2Cv)%5Cmid%20u%20%5Cneq%20v%5C%7D%3B%20%5Cquad%20%5Cmathrm%7Badj%7D%5C%5Bu%5C%5D%5C%5Bv%5C%5D%20%5Csubseteq%20E%2C%20%5Cquad%20%5Cmathrm%7Badj%7D%5C%5Bv%5C%5D%5C%5Bu%5C%5D%20%5Csubseteq%20E)](#_) ,
   storing a single edgeID in both lists.
   * Loop `(v,v)` stored once in `adj[v][v]`.
 

@@ -18,14 +18,13 @@
     - **Foundation:** forms building block for flow algorithms, bipartiteness tests, social-network layers, etc.
 
 ## 2 Math Formulation
-Shortest‐path distance in an unweighted graph is the minimum number of edges between two vertices:
-$$
-\mathrm{dist}(s, v) = \min_{\text{paths } s\to v} \sum_{e\in\text{path}} 1
-$$
+Shortest‐path distance in an unweighted graph is the minimum number of edges between two vertices: $$ \mathrm{dist}(s, v) = \min_{\text{paths } s\to v} \sum_{e\in\text{path}} 1 $$
+
+[![\\ \mathrm{dist}(s, v) = \min_{\text{paths } s\to v} \sum_{e\in\text{path}} 1](https://latex.codecogs.com/svg.latex?%5C%5C%20%5Cmathrm%7Bdist%7D(s%2C%20v)%20%3D%20%5Cmin_%7B%5Ctext%7Bpaths%20%7D%20s%5Cto%20v%7D%20%5Csum_%7Be%5Cin%5Ctext%7Bpath%7D%7D%201)](#_)
 
 Complexity:
-- **Time:** $${O}(V + E)$$
-- **Memory:** $${O}(V)$$
+- **Time:** [![\\ {O}(V + E)](https://latex.codecogs.com/svg.latex?%5C%5C%20%7BO%7D(V%20%2B%20E))](#_)
+- **Memory:** [![\\ {O}(V)](https://latex.codecogs.com/svg.latex?%5C%5C%20%7BO%7D(V))](#_)
 
 ## 3. High-Level Pseudocode
 

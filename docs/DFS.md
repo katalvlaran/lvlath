@@ -42,13 +42,6 @@ We maintain three visitation states per vertex:
 
 ### 2.2 Complexity
 
-| Operation           | Time Complexity                                                                                                                             | Memory Complexity                                                                                                 |
-|---------------------|---------------------------------------------------------------------------------------------------------------------------------------------|-------------------------------------------------------------------------------------------------------------------|
-| **DFS (traversal)** | ![\Large O(V + E)](https://latex.codecogs.com/svg.image?\large&space;O(V&plus;E))                                                           | ![\Large O(V)](https://latex.codecogs.com/svg.image?\large&space;O(V))                                            |
-| **DetectCycles**    | ![\Large O\bigl(V + E + C \times L^2\bigr)](https://latex.codecogs.com/svg.image?\large&space;O\bigl(V&plus;E&plus;C\times&space;L^2\bigr)) | ![\Large O\bigl(V + E + C \times L^2\bigr)](https://latex.codecogs.com/svg.image?\large&space;O(V&plus;L_{\max})) |
-| **TopologicalSort** | ![\Large O(V + E)](https://latex.codecogs.com/svg.image?\large&space;O(V&plus;E))                                                           | ![\Large O(V)](https://latex.codecogs.com/svg.image?\large&space;O(V))                                            |
-
-
 | Operation           | Time Complexity                       | Memory Complexity                |
 |---------------------|---------------------------------------|----------------------------------|
 | **DFS (traversal)** | $$O(V + E)$$                          | $$O(V)$$                         |

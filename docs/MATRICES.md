@@ -34,7 +34,16 @@ Use **matrices** when:
 
 An **adjacency matrix** `A` of a graph with `V` vertices is a `V*V` matrix where:
 
+$$A_{ij} = \begin{Bmatrix} w_{ij} & \text{if }(i,j) \in E \\ 0 & \text{otherwise} \\ \end{Bmatrix}$$
+
 $$A_{ij} = \begin{cases} w_{ij} & \text{if }(i,j) \in E \\\\ 0 & \text{otherwise}\end{cases}$$
+
+$$
+A_{ij} = \begin{Bmatrix}
+w_{ij} & \text{if }(i,j) \in E \\
+0 & \text{otherwise} \\
+\end{Bmatrix}
+$$
 
 $$A_{ij} = \begin{Bmatrix}
     w_{ij} & \text{if }(i,j) \in E \\

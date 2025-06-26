@@ -28,7 +28,7 @@ Complexity:
 
 ## 3. High-Level Pseudocode
 
-~~~text
+```text
 # Initialize
 Q ← empty queue                     // O(1)
 for each u in V do                  // O(|V|)
@@ -54,7 +54,7 @@ while Q not empty do                // up to |V| iterations
 end while
 
 return (Order = dequeue sequence, Depth, Parent)
-~~~
+```
 <!-- Comments: Each step is constant time; outer loop runs |V| times, inner total over all vertices examines each edge once. -->
 
 ## 4. Directed, Undirected & Mixed Modes
@@ -71,13 +71,13 @@ Implementation detail: When iterating neighbors, determine the "true neighbor" b
 
 ## 5. Go API & Functional Options
 
-~~~go
+```go
 func BFS(
   g *core.Graph,
   startID string,
   opts ...Option,
 ) (*BFSResult, error)
-~~~
+```
 
 **Error Cases**:
 - `ErrGraphNil` if `g == nil`.
@@ -102,7 +102,7 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
 
 ## 7. Code Example
 
-~~~go
+```go
   // Build a simple diamond graph
   //    A
   //   / \
@@ -137,7 +137,7 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
   // Visited E@3
   // Visited F@3
   // Order: [A B C D E F]
-~~~
+```
 
 [![Playground - BFS_SimpleDiamond](https://img.shields.io/badge/Go_Playground-BFS_SimpleDiamond-blue?logo=go)](https://go.dev/play/p/t2lxkt-unci)
 

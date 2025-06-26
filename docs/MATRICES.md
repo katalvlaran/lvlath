@@ -33,7 +33,7 @@ Use **matrices** when:
 ## 10.2 Adjacency Matrix
 
 An **adjacency matrix** `A` of a graph with `V` vertices is a `V*V` matrix where:
-$$A_{ij} = \begin{cases} w_{ij} & \text{if }(i,j) \in E\\ 0 & \text{otherwise} \end{cases}$$
+$$A_{ij} = \begin{cases} w_{ij} & \text{if }(i,j) \in E \\\\ 0 & \text{otherwise}\end{cases}$$
 
 
 - **Directed vs. Undirected:** For undirected graphs, A is symmetric.
@@ -92,7 +92,10 @@ This directed, weighted graph captures messaging frequency among six users.
 ## 10.3 Incidence Matrix
 
 An **incidence matrix** `M` of a graph with `V` vertices and `E` edges is a `V*E` matrix where each column corresponds to an edge $$e_k=(u,v)$$
-$$M_{i,k} = \begin{cases} 1 & \text{if } (i=u) \text{or} (i=v) \\ 0 & \text{otherwise} \end{cases}$$
+$$M_{i,k} = \begin{cases}
+    1 & \text{if } (i=u) \text{or} (i=v) \\\\
+    0 & \text{otherwise} 
+\end{cases}$$
 
 - **Directed**: $$M_{u,k} = -1, M_{v,k} = +1$$
 - **Undirected**: $$M_{u,k} = M_{v,k} = 1$$

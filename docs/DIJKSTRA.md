@@ -309,10 +309,10 @@ This advanced example showcases how Dijkstra seamlessly handles tightly connecte
 ### 5.5. Best Practices & Pitfalls
 
 * **Validate Input Early:** Ensure your graph is non-nil, weighted, and source vertex exists before running Dijkstra to avoid wasted work and panics.
-* **Enforce Non-Negative Weights:** Dijkstra assumes \(w(u,v) \ge 0\). For graphs with negative edges use Bellman–Ford or Johnson's algorithm.
+* **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman–Ford or Johnson's algorithm.
 * **Skip Stale Queue Entries:** When popping from the min-heap, always compare the extracted distance with the current `dist[u]` and skip if they differ — this implements the lazy decrease-key safely.
 * **Check for Overflow:** For graphs with very large weights, verify that `dist[u] + w` does not overflow the integer type before assignment, or use a saturated arithmetic strategy.
-* **Tune Priority Queue Strategy:** Go’s `container/heap` is an implicit binary heap (O(log n) per op). For heavy workloads consider Fibonacci or pairing heaps for amortized O(1) decrease-key, or radix heaps for integer weights.
+* **Tune Priority Queue Strategy:** Go’s `container/heap` is an implicit binary heap `(O(log n)` per op). For heavy workloads consider Fibonacci or pairing heaps for amortized `O(1)` decrease-key, or radix heaps for integer weights.
 * **Limit Search Space:** Use `WithMaxDistance()` to bound exploration when you only need distances up to a threshold, reducing work on large graphs.
 * **Leverage Mixed-Edge Support:** With `WithMixedEdges()`, Dijkstra can handle directed and undirected edges in the same graph — ensure you use the direction filter in relaxation to avoid reverse traversal.
 * **Profile Real Data:** Benchmark on realistic graph models (e.g., road networks, social graphs) rather than grids to capture actual performance characteristics and hotspot edges.

@@ -28,7 +28,7 @@ import (
 const Distance = 900_000
 
 // main executes the full pipeline: build, analyze, run Dijkstra, and display results.
-func main() {
+func main1() {
 	// 1) Build the roadways Ukraine graph.
 	fullG := BuildUkraineRoads()
 	vCount, eCount := fullG.VertexCount(), fullG.EdgeCount()

@@ -1,8 +1,10 @@
-# Core Graph (What, Why, When)
+# 2. Core Graph (What, Why, When)
 
-## What & Why
+---
 
-**What**:
+## 2.1. What & Why
+
+### 2.1.1. What:
 
 **`core`** is the foundational, in-memory adjacency-list graph implementation powering all lvlath graph algorithms. It provides:
 
@@ -24,7 +26,7 @@
   * `Vertices()` and `Edges()` return sorted results (O(V·log V), O(E·log E))
   * `Neighbors(v)` returns sorted edge list (O(d·log d))
 
-**Why**:
+### 2.1.2. Why:
 
 * Acts as the universal foundation for all lvlath algorithms (BFS, Dijkstra, MST, Flow, etc.).
 * Minimal overhead: optimized for Go’s sync.RWMutex.
@@ -32,7 +34,7 @@
 
 ---
 
-## Math Formulation
+## 2.2. Math Formulation
 
   **Let**
   * `V` be a finite set of vertices
@@ -52,7 +54,7 @@
 
 ---
 
-## Constructor Patterns
+## 2.3. Constructor Patterns
 
 ```go
 // Undirected, unweighted, no loops, no multi-edges:
@@ -78,7 +80,7 @@ gMixed := core.NewMixedGraph(
 
 ---
 
-## Core API & Complexity
+## 2.4. Core API & Complexity
 
 | Method                      | Description                                         | Complexity  |
 | --------------------------- | --------------------------------------------------- | ----------- |
@@ -98,7 +100,7 @@ gMixed := core.NewMixedGraph(
 
 ---
 
-## Pseudocode
+## 2.5. Pseudocode
 
 ```text
 function AddEdge(G, u, v, w):
@@ -120,7 +122,7 @@ function AddEdge(G, u, v, w):
 
 ---
 
-## ASCII Diagram
+## 2.6. ASCII Diagram
 
 **Undirected edge** (mirror stored once per direction):
 ```
@@ -153,7 +155,7 @@ function AddEdge(G, u, v, w):
 
 ---
 
-## Go Example
+## 2.7. Go Example
 
 ```go
 package main
@@ -187,7 +189,7 @@ func main() {
 ---
 
 
-## Pitfalls & Best Practices
+## 2.8. Pitfalls & Best Practices
 
 * **ErrBadWeight**: check `g.Weighted()` before calling `AddEdge(..., weight)` on unweighted graphs.
 * **Self-loops**: in undirected mode, loops appear **only once** in `Neighbors()` and `Edges()` (no mirror).

@@ -3,9 +3,11 @@
   covering theory, implementation details, Go API usage, and best practices.
 -->
 
-# BFS (Breadth-First Search)
+# 3. BFS (Breadth-First Search)
 
-## 1 What & Why
+---
+
+## 3.1. What & Why
 - **What:**  
   Breadth-First Search (BFS) explores an unweighted graph level by level from a given start vertex, producing:
     - **Order** of visitation (by non-decreasing distance)
@@ -17,7 +19,7 @@
     - **Layered traversal:** useful for connectivity checks, level-order processing
     - **Foundation:** forms building block for flow algorithms, bipartiteness tests, social-network layers, etc.
 
-## 2 Math Formulation
+## 3.2. Math Formulation
 Shortest‐path distance in an unweighted graph is the minimum number of edges between two vertices: 
 
 $$\mathrm{dist}(s, v) = \min_{\text{paths } s \to v} \sum_{e \in \text{path}} 1$$
@@ -26,7 +28,7 @@ Complexity:
 - **Time:**  $${O}(V + E)$$
 - **Memory:**  $${O}(V)$$
 
-## 3. High-Level Pseudocode
+## 3.3. High-Level Pseudocode
 
 ```text
 # Initialize
@@ -57,7 +59,7 @@ return (Order = dequeue sequence, Depth, Parent)
 ```
 <!-- Comments: Each step is constant time; outer loop runs |V| times, inner total over all vertices examines each edge once. -->
 
-## 4. Directed, Undirected & Mixed Modes
+## 3.4. Directed, Undirected & Mixed Modes
 
 - **Undirected Graphs**: Each edge is traversed both ways. BFS sees each undirected neighbor once.
 - **Directed Graphs**: Only follow edges in their forward direction (`From → To`).
@@ -69,7 +71,7 @@ Implementation detail: When iterating neighbors, determine the "true neighbor" b
 
 
 
-## 5. Go API & Functional Options
+## 3.5. Go API & Functional Options
 
 ```go
 func BFS(
@@ -96,11 +98,11 @@ func BFS(
 - `WithFilterNeighbor(fn(curr, nbr string) bool)` — Skip edges for which `fn` returns `false` (prune traversal dynamically).
 - `WithOnEnqueue(fn(id, depth))`, `WithOnDequeue(fn(id, depth))`, `WithOnVisit(fn(id, depth) error)` — Hooks at each stage.
 
-## 6. Determinism & Reproducibility
+## 3.6. Determinism & Reproducibility
 
 Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues in that order, the visit sequence is _fully reproducible_ across runs on the same graph, barring context cancellation.
 
-## 7. Code Example
+## 3.7. Code Example
 
 ```go
   // Build a simple diamond graph
@@ -109,7 +111,8 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
   //  B   C
   //   \ /
   //    D
-  
+  //   / \
+  //  E   F
   g := core.NewGraph()
   g.AddEdge("A", "B", 0)
   g.AddEdge("A", "C", 0)
@@ -141,7 +144,7 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
 
 [![Playground - BFS_SimpleDiamond](https://img.shields.io/badge/Go_Playground-BFS_SimpleDiamond-blue?logo=go)](https://go.dev/play/p/t2lxkt-unci)
 
-## 8. Pitfalls & Best Practices
+## 3.8. Pitfalls & Best Practices
 
 | Pitfall                                          | Recommendation                                                                             |
 |--------------------------------------------------|--------------------------------------------------------------------------------------------|
@@ -152,4 +155,4 @@ Because `core.Neighbors(u)` returns edges sorted by `Edge.ID`, and BFS enqueues 
 
 ---
 
-<!-- End of BFS.md: this serves as a single source of truth for theory, implementation, and usage. -->
+> Next: [4. Depth‑First Search (DFS) Tutorial →](DFS.md)

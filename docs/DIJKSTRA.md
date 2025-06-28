@@ -1,6 +1,8 @@
-## 5. Shortest Paths: Dijkstra
+# 5. Shortest Paths: Dijkstra
 
-### 5.1. What, Why, When (and where)
+---
+
+## 5.1. What, Why, When (and where)
 
 **What?**  
 Dijkstra’s algorithm computes the minimum-cost paths from a single source vertex to all other vertices in a weighted graph with non-negative edge weights. It forms the backbone of routing, navigation, and resource-allocation systems.
@@ -22,7 +24,7 @@ Dijkstra’s algorithm computes the minimum-cost paths from a single source vert
 > **Goal:** Compute the minimum‐cost path from a single source to every other vertex in a weighted graph with non‑negative edge weights.
 ---
 
-### 5.2. Mathematical Formulation
+## 5.2. Mathematical Formulation
 Dijkstra maintains a set of **visited** nodes whose shortest distance from the source is finalized, and a **min‑heap** (priority queue) of frontier nodes keyed by their tentative distance.
 
 Let `G = (V, E)` be a graph with weight function $$w: E \to \mathbb{R}_{\ge0}$$
@@ -54,7 +56,7 @@ Let `G = (V, E)` be a graph with weight function $$w: E \to \mathbb{R}_{\ge0}$$
 
 ---
 
-### 5.3. Step-by-Step Pseudocode
+## 5.3. Step-by-Step Pseudocode
 
 ```plaintext
 function Dijkstra(Graph G, source s):
@@ -99,7 +101,7 @@ function Dijkstra(Graph G, source s):
 ```
 
 *Complexity:* O((V + E) log V) time, O(V + E) space.
-### 5.4. Examples
+## 5.4. Examples
 ### 5.4.1 Medium Example: 4‑Node Graph Walkthrough
 
 This example demonstrates Dijkstra’s algorithm on a small undirected graph of four vertices. We trace each step, show the evolving priority queue, and reconstruct the shortest path.
@@ -306,7 +308,7 @@ This advanced example showcases how Dijkstra seamlessly handles tightly connecte
 
 ---
 
-### 5.5. Best Practices & Pitfalls
+## 5.5. Best Practices & Pitfalls
 
 * **Validate Input Early:** Ensure your graph is non-nil, weighted, and source vertex exists before running Dijkstra to avoid wasted work and panics.
 * **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman–Ford or Johnson's algorithm.

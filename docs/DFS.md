@@ -1,10 +1,10 @@
-# Depth‑First Search (DFS) Tutorial
+# 4. Depth‑First Search (DFS) Tutorial
 
 This document is a comprehensive guide to Depth‑First Search (DFS) on a `core.Graph`, covering algorithmic details, complexity analysis, and practical Go code examples using the `lvlath/dfs` package. It also includes cycle detection and topological sort implementations, tailored for directed graphs (and undirected where noted).
 
 ---
 
-## 1. Introduction
+## 4.1. Introduction
 
 Depth‑First Search (DFS) explores as far as possible along each branch before backtracking. It is a cornerstone of graph algorithms, powering:
 
@@ -23,9 +23,9 @@ Supported Go version: **1.21+**.
 
 ---
 
-## 2. Algorithmic Concepts
+## 4.2. Algorithmic Concepts
 
-### 2.1 Vertex Coloring & States
+### 4.2.1. Vertex Coloring & States
 
 We maintain three visitation states per vertex:
 
@@ -38,7 +38,7 @@ We maintain three visitation states per vertex:
 - A **back‑edge** Gray→Gray indicates a cycle.
 - Post‑order (when marking Black) generates finish ordering used for topological sort.
 
-### 2.2 Complexity
+### 4.2.2. Complexity
 
 | Operation           | Time Complexity                       | Memory Complexity                |
 |---------------------|---------------------------------------|----------------------------------|
@@ -52,7 +52,7 @@ We maintain three visitation states per vertex:
 
 ---
 
-## 3. DFS Pseudocode
+## 4.3. DFS Pseudocode
 
 ```text
 procedure DFS(u, depth):
@@ -71,8 +71,7 @@ procedure DFS(u, depth):
 
 ---
 
-## 4. Go Implementation: DFS
-
+## 4.4. Go Implementation: DFS
 
 ```go
 package main
@@ -136,7 +135,7 @@ func main() {
 
 ---
 
-## 5. Cycle Detection (`DetectCycles`)
+## 4.5. Cycle Detection (`DetectCycles`)
 
 Detects all **simple cycles** in a (directed or undirected) graph by:
 
@@ -200,7 +199,7 @@ func main() {
 
 ---
 
-## 6. Topological Sort (`TopologicalSort`)
+## 4.6. Topological Sort (`TopologicalSort`)
 
 Performs DFS-based topological sorting, reversing post‑order of a directed acyclic graph:
 
@@ -297,7 +296,7 @@ func main() {
 
 ---
 
-## 7. Practical Tips & Pitfalls
+## 4.7. Practical Tips & Pitfalls
 
 - **Stack depth**: For very deep or skewed graphs, consider iterative DFS or increase Go stack limits.
 - **Hooks overhead**: Keep `OnVisit`/`OnExit` callbacks lightweight to avoid performance regressions.
@@ -307,9 +306,4 @@ func main() {
 
 ---
 
-## 8. Further Reading
-
-- [Shortest Paths (Dijkstra)](DIJKSTRA.md)
-
-
-*End of DFS Tutorial*
+> Next: [5. Shortest Paths: Dijkstra →](DIJKSTRA.md)

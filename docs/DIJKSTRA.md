@@ -311,7 +311,7 @@ This advanced example showcases how Dijkstra seamlessly handles tightly connecte
 ## 5.5. Best Practices & Pitfalls
 
 * **Validate Input Early:** Ensure your graph is non-nil, weighted, and source vertex exists before running Dijkstra to avoid wasted work and panics.
-* **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman–Ford or Johnson's algorithm.
+* **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman-Ford or Johnson's algorithm.
 * **Skip Stale Queue Entries:** When popping from the min-heap, always compare the extracted distance with the current `dist[u]` and skip if they differ — this implements the lazy decrease-key safely.
 * **Check for Overflow:** For graphs with very large weights, verify that `dist[u] + w` does not overflow the integer type before assignment, or use a saturated arithmetic strategy.
 * **Tune Priority Queue Strategy:** Go’s `container/heap` is an implicit binary heap `(O(log n)` per op). For heavy workloads consider Fibonacci or pairing heaps for amortized `O(1)` decrease-key, or radix heaps for integer weights.
@@ -322,5 +322,4 @@ This advanced example showcases how Dijkstra seamlessly handles tightly connecte
 
 
 ---
-
-Next: [6. Minimum Spanning Trees: Prim & Kruskal →](PRIM_%26_KRUSKAL.md)
+> Next: [6. Minimum Spanning Trees: Prim & Kruskal →](PRIM_%26_KRUSKAL.md)

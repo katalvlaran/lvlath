@@ -1,25 +1,24 @@
-// Package dtw defines options and sentinel errors for Dynamic Time Warping.
+// Package dtw defines configuration options and sentinel errors
+// for the Dynamic Time Warping algorithm.
 package dtw
 
-import "errors"
+import "errors" // we need sentinel error creation
 
-// MemoryMode controls how DTW stores its DP matrix.
+// MemoryMode controls how much of the DP matrix DTW stores.
 //
-//   - None       — no matrix stored; only compute and return distance. Memory: O(1).
-//   - TwoRows    — keep two rows (current and previous); compute distance only. Memory: O(min(N, M)).
-//   - FullMatrix — store entire (n+1)x(m+1) matrix; supports path recovery. Memory: O(N·M).
-//
-// Use FullMatrix when you need to retrieve the optimal warping path.
+//   - NoMemory   — constant O(1) memory, compute distance only.
+//   - TwoRows    — O(min(N,M)) memory, keep two rows, distance only.
+//   - FullMatrix — O(N*M) memory, store entire matrix, supports backtracking.
 type MemoryMode int
 
 const (
-	// None mode: minimal overhead, no path, constant memory.
-	None MemoryMode = iota
+	// NoMemory: minimal overhead, no path recovery, constant memory.
+	NoMemory MemoryMode = iota
 
-	// TwoRows mode: rolling array of two rows, no path recovery.
+	// TwoRows: rolling two-row storage, no path recovery.
 	TwoRows
 
-	// FullMatrix mode: full DP matrix, supports backtracking for path.
+	// FullMatrix: full DP matrix storage, enables optimal path recovery.
 	FullMatrix
 )
 
@@ -46,7 +45,7 @@ var (
 //	SlopePenalty — penalty cost for insertion/deletion steps; controls stretch bias.
 //	ReturnPath   — if true, DTW backtracks and returns the optimal warping path.
 //	                Requires MemoryMode=FullMatrix.
-//	MemoryMode   — choose None, TwoRows, or FullMatrix for DP storage.
+//	MemoryMode   — choose NoMemory, TwoRows, or FullMatrix for DP storage.
 type Options struct {
 	Window       int
 	SlopePenalty float64
@@ -54,12 +53,12 @@ type Options struct {
 	MemoryMode   MemoryMode
 }
 
-// DefaultOptions returns an Options struct with sensible defaults:
+// DefaultOptions returns an Options struct pre-populated with safe defaults.
 //
-//	Window:       -1 (no window constraint)
-//	SlopePenalty: 0.0
-//	ReturnPath:   false
-//	MemoryMode:   TwoRows
+//	Window:       -1       // no window constraint
+//	SlopePenalty: 0.0      // free insertions/deletions
+//	ReturnPath:   false    // only distance, no path
+//	MemoryMode:   TwoRows  // minimal extra memory
 func DefaultOptions() Options {
 	return Options{
 		Window:       -1,
@@ -67,4 +66,23 @@ func DefaultOptions() Options {
 		ReturnPath:   false,
 		MemoryMode:   TwoRows,
 	}
+}
+
+// Validate checks that Options fields hold a valid combination.
+// It returns ErrBadInput if Window < -1 or SlopePenalty < 0,
+// and ErrPathNeedsMatrix if ReturnPath=true but MemoryMode!=FullMatrix.
+func (o *Options) Validate() error {
+	// Window must be -1 (disabled) or ≥ 0
+	if o.Window < -1 {
+		return ErrBadInput
+	}
+	// Penalty must be non-negative
+	if o.SlopePenalty < 0 {
+		return ErrBadInput
+	}
+	// If a path is requested, we need full-matrix storage
+	if o.ReturnPath && o.MemoryMode != FullMatrix {
+		return ErrPathNeedsMatrix
+	}
+	return nil
 }

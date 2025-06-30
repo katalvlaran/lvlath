@@ -63,7 +63,7 @@ which yields a **residual graph** $$\(G_f\)$$ whose edges represent remaining fo
 ## 7.3. Algorithms Overview
 
 ---
-### 7.3.1. Ford–Fulkerson (DFS)
+### 7.3.1. Ford-Fulkerson (DFS)
 
 #### Core Idea
 Use a **depth-first search (DFS)** to find **any** path from source `(s)` to sink `(t)` in the **residual graph** $$(G_f)$$ that has **positive residual capacity** on every edge. Once a path is found, **augment** (push) the maximum possible flow (the **bottleneck**) along that path, update the residual capacities, and repeat until no augmenting path remains.
@@ -78,7 +78,7 @@ Use a **depth-first search (DFS)** to find **any** path from source `(s)` to sin
 #### Improvements & Advantages
 - Ideal for **small** or **integral** networks where total flow `(F)` is modest.
 - Requires only **O(V+E)** extra memory for DFS stack and residual map.
-- Serves as a foundation for more advanced algorithms (e.g., `Dinic`, `Push–Relabel`).
+- Serves as a foundation for more advanced algorithms (e.g., `Dinic`, `Push-Relabel`).
 
 ---
 
@@ -211,7 +211,7 @@ func main() {
 
 [![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_FordFulkerson-blue?logo=go)](https://go.dev/play/p/k-qe-ntQ7VO)
 
-### 7.3.2. Edmonds–Karp (Breadth‑First Search)
+### 7.3.2. Edmonds-Karp (Breadth‑First Search)
 
 #### Core Idea
 Always choose the shortest (fewest‑edge) augmenting path from source `S` to sink `T` by performing a BFS on the **residual network**.  This strategy bounds the number of augmentations and guarantees a worst‑case **polynomial** time complexity.
@@ -220,7 +220,7 @@ Always choose the shortest (fewest‑edge) augmenting path from source `S` to si
 
 - **Shortest‑path selection**: `BFS` ensures each augmenting path increases the distance (in edges) between  `S` and `T` by at least `1` before being reused.
 - **Polynomial bound**: Guarantees `O(V · E²)` runtime on integer capacities versus `O(E · F)` for naive `DFS`.
-- **Deterministic performance**: More predictable than Ford–Fulkerson, especially on adversarial networks.
+- **Deterministic performance**: More predictable than Ford-Fulkerson, especially on adversarial networks.
 - **Simple to implement**: Leverages familiar `BFS`, minimal extra data structures.
 
 #### Complexity
@@ -340,14 +340,14 @@ func main() {
 
 [![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_EdmondsKarp-blue?logo=go)](https://go.dev/play/p/EZsJzI4bXHt)
 
-*The Edmonds–Karp method above illustrates how prioritizing shortest augmenting paths yields stable, provably bounded performance, crucial for networks with adversarial or high‐capacity configurations.*
+*The Edmonds-Karp method above illustrates how prioritizing shortest augmenting paths yields stable, provably bounded performance, crucial for networks with adversarial or high‐capacity configurations.*
 
 ---
 
 ### 7.3.3. Dinic (Level Graph + Blocking Flow)
 
 #### Core Idea
-Dinic’s algorithm accelerates the classic augmenting‐path approach by layering the network into a _level graph_ and then finding _blocking flows_ that saturate all shortest paths in one `BFS`–`DFS` round. This dramatically reduces the number of augmentations compared to naive `DFS` or `BFS` alone.
+Dinic’s algorithm accelerates the classic augmenting‐path approach by layering the network into a _level graph_ and then finding _blocking flows_ that saturate all shortest paths in one `BFS`-`DFS` round. This dramatically reduces the number of augmentations compared to naive `DFS` or `BFS` alone.
 
 #### Key Features
 - **Level Graph Construction**: A `BFS` from the source partitions vertices by their distance (in edges) from `s`. Only edges **u→v** with remaining capacity and `level[v] = level[u] + 1` are retained.
@@ -358,7 +358,7 @@ Dinic’s algorithm accelerates the classic augmenting‐path approach by layeri
 ###Complexity & Advantages
 - **Time**:  $$O(E\sqrt V)$$ on unit‐capacity networks; in practice near $$O(E\sqrt V)$$ for many graphs.
 - **Memory**: $$O(V + E)$$ for residual capacities, level map, and iterators.
-- Compared to Edmonds–Karp $$O(VE^2)$$ , Dinic typically offers an order‐of‐magnitude speedup on dense or high‐capacity graphs.
+- Compared to Edmonds-Karp $$O(VE^2)$$ , Dinic typically offers an order‐of‐magnitude speedup on dense or high‐capacity graphs.
 
 #### Pseudocode
 ```text
@@ -498,13 +498,13 @@ func main() {
    Edges with `(c(u,v)=0)` may clutter your residual graph—either filter them out early or ensure your algorithm skips them to avoid needless work.
 
 3. **Choice of algorithm**
-    - **Ford–Fulkerson (DFS)**: simple but worst-case $$\(O(E\cdot F)\)$$ may be prohibitive if `(F)` is large.
-    - **Edmonds–Karp (BFS)**: polynomial $$\(O(V\,E^2)\)$$ guarantees, but can be slow on dense graphs.
+    - **Ford-Fulkerson (DFS)**: simple but worst-case $$\(O(E\cdot F)\)$$ may be prohibitive if `(F)` is large.
+    - **Edmonds-Karp (BFS)**: polynomial $$\(O(V\,E^2)\)$$ guarantees, but can be slow on dense graphs.
     - **Dinic**: $$\(O(E\sqrt V)\)$$ on unit networks and often very fast in practice; preferred for large or dense graphs.
 
 4. **Parallel edges and loops**
     - **Multi-edges**: `lvlath/core` by default **aggregates** parallel capacities—ensure this matches your model semantics.
-    - **Loops** $$\((v\to v)\)$$: typically ignored in augmentation since they cannot contribute to source–sink throughput.
+    - **Loops** $$\((v\to v)\)$$: typically ignored in augmentation since they cannot contribute to source-sink throughput.
 
 5. **Residual graph size**  
    Residual graph may have up to twice as many edges as the original (forward + backward). For huge networks, consider **streaming** or **out-of-core** techniques to limit memory.

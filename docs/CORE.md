@@ -199,3 +199,4 @@ func main() {
 * **High-throughput**: batch multiple mutations under a single lock or consider sharding for extremely large data.
 
 ---
+> Next: [3. BFS (Breadth-First Search) →](BFS.md)

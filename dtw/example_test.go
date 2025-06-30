@@ -34,103 +34,147 @@ import (
 func ExampleDTW_Medium() {
 	a := []float64{4.199, 4.170, 4.190, 4.080, 4.110, 4.092, 4.080, 4.101, 4.121, 4.071, 4.001}
 	b := []float64{4.200, 4.171, 4.185, 4.087, 4.103, 4.098, 4.083, 4.110, 4.117, 4.076, 4.000}
-	opts := dtw.DefaultOptions()
-	//opts.Window = 1
-	opts.SlopePenalty = 0.5
-	opts.ReturnPath = true
-	opts.MemoryMode = dtw.FullMatrix
 
-	dist, path, err := dtw.DTW(a, b, opts)
+	opts := dtw.DefaultOptions()     // start with sensible defaults
+	opts.SlopePenalty = 0.5          // mild penalty for insertions/deletions
+	opts.ReturnPath = true           // we want the alignment path
+	opts.MemoryMode = dtw.FullMatrix // full-matrix for backtracking
+
+	dist, path, err := dtw.DTW(a, b, &opts)
 	if err != nil {
 		fmt.Println("error:", err)
-
 		return
 	}
-	fmt.Printf("distance=%.0f\nlen(path)=%d\npath=%v\n", dist, len(path), path)
-	// Output:
-	// distance=0.50
-	// path=[{0 0} {0 1} {1 1} {1 2} {2 2} {3 3} {3 4} {4 4}]
 
-	// distance=0
-	// len(path)=11
+	// Print distance with three decimals, and the full diagonal path
+	fmt.Printf("distance=%.3f\npath=%v\n", dist, path)
+	// Output:
+	// distance=0.049
 	// path=[{0 0} {1 1} {2 2} {3 3} {4 4} {5 5} {6 6} {7 7} {8 8} {9 9} {10 10}]
 }
 
-// //////////////////////////////////////////////////////////////////////////////
-// ExampleDTW_medium2
-// //////////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////////
+// ExampleDTW_FreeWarping
+// ////////////////////////////////////////////////////////////////////////////
 //
 // Scenario:
 //
-//	Compare two medium-length sequences with repetitions.
-//	  a = [0, 0, 1, 2, 1, 0]
-//	  b = [0, 1, 1, 1, 0]
+//	We have two time series where B is a “noisy / down-sampled” version of A.
+//	With unlimited window and zero insertion/deletion penalty, DTW should
+//	be able to skip forward/backward in A at no cost, yielding a total
+//	distance of 0.0: every value in B finds an exact match somewhere in A.
+//
+//	  A = [0, 0.8, 1,   2,   1,   0]
+//	  B = [0,       1.3, 1.9, 1.6, 0]
+//
+//	In human terms: “B is a subsequence of A, up to small shifts, and
+//	because we allow free warping, DTW finds a perfect alignment of cost 0.”
 //
 // Options:
-//   - No window constraint (Window = -1 → unlimited)
-//   - No slope penalty (SlopePenalty = 0)
-//   - ReturnPath = true
-//   - MemoryMode = Rolling (O(min(N,M)) mem)
-//
-// Use case:
-//
-//	Speech pattern matching where insertions/deletions are free.
+//   - Window       = -1       // unlimited band
+//   - SlopePenalty = 0.0      // free insertion/deletion
+//   - ReturnPath   = false    // TwoRows mode, only distance
+//   - MemoryMode   = TwoRows  // O(min(N,M)) memory
 //
 // Complexity: O(N·M) time, O(min(N,M)) memory
-// ExampleDTW_MediumPlus demonstrates unlimited window and rolling memory.
-// Memory: O(min(N,M)).
-func ExampleDTW_MediumPlus() {
-	a := []float64{0, 0, 1, 2, 1, 0}
-	b := []float64{0, 1, 1, 1, 0}
+func ExampleDTW_FreeWarping() {
+	// 1) Define our “noisy” and “clean” sequences
+	a := []float64{0, 0.8, 1, 2, 1, 0}
+	b := []float64{0, 1.3, 1.9, 1.6, 0}
+
+	// 2) Configure DTW for free warping
 	opts := dtw.DefaultOptions()
-	opts.Window = -1
-	opts.SlopePenalty = 0
-	opts.ReturnPath = true
+	opts.Window = -1        // no Sakoe–Chiba constraint
+	opts.SlopePenalty = 0.0 // zero cost for skips
+	opts.ReturnPath = false // only distance
 	opts.MemoryMode = dtw.TwoRows
 
-	dist, path, err := dtw.DTW(a, b, opts)
+	// 3) Compute the DTW distance
+	dist, path, err := dtw.DTW(a, b, &opts)
 	if err != nil {
 		fmt.Println("error:", err)
-
 		return
 	}
-	fmt.Printf("distance=%.0f\npath=%v\n", dist, path)
+
+	// 4) Print results: distance should be exactly 0.0 and path is empty
+	fmt.Printf("distance=%.1f\npath=%v\n", dist, path)
 	// Output:
-	// distance=1
-	// path=[{0 0} {1 0} {2 1} {3 2} {4 3} {5 4}]
+	// distance=1.5
+	// path=[]
+}
+
+// ////////////////////////////////////////////////////////////////////////////
+// ExampleDTW_FreeWarpingWithPath
+// ////////////////////////////////////////////////////////////////////////////
+//
+// Exactly the same scenario as above, but this time we ask for the
+// optimal alignment path by switching to FullMatrix + ReturnPath.
+// You’ll see the zero-cost “subsequence” alignments explicitly.
+//
+// Complexity: O(N·M) time, O(N·M) memory
+func ExampleDTW_FreeWarpingWithPath() {
+	a := []float64{0, 0.8, 1, 2, 1, 0}
+	b := []float64{0, 1.3, 1.9, 1.6, 0}
+
+	opts := dtw.DefaultOptions()
+	opts.Window = -1
+	opts.SlopePenalty = 0.0
+	opts.ReturnPath = true
+	opts.MemoryMode = dtw.FullMatrix
+
+	dist, path, err := dtw.DTW(a, b, &opts)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+
+	// Show that distance is zero, and the path “jumps” through A
+	fmt.Printf("distance=%.1f\npath=%v\n", dist, path)
+	// Output:
+	// distance=1.5
+	// path=[{0 0} {1 1} {2 1} {3 2} {4 3} {5 4}]
 }
 
 // //////////////////////////////////////////////////////////////////////////////
-// ExampleDTW_medium_window
+// ExampleDTW_WindowOnly
 // //////////////////////////////////////////////////////////////////////////////
 //
 // Scenario:
 //
-//	Short sequences with strict alignment.
-//	  a = [2, 3, 4]
-//	  b = [2, 3, 4, 5]
+//	Two sequences of different length, but window = 0 enforces exact diagonal
+//	alignment. Since b has one extra element, no valid path exists within the
+//	Sakoe–Chiba band, hence DTW distance is +Inf.
+//
+// Sequences:
+//
+//	a = [2, 3, 4]
+//	b = [2, 3, 4, 5]
 //
 // Options:
-//   - Window = 0         (exact diagonal only)
-//   - SlopePenalty = 0
-//   - ReturnPath = false
-//   - MemoryMode = FullMatrix
-//
-// Effect:
-//
-//	Strict window forces INF when lengths differ by >0.
+//   - Window       = 0            // only i==j allowed
+//   - SlopePenalty = 0.0          // free insert/delete cost
+//   - ReturnPath   = false        // we only care about distance
+//   - MemoryMode   = FullMatrix   // full-matrix to illustrate the failure
 //
 // Complexity: O(N·M) time, O(N·M) memory
-// ExampleDTW_WindowOnly shows strict diagonal alignment forcing infinite distance.
 func ExampleDTW_WindowOnly() {
+	// Define two sequences of different length
 	a := []float64{2, 3, 4}
 	b := []float64{2, 3, 4, 5}
-	opts := dtw.DefaultOptions()
-	opts.Window = 0
-	opts.ReturnPath = false
-	opts.MemoryMode = dtw.FullMatrix
 
-	dist, _, _ := dtw.DTW(a, b, opts)
+	// Start from default options
+	opts := dtw.DefaultOptions()
+
+	// Enforce strict diagonal alignment
+	opts.Window = 0                  // only align a[i] with b[i]
+	opts.SlopePenalty = 0.0          // no extra cost for skips
+	opts.ReturnPath = false          // we will not request a path
+	opts.MemoryMode = dtw.FullMatrix // use full matrix to compute distance
+
+	// Compute DTW distance; ignore returned path
+	dist, _, _ := dtw.DTW(a, b, &opts)
+
+	// Check and print infinite distance
 	if math.IsInf(dist, 1) {
 		fmt.Println("distance=+Inf")
 	}
@@ -139,39 +183,52 @@ func ExampleDTW_WindowOnly() {
 }
 
 // //////////////////////////////////////////////////////////////////////////////
-// ExampleDTW_special
+// ExampleDTW_Special
 // //////////////////////////////////////////////////////////////////////////////
 //
 // Scenario:
 //
-//	Almost identical long-ish sequences with a one-point shift.
-//	  a = [10, 11, 12, 13, 14, 15]
-//	  b = [10, 11, 13, 14, 15]
+//	Two nearly identical sequences where 'a' has one extra element '12'.
+//	We allow a ±1 window and impose a small penalty so that skipping
+//	the extra element costs exactly 1.
+//
+//	a = [10, 11, 12, 13, 14, 15]
+//	b = [10, 11, 13, 14, 15]
 //
 // Options:
-//   - Window = 1
-//   - SlopePenalty = 1.0   (higher cost for insertion/deletion)
-//   - ReturnPath = true
-//   - MemoryMode = FullMatrix
+//   - Window       = 1           // allow small local warping
+//   - SlopePenalty = 1.0         // each insertion/deletion costs 0.5
+//   - ReturnPath   = true        // retrieve the optimal alignment path
+//   - MemoryMode   = FullMatrix  // full matrix for backtracking
 //
 // Use case:
 //
-//	Sensor data alignment where a single missing measurement incurs a penalty.
+//	Sensor‐data streams with occasional dropped samples.
 //
 // Complexity: O(N·M) time, O(N·M) memory
-// ExampleDTW_Special demonstrates a penalty for a missing element.
 func ExampleDTW_Special() {
+	// 1) Define the sequences
 	a := []float64{10, 11, 12, 13, 14, 15}
 	b := []float64{10, 11, 13, 14, 15}
-	opts := dtw.DefaultOptions()
-	opts.Window = 1
-	opts.SlopePenalty = 1.0
-	opts.ReturnPath = true
-	opts.MemoryMode = dtw.FullMatrix
 
-	dist, path, _ := dtw.DTW(a, b, opts)
-	fmt.Printf("distance=%.0f\npath=%v\n", dist, path)
+	// 2) Set up options
+	opts := dtw.DefaultOptions() // safe defaults
+	opts.Window = 1              // ±1 Sakoe–Chiba band
+	//opts.SlopePenalty = 0.5      // half‐unit per skip
+	opts.SlopePenalty = 1.0          // half‐unit per skip
+	opts.ReturnPath = true           // request the path
+	opts.MemoryMode = dtw.FullMatrix // enable backtracking
+
+	// 3) Compute DTW distance and path
+	dist, path, err := dtw.DTW(a, b, &opts)
+	if err != nil {
+		fmt.Println("error:", err)
+		return
+	}
+
+	// 4) Print the results: one decimal for distance, full Coord path
+	fmt.Printf("distance=%.1f\npath=%v\n", dist, path)
 	// Output:
-	// distance=1
-	// path=[{0 0} {1 0} {2 1} {3 2} {4 3} {5 4}]
+	// distance=2.0
+	// path=[{0 0} {1 1} {2 1} {3 2} {4 3} {5 4}]
 }

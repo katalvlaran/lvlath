@@ -8,50 +8,71 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
+// TestDTW_EmptyInput verifies that DTW returns ErrEmptyInput
+// when either input sequence is empty.
 func TestDTW_EmptyInput(t *testing.T) {
 	opts := dtw.DefaultOptions()
-	_, _, err := dtw.DTW([]float64{}, []float64{1, 2, 3}, opts)
+
+	// Empty first sequence
+	_, _, err := dtw.DTW([]float64{}, []float64{1, 2, 3}, &opts)
 	assert.ErrorIs(t, err, dtw.ErrEmptyInput, "empty first sequence should error")
 
-	_, _, err = dtw.DTW([]float64{1, 2, 3}, []float64{}, opts)
+	// Empty second sequence
+	_, _, err = dtw.DTW([]float64{1, 2, 3}, []float64{}, &opts)
 	assert.ErrorIs(t, err, dtw.ErrEmptyInput, "empty second sequence should error")
 }
 
+// TestDTW_BadWindowOption ensures that Window < -1 triggers ErrBadInput.
+func TestDTW_BadWindowOption(t *testing.T) {
+	opts := dtw.DefaultOptions()
+	opts.Window = -2
+
+	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
+	assert.ErrorIs(t, err, dtw.ErrBadInput, "Window < -1 must error ErrBadInput")
+}
+
+// TestDTW_PathNeedsMatrix ensures ReturnPath=true with non-FullMatrix mode errors.
 func TestDTW_PathNeedsMatrix(t *testing.T) {
 	opts := dtw.DefaultOptions()
 	opts.ReturnPath = true
 	opts.MemoryMode = dtw.TwoRows
 
-	_, _, err := dtw.DTW([]float64{1, 2}, []float64{1, 2}, opts)
-	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "ReturnPath without FullMatrix should error")
+	_, _, err := dtw.DTW([]float64{1, 2}, []float64{1, 2}, &opts)
+	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "ReturnPath without FullMatrix must error ErrPathNeedsMatrix")
 }
 
+// TestDTW_BasicDistance verifies that identical sequences have zero distance
+// and no path is returned by default.
 func TestDTW_BasicDistance(t *testing.T) {
 	a := []float64{0, 1, 2}
 	b := []float64{0, 1, 2}
 	opts := dtw.DefaultOptions()
-	dist, path, err := dtw.DTW(a, b, opts)
-	assert.NoError(t, err)
+
+	dist, path, err := dtw.DTW(a, b, &opts)
+	assert.NoError(t, err, "identical sequences should not error")
 	assert.Equal(t, 0.0, dist, "identical sequences must have zero distance")
 	assert.Nil(t, path, "default ReturnPath=false should yield nil path")
 }
 
+// TestDTW_SyntheticDistanceAndPath checks a perfect subsequence match
+// and that the path length equals n + (m-n).
 func TestDTW_SyntheticDistanceAndPath(t *testing.T) {
 	a := []float64{1, 2, 3}
 	b := []float64{1, 2, 2, 3}
 	opts := dtw.DefaultOptions()
 	opts.ReturnPath = true
 	opts.MemoryMode = dtw.FullMatrix
-	opts.SlopePenalty = 0.0
 
-	dist, path, err := dtw.DTW(a, b, opts)
-	assert.NoError(t, err)
+	dist, path, err := dtw.DTW(a, b, &opts)
+	assert.NoError(t, err, "should not error on perfect match")
 	assert.Equal(t, 0.0, dist, "perfect subsequence match yields zero cost")
-	assert.Len(t, path, 4, "path length should equal n + offset")
+	assert.Len(t, path, 4, "path length should be len(a)+(len(b)-len(a))")
 	assert.Equal(t, dtw.Coord{I: 0, J: 0}, path[0], "first path point")
 	assert.Equal(t, dtw.Coord{I: 2, J: 3}, path[len(path)-1], "last path point")
 }
 
+// TestDTW_WindowConstraint verifies that a strict window = 0
+// with a length mismatch yields +Inf distance.
 func TestDTW_WindowConstraint(t *testing.T) {
 	a := []float64{1, 2, 3}
 	b := []float64{1, 2, 3, 4}
@@ -59,102 +80,121 @@ func TestDTW_WindowConstraint(t *testing.T) {
 	opts.Window = 0
 	opts.MemoryMode = dtw.FullMatrix
 
-	dist, _, err := dtw.DTW(a, b, opts)
-	assert.NoError(t, err)
+	dist, _, err := dtw.DTW(a, b, &opts)
+	assert.NoError(t, err, "should not error with window constraint")
 	assert.True(t, math.IsInf(dist, 1), "window=0 with length mismatch should yield +Inf")
 }
 
+// TestDTW_SlopePenaltyAffectsDistance ensures that a positive slope penalty
+// increases the computed distance by exactly that penalty.
 func TestDTW_SlopePenaltyAffectsDistance(t *testing.T) {
 	a := []float64{1, 2, 3}
 	b := []float64{1, 1, 2, 3}
 
-	// Zero penalty
-	opts0 := dtw.DefaultOptions()
-	opts0.MemoryMode = dtw.FullMatrix
-	dist0, _, err := dtw.DTW(a, b, opts0)
+	// No penalty
+	opts := dtw.DefaultOptions()
+	opts.MemoryMode = dtw.FullMatrix
+	dist0, _, err := dtw.DTW(a, b, &opts)
 	assert.NoError(t, err)
 	assert.Equal(t, 0.0, dist0, "zero penalty allows perfect cost")
 
-	// Positive penalty
-	opts1 := dtw.DefaultOptions()
-	opts1.MemoryMode = dtw.FullMatrix
-	opts1.SlopePenalty = 1.0
-	dist1, _, err := dtw.DTW(a, b, opts1)
+	// Penalty = 1.0
+	opts.SlopePenalty = 1.0
+	dist1, _, err := dtw.DTW(a, b, &opts)
 	assert.NoError(t, err)
-	assert.Equal(t, 1.0, dist1, "penalty 1 adds cost per warp step")
+	assert.Equal(t, 1.0, dist1, "penalty=1.0 adds exactly one unit to distance")
 }
 
+// TestDTW_TwoRowsDistanceOnly confirms TwoRows mode matches FullMatrix distance
+// and does not return a path.
 func TestDTW_TwoRowsDistanceOnly(t *testing.T) {
 	a := []float64{0, 1, 2, 3}
 	b := []float64{0, 1, 1, 2, 3}
-	// FullMatrix for reference
-	reference, _, _ := dtw.DTW(a, b, dtw.DefaultOptions())
 
+	// Reference with FullMatrix
+	refOpts := dtw.DefaultOptions()
+	refOpts.MemoryMode = dtw.FullMatrix
+	refDist, _, _ := dtw.DTW(a, b, &refOpts)
+
+	// TwoRows mode
 	opts := dtw.DefaultOptions()
 	opts.MemoryMode = dtw.TwoRows
-	distance, path, err := dtw.DTW(a, b, opts)
+	dist, path, err := dtw.DTW(a, b, &opts)
 	assert.NoError(t, err)
-	assert.Equal(t, reference, distance, "TwoRows must match FullMatrix distance")
+	assert.Equal(t, refDist, dist, "TwoRows must match FullMatrix distance")
 	assert.Nil(t, path, "TwoRows should not return a path")
 }
 
-func TestDTW_NoneMode(t *testing.T) {
+// TestDTW_NoMemoryMode confirms NoMemory mode matches FullMatrix distance
+// and does not return a path.
+func TestDTW_NoMemoryMode(t *testing.T) {
 	a := []float64{5, 6, 7}
 	b := []float64{5, 7}
-	// Reference distance
-	reference, _, _ := dtw.DTW(a, b, dtw.DefaultOptions())
+
+	refOpts := dtw.DefaultOptions()
+	refOpts.MemoryMode = dtw.FullMatrix
+	refDist, _, _ := dtw.DTW(a, b, &refOpts)
 
 	opts := dtw.DefaultOptions()
-	opts.MemoryMode = dtw.None
-	distance, path, err := dtw.DTW(a, b, opts)
+	opts.MemoryMode = dtw.NoMemory
+	dist, path, err := dtw.DTW(a, b, &opts)
 	assert.NoError(t, err)
-	assert.Equal(t, reference, distance, "None mode must match FullMatrix distance")
-	assert.Nil(t, path, "None mode should not return a path")
+	assert.Equal(t, refDist, dist, "NoMemory must match FullMatrix distance")
+	assert.Nil(t, path, "NoMemory should not return a path")
 }
 
+// TestDTW_NegativeWindowUnlimited verifies Window=-1 disables constraint.
 func TestDTW_NegativeWindowUnlimited(t *testing.T) {
 	a := []float64{1, 2, 3, 4}
 	b := []float64{1, 2, 3}
 	opts := dtw.DefaultOptions()
-	opts.Window = -1 // unlimited
+	opts.Window = -1
 	opts.MemoryMode = dtw.FullMatrix
-	distance, _, err := dtw.DTW(a, b, opts)
+
+	dist, _, err := dtw.DTW(a, b, &opts)
 	assert.NoError(t, err)
-	assert.NotEqual(t, math.Inf(1), distance, "negative window should allow alignment")
+	assert.False(t, math.IsInf(dist, 1), "Window=-1 must allow alignment")
 }
 
+// TestDTW_BadInputCombination checks that contradictory options error out.
 func TestDTW_BadInputCombination(t *testing.T) {
 	opts := dtw.DefaultOptions()
 	opts.Window = 0
 	opts.MemoryMode = dtw.TwoRows
 	opts.ReturnPath = true
-	_, _, err := dtw.DTW([]float64{1}, []float64{1}, opts)
-	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "invalid options must error ErrBadInput or ErrPathNeedsMatrix")
+
+	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
+	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "invalid options must return ErrPathNeedsMatrix")
 }
 
+// BenchmarkDTW_Small measures DTW on 100×100 zero-based sequences.
 func BenchmarkDTW_Small(b *testing.B) {
-	a := make([]float64, 100)
-	bArr := make([]float64, 100)
-	opts := dtw.DefaultOptions()
+	const N = 100
+	a := make([]float64, N)
+	c := make([]float64, N)
 	for i := range a {
-		a[i], bArr[i] = float64(i), float64(i)
+		a[i], c[i] = float64(i), float64(i)
 	}
+	opts := dtw.DefaultOptions()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = dtw.DTW(a, bArr, opts)
+		dtw.DTW(a, c, &opts)
 	}
 }
 
+// BenchmarkDTW_Medium measures DTW on 500×500 zero-based sequences.
 func BenchmarkDTW_Medium(b *testing.B) {
-	N := 500
+	const N = 500
 	a := make([]float64, N)
-	bArr := make([]float64, N)
+	c := make([]float64, N)
 	for i := range a {
-		a[i], bArr[i] = float64(i), float64(i)
+		a[i], c[i] = float64(i), float64(i)
 	}
 	opts := dtw.DefaultOptions()
+
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		_, _, _ = dtw.DTW(a, bArr, opts)
+		dtw.DTW(a, c, &opts)
 	}
 }

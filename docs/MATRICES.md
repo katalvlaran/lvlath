@@ -1,16 +1,10 @@
 # 10. Matrices: Adjacency & Incidence
 
-Matrices provide a powerful algebraic and algorithmic perspective on graphs, enabling everything from constant‑time edge queries to spectral clustering and connectivity analysis. This guide covers:
-
-- **When & Why**: trade‑offs between adjacency lists and matrices
-- **Adjacency Matrix**: definition, complexity, examples
-- **Incidence Matrix**: definition, complexity, examples
-- **Go Usage**: building and converting matrices with `lvlath/matrix`
-- **Best Practices & Pitfalls**
-
 ---
 
-## 10.1 When & Why Use Matrices
+## 10.1. When & Why Use Matrices
+
+Matrices provide a powerful algebraic and algorithmic perspective on graphs, enabling everything from constant‑time edge queries to spectral clustering and connectivity analysis.
 
 **Adjacency List vs. Matrix**
 
@@ -24,13 +18,13 @@ Use **Adjacency Matrix** when dealing with dense graphs (E≈V²) or requiring c
 
 Use **matrices** when:
 
-1. **Dense graphs** (E ∼ V²), where O(V²) storage is acceptable.
+1. **Dense graphs** `(E ∼ V²)`, where `O(V²)` storage is acceptable.
 2. You require **constant‑time** edge existence or weight lookup.
 3. You perform **algebraic** or **spectral** operations (e.g., eigenvalues, clustering).
 
 ---
 
-## 10.2 Adjacency Matrix
+## 10.2. Adjacency Matrix
 
 An **adjacency matrix** `A` of a graph with `V` vertices is a `V*V` matrix where:
 
@@ -40,7 +34,7 @@ $$A_{ij} = \begin{Bmatrix} w_{ij} & \text{if }(i,j) \in E \\\ 0 & \text{otherwis
 - **Directed vs. Undirected:** For undirected graphs, A is symmetric.
 - **Weighted vs. Unweighted:** When unweighted, $$w_{ij}=1$$  for existing edges.
 
-### 10.2.1 Social Network Scenario + Example Graph
+### 10.2.1. Social Network Scenario + Example Graph
 
 ```text
   [User Network Example]
@@ -72,7 +66,7 @@ Edges:
 
 This directed, weighted graph captures messaging frequency among six users.
 
-### 10.2.2 Matrix Representation (6×6)
+### 10.2.2. Matrix Representation (6×6)
 
 |           | Alice  |  Bob  | Carol | Dave  |  Eva  | Fiona  |
 |-----------|:------:|:-----:|:-----:|:-----:|:-----:|:------:|
@@ -84,13 +78,13 @@ This directed, weighted graph captures messaging frequency among six users.
 | **Fiona** |   4    |   2   |   0   |   0   |   0   |   0    |
 
 **Complexities:**
-- Build: \(O(V+E)\) time, \(O(V^2)\) memory.
-- Edge lookup: \(O(1)\).
-- Iterate neighbors: \(O(V)\).
+- Build: $$\(O(V+E)\)$$ time, $$\(O(V^2)\)$$ memory.
+- Edge lookup: $$\(O(1)\)$$.
+- Iterate neighbors: $$\(O(V)\)$$.
 
 ---
 
-## 10.3 Incidence Matrix
+## 10.3. Incidence Matrix
 
 An **incidence matrix** `M` of a graph with `V` vertices and `E` edges is a `V*E` matrix where each column corresponds to an edge $$e_k=(u,v)$$
 
@@ -104,13 +98,13 @@ $$M_{i,k} = \begin{Bmatrix}
 - Other entries are 0.
 
 **Complexity:**
-- Build: O(V + E) time, O(V·E) memory
-- Lookup endpoints: O(1)
-- Algebraic ops: often O(V·E)
+- Build: `O(V + E)` time, `O(V·E)` memory
+- Lookup endpoints: `O(1)`
+- Algebraic ops: often `O(V·E)`
 
-### 10.3.1 Social Network Incidence (6×9)
+### 10.3.1. Social Network Incidence (6×9)
 
-Label edges 1–9 in the scenario above. The \(M\) matrix has 6 rows (users) and 9 columns (messages links). For example:
+Label edges 1-9 in the scenario above. The $$\(M\)$$ matrix has 6 rows (users) and 9 columns (messages links). For example:
 
 |         | e₁ | e₂ | e₃ | e₄ | e₅ | e₆ | e₇ | e₈ | e₉ |
 |---------|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|:--:|
@@ -127,7 +121,7 @@ Columns:
 
 ---
 
-## 10.4 Go Usage Example
+## 10.4. Go Usage Example
 
 Below is a condensed Go example using `lvlath/core` and `lvlath/matrix` to build both matrices and perform a simple lookup and spectral analysis.
 
@@ -218,7 +212,7 @@ func main() {
 
 ---
 
-## 10.5 Best Practices & Pitfalls
+## 10.5. Best Practices & Pitfalls
 
 - **Avoid In‑Place Mutation**: build on copies to preserve original data.
 - **Choose Correct Representation**: use matrices only when graph is sufficiently dense or when algebraic operations are required.

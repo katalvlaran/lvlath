@@ -105,7 +105,7 @@ To build intuition for both Prim’s and Kruskal’s algorithms, consider the fo
 This graph exhibits a mix of **sparse** and **dense** regions, several **alternative paths**, and potential **cycles**—ideal for showcasing:
 
 - **Prim’s behavior** when growing a tree from a chosen root (e.g. A), repeatedly pulling the cheapest frontier edge.
-- **Kruskal’s global selection**, sorting all edges and merging components via union–find.
+- **Kruskal’s global selection**, sorting all edges and merging components via union-find.
 
 Both algorithms must handle:
 
@@ -121,12 +121,12 @@ In the subsequent sections, we will trace through this graph step by step, obser
 
 **Core Idea**
 
-Kruskal’s method builds an MST by **globally** considering edges in ascending order of weight and merging components only when they lie in different sets. It relies on a Disjoint‑Set (Union–Find) structure to track connected components efficiently, ensuring no cycles are formed.
+Kruskal’s method builds an MST by **globally** considering edges in ascending order of weight and merging components only when they lie in different sets. It relies on a Disjoint‑Set (Union-Find) structure to track connected components efficiently, ensuring no cycles are formed.
 
 **Key Features**
 
 - **Global Greedy Selection**: Sorts all `(E)` edges once $$(O(E log E))$$.
-- **Cycle Avoidance**: Uses Union–Find with **path compression** and **union by rank** to test/component merge in $$O(\alpha(V))$$ per operation.
+- **Cycle Avoidance**: Uses Union-Find with **path compression** and **union by rank** to test/component merge in $$O(\alpha(V))$$ per operation.
 - **Deterministic**: Stable sort on edges (by ID tie‑breaker) → reproducible MST even when weights tie.
 
 **When to Use**
@@ -198,7 +198,7 @@ Recall the example graph from **6.3.0** with vertices `{A…H}` and edge weights
 
 - **Early Exit**: Stops once $$(|V|-1)$$ edges are chosen.
 - **Tie‑Breaking**: Stable sort + edge ID order → predictable when weights tie.
-- **Union–Find Efficiency**: Path compression + union by rank keeps each `Find` ≈ amortized $$O(1)$$.
+- **Union-Find Efficiency**: Path compression + union by rank keeps each `Find` ≈ amortized $$O(1)$$.
 
 ---
 

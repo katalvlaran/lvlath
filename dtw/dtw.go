@@ -1,175 +1,170 @@
+// Package dtw provides a production-grade implementation of the
+// Dynamic Time Warping (DTW) algorithm for time series alignment.
+//
+// DTW finds the minimal cumulative cost to align two sequences by
+// stretching/compressing their time axes, subject to an optional
+// Sakoe–Chiba window constraint and configurable insertion/deletion penalties.
 package dtw
 
 import (
 	"math"
 )
 
-// Coord represents a point (i,j) in the optimal warping path.
-type Coord struct{ I, J int }
+// Coord represents a single point (i,j) in the optimal warping path.
+// I denotes the index in sequence A, J denotes the index in sequence B.
+type Coord struct {
+	I, J int
+}
 
-// DTW computes the Dynamic Time Warping distance between sequences a and b.
-// It optionally returns the optimal alignment path if opts.ReturnPath is true.
+// DTW computes the DTW distance between sequences a and b,
+// and optionally returns the alignment path if opts.ReturnPath=true.
 //
-// Time Complexity:    O(N·M)      where N=len(a), M=len(b)
-// Memory Complexity:  O(N·M)      for FullMatrix mode
+// Preconditions:
+//   - a and b must be non-empty (checked below).
+//   - opts.Validate() must be called by the caller, or DTW will return ErrBadInput.
 //
-//	O(min(N,M)) for TwoRows and None modes (distance only)
+// Time complexity:    O(N*M) where N=len(a), M=len(b)
+// Memory complexity:  O(1) for NoMemory,
 //
-// Returns:
-//
-//	dist float64    - cumulative minimal cost
-//	path []Coord    - nil unless ReturnPath=true (and MemoryMode=FullMatrix)
-//	err  error      - sentinel errors for input or options
-func DTW(a, b []float64, opts Options) (dist float64, path []Coord, err error) {
+//	O(min(N,M)) for TwoRows,
+//	O(N*M) for FullMatrix (with backtrace support).
+func DTW(a, b []float64, opts *Options) (dist float64, path []Coord, err error) {
+	// 1) Validate input lengths
 	n, m := len(a), len(b)
-	// Validate input lengths
 	if n == 0 || m == 0 {
 		return 0, nil, ErrEmptyInput
 	}
-	// Validate path requirements
-	if opts.ReturnPath && opts.MemoryMode != FullMatrix {
-		return 0, nil, ErrPathNeedsMatrix
+	// 2) Validate option combinations
+	if err = opts.Validate(); err != nil {
+		return 0, nil, err
 	}
-	// Alias options
-	penalty := opts.SlopePenalty
-	window := opts.Window
-	mode := opts.MemoryMode
-	needPath := opts.ReturnPath
 
-	inf := math.Inf(1)
-	// Allocate DP storage
-	var dpFull [][]float64
-	prev := make([]float64, m+1)
-	curr := make([]float64, m+1)
+	// 3) Precompute constants and buffers
+	penalty := opts.SlopePenalty    // non-negative insertion/deletion cost
+	window := opts.Window           // Sakoe–Chiba band radius (-1 disabled)
+	mode := opts.MemoryMode         // storage strategy
+	needPath := opts.ReturnPath     // whether to reconstruct path
+	infinity := math.Inf(1)         // positive infinity
+	prevRow := make([]float64, m+1) // DP row for i-1
+	currRow := make([]float64, m+1) // DP row for i
+
+	// 4) If using FullMatrix, allocate dpMatrix[i][j] = cost up to (i,j)
+	var dpMatrix [][]float64
 	if mode == FullMatrix {
-		dpFull = make([][]float64, n+1)
-		dpFull[0] = make([]float64, m+1)
-		copy(dpFull[0], prev)
-	}
-	// Initialize first row
-	for j := 1; j <= m; j++ {
-		prev[j] = inf
+		// allocate all rows up front
+		dpMatrix = make([][]float64, n+1)
+		dpMatrix[0] = make([]float64, m+1)
+		copy(dpMatrix[0], prevRow)
 	}
 
-	// Fill DP rows
-	for i := 1; i <= n; i++ {
-		// First column
-		curr[0] = inf
-		for j := 1; j <= m; j++ {
-			// Sakoe-Chiba window constraint
-			if window >= 0 && abs(i-j) > window {
-				curr[j] = inf
-				continue
-			}
-			// Local cost
-			c := math.Abs(a[i-1] - b[j-1])
-			// Recurrence: insertion, deletion, match
-			if window >= 0 {
-				// Chebyshev mode
-				insR := prev[j]
-				delR := curr[j-1]
-				matR := prev[j-1]
-				insV := math.Max(insR, penalty)
-				delV := math.Max(delR, penalty)
-				matV := math.Max(matR, c)
-				curr[j] = min3(insV, delV, matV)
-			} else {
-				// Sum-of-cost mode
-				ins := prev[j] + penalty
-				del := curr[j-1] + penalty
-				match := prev[j-1]
-				best := min3(ins, del, match)
-				curr[j] = c + best
-			}
-		}
-		// Save row if needed
-		if mode == FullMatrix {
-			dpFull[i] = make([]float64, m+1)
-			copy(dpFull[i], curr)
-		}
-		// Rotate buffers
-		prev, curr = curr, prev
+	// 5) Initialize DP boundary for row 0: cost to align zero-length a with prefixes of b
+	for j := 1; j <= m; j++ {
+		prevRow[j] = infinity // cannot align non-zero prefix with empty sequence
 	}
-	// Distance in last filled row
-	dist = prev[m]
-	// Backtrack for path if requested
+
+	// 6) Main DP loop: fill rows 1..n
+	for i := 1; i <= n; i++ {
+		// 6.1) Initialize boundary for column 0: cost to align prefixes of a with empty b
+		currRow[0] = infinity
+
+		// 6.2) Compute columns 1..m
+		for j := 1; j <= m; j++ {
+			// 6.2.1) Enforce Sakoe–Chiba window if enabled
+			if window >= 0 && abs(i-j) > window {
+				currRow[j] = infinity
+				continue // skip cost computation outside band
+			}
+
+			// 6.2.2) Compute local cost = |a[i-1] - b[j-1]|
+			localCost := math.Abs(a[i-1] - b[j-1])
+
+			// 6.2.3) Recurrence relation: match (↖), insertion (↑), deletion (←)
+			matchCost := prevRow[j-1]            // cost up to (i-1, j-1)
+			insertCost := prevRow[j] + penalty   // insertion in b (advance i)
+			deleteCost := currRow[j-1] + penalty // insertion in a (advance j)
+
+			// 6.2.4) Choose minimum predecessor and add local cost
+			bestPrev := min3(matchCost, insertCost, deleteCost)
+			currRow[j] = localCost + bestPrev
+		}
+
+		// 6.3) If FullMatrix, store a copy of currRow for backtracking
+		if mode == FullMatrix {
+			rowCopy := make([]float64, m+1)
+			copy(rowCopy, currRow)
+			dpMatrix[i] = rowCopy
+		}
+
+		// 6.4) Rotate rows: current becomes previous for next iteration
+		prevRow, currRow = currRow, prevRow
+	}
+
+	// 7) The final distance is at prevRow[m] after last rotation
+	dist = prevRow[m]
+
+	// 8) If requested, reconstruct the optimal path
 	if needPath {
-		path, err = backtrack(dpFull, a, b, opts)
+		path, err = backtrack(dpMatrix, a, b, opts)
 	}
 	return dist, path, err
 }
 
-// backtrack reconstructs the optimal path from dpFull matrix.
-func backtrack(dp [][]float64, a, b []float64, opts Options) ([]Coord, error) {
+// backtrack reconstructs the alignment path from dpMatrix.
+// It walks backward from (N,M) to (0,0) following the minimal-cost moves.
+func backtrack(dp [][]float64, a, b []float64, opts *Options) ([]Coord, error) {
 	i, j := len(a), len(b)
 	path := make([]Coord, 0, i+j)
-	//inf := math.Inf(1)
+
 	for i > 0 || j > 0 {
-		// Append current alignment
-		path = append(path, Coord{I: i - 1, J: j - 1})
-		// Determine move: match vs insertion vs deletion
+		// record the alignment (i-1,j-1) or boundary
+		var x, y int
+		if i > 0 && j > 0 {
+			x, y = i-1, j-1
+		} else if i > 0 {
+			x, y = i-1, 0
+		} else {
+			x, y = 0, j-1
+		}
+		path = append(path, Coord{I: x, J: y})
+
+		// compute the local cost at (i,j)
 		moved := false
-		if opts.Window >= 0 { // Chebyshev backtrack
-			// match
-			if i > 0 && j > 0 {
-				c := math.Abs(a[i-1] - b[j-1])
-				if almostEqual(dp[i][j], math.Max(dp[i-1][j-1], c)) {
-					i, j = i-1, j-1
-					moved = true
-				}
-			}
-			// insertion
-			if !moved && i > 0 {
-				if almostEqual(dp[i][j], math.Max(dp[i-1][j], opts.SlopePenalty)) {
-					i--
-					moved = true
-				}
-			}
-			// deletion
-			if !moved && j > 0 {
-				if almostEqual(dp[i][j], math.Max(dp[i][j-1], opts.SlopePenalty)) {
-					j--
-					moved = true
-				}
-			}
-		} else { // Sum-of-cost backtrack
-			// match
-			if i > 0 && j > 0 {
-				c := math.Abs(a[i-1] - b[j-1])
-				if almostEqual(dp[i][j], dp[i-1][j-1]+c) {
-					i, j = i-1, j-1
-					moved = true
-				}
-			}
-			// insertion
-			if !moved && i > 0 {
-				if almostEqual(dp[i][j], dp[i-1][j]+opts.SlopePenalty) {
-					i--
-					moved = true
-				}
-			}
-			// deletion
-			if !moved && j > 0 {
-				if almostEqual(dp[i][j], dp[i][j-1]+opts.SlopePenalty) {
-					j--
-					moved = true
-				}
-			}
+		var localCost float64
+		if i > 0 && j > 0 {
+			localCost = math.Abs(a[i-1] - b[j-1])
+		}
+		// “unwind” the localCost before comparing to predecessors
+		curr := dp[i][j] - localCost
+
+		// 1) match ↖
+		if i > 0 && j > 0 && almostEqual(curr, dp[i-1][j-1]) {
+			i, j = i-1, j-1
+			moved = true
+		}
+		// 2) insertion (↑)
+		if !moved && i > 0 && almostEqual(curr, dp[i-1][j]+opts.SlopePenalty) {
+			i--
+			moved = true
+		}
+		// 3) deletion  (←)
+		if !moved && j > 0 && almostEqual(curr, dp[i][j-1]+opts.SlopePenalty) {
+			j--
+			moved = true
 		}
 
 		if !moved {
 			return nil, ErrIncompletePath
 		}
 	}
-	// Reverse path to start at (0,0)
+
+	// reverse path so it's from (0,0)→(N,M)
 	for l, r := 0, len(path)-1; l < r; l, r = l+1, r-1 {
 		path[l], path[r] = path[r], path[l]
 	}
-
 	return path, nil
 }
 
-// min3 returns the minimum of three floats.
+// min3 returns the minimum of three float64 values.
 func min3(a, b, c float64) float64 {
 	if a < b {
 		if a < c {
@@ -185,7 +180,7 @@ func min3(a, b, c float64) float64 {
 	return c
 }
 
-// abs returns the absolute value of an int.
+// abs returns the absolute value of x.
 func abs(x int) int {
 	if x < 0 {
 		return -x
@@ -194,7 +189,7 @@ func abs(x int) int {
 	return x
 }
 
-// almostEqual compares floats within a small epsilon.
+// almostEqual reports whether two floats are equal within a small epsilon.
 func almostEqual(a, b float64) bool {
 	const eps = 1e-9
 	return math.Abs(a-b) <= eps

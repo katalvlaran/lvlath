@@ -33,12 +33,23 @@ Define a matrix $$\(D\in\mathbb{R}^{(n+1)\times(m+1)}\)$$ where
 
 ### 8.2.2 Recurrence Relation
 
-$$\begin{aligned}
+$$\begin{matrix}
+    D_{0,0} = 0, & D_{i,0} = +\infty\; (i>0), & D_{0,j} = +\infty\;(j>0), \\\
+    D_{i,j} = \underbrace{\bigl|\,a_i - b_j\,\bigr|}_{\text{local cost}} + \min\Bigl\{ D_{i-1,j-1},\; D_{i-1,j} + p,\; D_{i,j-1} + p \Bigr\}, \\\
+\end{matrix}$$
+
+
+\[\begin{aligned}
+    D_{0,0} &= 0, \quad D_{i,0} = +\infty\; (i>0), \quad D_{0,j} = +\infty\;(j>0), \\\
+    D_{i,j} &= \underbrace{\bigl|\,a_i - b_j\,\bigr|}_{\text{local cost}} + \min\Bigl\{ D_{i-1,j-1},\; D_{i-1,j} + p,\; D_{i,j-1} + p \Bigr\}, \\\
+\end{aligned}\]
+
+```math
+\[\begin{aligned}
 D_{0,0} &= 0, \quad D_{i,0} = +\infty\; (i>0), \quad D_{0,j} = +\infty\;(j>0), \\\
 D_{i,j} &= \underbrace{\bigl|\,a_i - b_j\,\bigr|}_{\text{local cost}} + \min\Bigl\{ D_{i-1,j-1},\; D_{i-1,j} + p,\; D_{i,j-1} + p \Bigr\}, \\\
-\end{aligned}$$
-
-$$\begin{bmatrix} D_{0,0} = 0, & D_{i,0} = +\infty (i>0), & D_{0,j} = +\infty(j>0), \\\ D_{i,j} = \underbrace{\bigl|\,a_i - b_j\,\bigr|}_{\text{local cost}} + \min\Bigl\{ D_{i-1,j-1}, & D_{i-1,j} + p, & D_{i,j-1} + p \Bigr\}, \\\ \end{bmatrix}\;$$
+\end{aligned}\]
+```
 
 where
 - $$\(\lvert a_i - b_j\rvert\)$$ is the absolute difference (or any other distance metric from `core/`).
@@ -73,12 +84,27 @@ At its heart, DTW computes the minimal cumulative cost to warp and align two seq
 
 1. Builds a **cost matrix** $$\(D\)$$ of size $$\((n+1) \times (m+1)\)$$ , where
    
-   $$D_{i,j} = \min \begin{cases}
+$$D_{i,j} = \min \begin{cases}
    D_{i-1, j-1} + \lvert a_i - b_j \rvert, & \text{match (diagonal)} \\\
    D_{i-1, j} + p, & \text{insertion (vertical)} \\\
    D_{i, j-1} + p, & \text{deletion  (horizontal)} \\\
-   \end{cases}$$
+\end{cases}$$
 
+```math
+D_{i,j} = \min \begin{cases}
+   D_{i-1, j-1} + \lvert a_i - b_j \rvert, & \text{match (diagonal)} \\\
+   D_{i-1, j} + p, & \text{insertion (vertical)} \\\
+   D_{i, j-1} + p, & \text{deletion  (horizontal)} \\\
+   \end{cases}
+```
+
+```math
+D_{i,j} = \min \begin{cases}
+   D_{i-1, j-1} + \lvert a_i - b_j \rvert, & \text{match (diagonal)} \\
+   D_{i-1, j} + p, & \text{insertion (vertical)} \\
+   D_{i, j-1} + p, & \text{deletion  (horizontal)} \\
+   \end{cases}
+```
    and $$\(p\)$$ is the **slope penalty** controlling the cost of skips.
 
 2. Optionally applies the **Sakoe-Chiba window** $$\(w\)$$ to restrict $$\(|i-j| \le w\)$$, improving locality and reducing computation.

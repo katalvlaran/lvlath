@@ -216,7 +216,7 @@ func main() {
 
 - **Avoid In‑Place Mutation**: build on copies to preserve original data.
 - **Choose Correct Representation**: use matrices only when graph is sufficiently dense or when algebraic operations are required.
-- **Watch Memory**: adjacency matrix uses O(V²) space—avoid on large sparse graphs.
+- **Watch Memory**: adjacency matrix uses O(V²) space - avoid on large sparse graphs.
 - **Set Tolerance & Iterations** for spectral: too strict tol or too few iterations may fail convergence (ErrEigenFailed).
 - **Validate Options**: `opts := matrix.NewMatrixOptions(...)` ensures consistent behavior.
 

@@ -90,13 +90,13 @@ func BFS(
 - Wrapped errors from user-supplied `OnVisit`.
 
 **Key Options**:
-- `WithContext(ctx)` — Cancel or timeout BFS via `context.Context`.
-- `WithMaxDepth(d)` — Stop exploring beyond depth \(d\).
+- `WithContext(ctx)` - Cancel or timeout BFS via `context.Context`.
+- `WithMaxDepth(d)` - Stop exploring beyond depth \(d\).
   - \(d>0\): limit to depth \(d\).
   - \(d=0\): explicit "no depth limit."
   - \(d<0\): invalid (violates `ErrOptionViolation`).
-- `WithFilterNeighbor(fn(curr, nbr string) bool)` — Skip edges for which `fn` returns `false` (prune traversal dynamically).
-- `WithOnEnqueue(fn(id, depth))`, `WithOnDequeue(fn(id, depth))`, `WithOnVisit(fn(id, depth) error)` — Hooks at each stage.
+- `WithFilterNeighbor(fn(curr, nbr string) bool)` - Skip edges for which `fn` returns `false` (prune traversal dynamically).
+- `WithOnEnqueue(fn(id, depth))`, `WithOnDequeue(fn(id, depth))`, `WithOnVisit(fn(id, depth) error)` - Hooks at each stage.
 
 ## 3.6. Determinism & Reproducibility
 

@@ -13,7 +13,7 @@ allowing local expansions or contractions in time.
 
 ### Why
 - **Robustness to non-linear time shifts**: Handles local accelerations/decelerations in signals.
-- **Interoperability**: Works on any numeric sequence—audio, sensor readings, stock prices.
+- **Interoperability**: Works on any numeric sequence-audio, sensor readings, stock prices.
 - **Optional path recovery**: Full-matrix mode lets you see exactly which elements align.
 
 ### When
@@ -32,11 +32,6 @@ Define a matrix $$\(D\in\mathbb{R}^{(n+1)\times(m+1)}\)$$ where
 - We index from 0 with boundary conditions at $$\(i=0\)$$ or $$\(j=0\)$$.
 
 ### 8.2.2 Recurrence Relation
-
-$$\[\begin{aligned}
-    D_{0,0} &= 0, \quad D_{i,0} = +\infty\; (i>0), \quad D_{0,j} = +\infty\;(j>0), \\\
-    D_{i,j} &= \underbrace{\bigl|\,a_i - b_j\,\bigr|}_{\text{local cost}} + \min\Bigl\{ D_{i-1,j-1},\; D_{i-1,j} + p,\; D_{i,j-1} + p \Bigr\}, \\\
-\end{aligned}\]$$
 
 ```math
 \begin{aligned}
@@ -144,7 +139,7 @@ function DTW(A[1..n], B[1..m], window w, penalty p):
   return distance
 ```
 
-> **Time Complexity**: $$\(O(n \times m)\)$$ — every cell is visited once.
+> **Time Complexity**: $$\(O(n \times m)\)$$ - every cell is visited once.
 >
 > **Memory Complexity**: $$\(O(n \times m)\)$$ for full matrix, or $$\(O(\min(n,m))\)$$ for rolling array.
 

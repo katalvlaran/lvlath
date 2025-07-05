@@ -495,7 +495,7 @@ func main() {
    When capacities or numbers of augmentations are large, sums of flows can exceed 32-bit limits. Always use **int64** (or larger) for capacities and accumulators.
 
 2. **Zero-capacity edges**  
-   Edges with `(c(u,v)=0)` may clutter your residual graph—either filter them out early or ensure your algorithm skips them to avoid needless work.
+   Edges with `(c(u,v)=0)` may clutter your residual graph - either filter them out early or ensure your algorithm skips them to avoid needless work.
 
 3. **Choice of algorithm**
     - **Ford-Fulkerson (DFS)**: simple but worst-case $$\(O(E\cdot F)\)$$ may be prohibitive if `(F)` is large.
@@ -503,7 +503,7 @@ func main() {
     - **Dinic**: $$\(O(E\sqrt V)\)$$ on unit networks and often very fast in practice; preferred for large or dense graphs.
 
 4. **Parallel edges and loops**
-    - **Multi-edges**: `lvlath/core` by default **aggregates** parallel capacities—ensure this matches your model semantics.
+    - **Multi-edges**: `lvlath/core` by default **aggregates** parallel capacities - ensure this matches your model semantics.
     - **Loops** $$\((v\to v)\)$$: typically ignored in augmentation since they cannot contribute to source-sink throughput.
 
 5. **Residual graph size**  
@@ -514,7 +514,7 @@ func main() {
 
 7. **Algorithm tuning**
     - **Verbose logging**: helpful for debugging small examples, but **disable** in benchmarks to avoid I/O overhead.
-    - **LevelRebuildInterval** `Dinic`: in some variants, rebuilding the level graph after a fixed number of push operations can yield practical speedups—tune this parameter for your workloads.
+    - **LevelRebuildInterval** `Dinic`: in some variants, rebuilding the level graph after a fixed number of push operations can yield practical speedups-tune this parameter for your workloads.
 
 ---
 

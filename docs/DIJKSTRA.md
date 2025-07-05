@@ -213,7 +213,7 @@ Path A→D: [A B D]
 
 | Step | Frontier (min-heap)                | Extracted | Updated Distances                                                               |
 |------|------------------------------------|-----------|---------------------------------------------------------------------------------|
-| 0    | {A:0}                              | —         | d[A]=0                                                                          |
+| 0    | {A:0}                              | -         | d[A]=0                                                                          |
 | 1    | {B:5, C:2}                         | C (2)     | d[C]=2; relax C→B (2+1=3) ⇒ d[B]=3; C→E (2+4=6) ⇒ d[E]=6; C→D (2+3=5) ⇒ d[D]=5  |
 | 2    | {B:3, D:5, E:6}                    | B (3)     | d[B]=3; relax B→D (3+2=5) ties d[D]=5; B→A, B→C already settled                 |
 | 3    | {D:5, E:6, A:∞?*, ...}             | D (5)     | relax D→E (5+1=6) tie d[E]=6; D→F (5+19=24) ⇒ d[F]=24                           |
@@ -312,13 +312,13 @@ This advanced example showcases how Dijkstra seamlessly handles tightly connecte
 
 * **Validate Input Early:** Ensure your graph is non-nil, weighted, and source vertex exists before running Dijkstra to avoid wasted work and panics.
 * **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman-Ford or Johnson's algorithm.
-* **Skip Stale Queue Entries:** When popping from the min-heap, always compare the extracted distance with the current `dist[u]` and skip if they differ — this implements the lazy decrease-key safely.
+* **Skip Stale Queue Entries:** When popping from the min-heap, always compare the extracted distance with the current `dist[u]` and skip if they differ - this implements the lazy decrease-key safely.
 * **Check for Overflow:** For graphs with very large weights, verify that `dist[u] + w` does not overflow the integer type before assignment, or use a saturated arithmetic strategy.
 * **Tune Priority Queue Strategy:** Go’s `container/heap` is an implicit binary heap `(O(log n)` per op). For heavy workloads consider Fibonacci or pairing heaps for amortized `O(1)` decrease-key, or radix heaps for integer weights.
 * **Limit Search Space:** Use `WithMaxDistance()` to bound exploration when you only need distances up to a threshold, reducing work on large graphs.
-* **Leverage Mixed-Edge Support:** With `WithMixedEdges()`, Dijkstra can handle directed and undirected edges in the same graph — ensure you use the direction filter in relaxation to avoid reverse traversal.
+* **Leverage Mixed-Edge Support:** With `WithMixedEdges()`, Dijkstra can handle directed and undirected edges in the same graph - ensure you use the direction filter in relaxation to avoid reverse traversal.
 * **Profile Real Data:** Benchmark on realistic graph models (e.g., road networks, social graphs) rather than grids to capture actual performance characteristics and hotspot edges.
-> * Secret Tip — Early Exit for Single-Target: If you only need the shortest path to one destination, break the loop when that vertex is finalized, saving the cost of processing the rest of the graph.
+> * Secret Tip - Early Exit for Single-Target: If you only need the shortest path to one destination, break the loop when that vertex is finalized, saving the cost of processing the rest of the graph.
 
 
 ---

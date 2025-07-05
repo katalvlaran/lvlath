@@ -233,34 +233,6 @@ func (s *MethodsSuite) TestMultiEdges() {
 	req.ElementsMatch([]int64{1, 2}, []int64{weights[e1], weights[e2]}, "Weights match original values")
 }
 
-/*// TestMixedEdges checks per-edge directed override when mixed edges enabled.
-func (s *MethodsSuite) TestMixedEdges() {
-	req := require.New(s.T())
-
-	// Enable mixed-edge support (Graph default undirected)
-	s.g = core.NewGraph(core.WithMixedEdges())
-	// Add a directed edge override
-	_, err := s.g.AddEdge("A", "B", 0, core.WithEdgeDirected(true))
-	req.NoError(err)
-	nbsA, _ := s.g.Neighbors("A")
-	req.Len(nbsA, 1, "Directed override edge appears in source neighbors")
-	req.True(nbsA[0].Directed, "Edge should respect per-edge Directed flag")
-
-	// Add an explicit undirected override
-	eidU, err := s.g.AddEdge("B", "C", 0, core.WithEdgeDirected(false))
-	req.NoError(err)
-	nbsB, _ := s.g.Neighbors("B")
-	// Find the B–C edge and ensure it's undirected
-	found := false
-	for _, e := range nbsB {
-		if e.ID == eidU {
-			req.False(e.Directed, "Edge override directed=false must be undirected")
-			found = true
-		}
-	}
-	req.True(found, fmt.Sprintf("Neighbor list for B should include edge %s", eidU))
-}*/
-
 // Entry point for the test suite
 func TestMethodsSuite(t *testing.T) {
 	suite.Run(t, new(MethodsSuite))

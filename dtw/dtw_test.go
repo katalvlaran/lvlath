@@ -166,35 +166,3 @@ func TestDTW_BadInputCombination(t *testing.T) {
 	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
 	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "invalid options must return ErrPathNeedsMatrix")
 }
-
-// BenchmarkDTW_Small measures DTW on 100×100 zero-based sequences.
-func BenchmarkDTW_Small(b *testing.B) {
-	const N = 100
-	a := make([]float64, N)
-	c := make([]float64, N)
-	for i := range a {
-		a[i], c[i] = float64(i), float64(i)
-	}
-	opts := dtw.DefaultOptions()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		dtw.DTW(a, c, &opts)
-	}
-}
-
-// BenchmarkDTW_Medium measures DTW on 500×500 zero-based sequences.
-func BenchmarkDTW_Medium(b *testing.B) {
-	const N = 500
-	a := make([]float64, N)
-	c := make([]float64, N)
-	for i := range a {
-		a[i], c[i] = float64(i), float64(i)
-	}
-	opts := dtw.DefaultOptions()
-
-	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
-		dtw.DTW(a, c, &opts)
-	}
-}

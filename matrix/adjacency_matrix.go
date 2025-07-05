@@ -3,6 +3,7 @@ package matrix
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/katalvlaran/lvlath/core"
 )
@@ -135,6 +136,10 @@ func (m AdjacencyMatrix) ToGraph() (*core.Graph, error) {
 			if w == 0 {
 				continue
 			}
+			if math.IsInf(w, 1) {
+				continue
+			}
+
 			var weight int64
 			if m.opts.Weighted {
 				weight = int64(w)

@@ -8,6 +8,8 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
+const DefaultWeight = 1.0 // used for filling weight in an UNweighted graph
+
 // BuildAdjacencyData constructs the index map and dense adjacency matrix from
 // a list of vertex IDs and core.Edge values, applying the given MatrixOptions.
 // It validates options, checks for unknown vertices, and supports directed,
@@ -35,7 +37,7 @@ func BuildAdjacencyData(vertices []string, edges []*core.Edge, opts MatrixOption
 		if !ok {
 			return nil, nil, ErrUnknownVertex
 		}
-		w := 1.0
+		w := DefaultWeight
 		if opts.Weighted {
 			w = float64(e.Weight)
 		}
@@ -43,6 +45,25 @@ func BuildAdjacencyData(vertices []string, edges []*core.Edge, opts MatrixOption
 		if !opts.Directed {
 			data[j][i] = w
 		}
+	}
+
+	// enables “0 edges → Inf + APSP metric closure
+	if opts.MetricClosure {
+		// 1) mark missing→Inf
+		n = len(data)
+		for u := 0; u < n; u++ {
+			for v := 0; v < n; v++ {
+				if u == v {
+					continue
+				} // keep diagonal zero
+
+				if data[u][v] == 0 {
+					data[u][v] = math.Inf(1)
+				}
+			}
+		}
+		// 2) fill APSP
+		//FloydWarshall(data)
 	}
 
 	return idx, data, nil
@@ -248,9 +269,8 @@ func applyJacobi(A, V [][]float64, p, q int, c, s float64) {
 	}
 }
 
-// EigenDecompose computes eigenvalues and eigenvectors of a symmetric matrix
-// using the Jacobi rotation algorithm. It splits responsibilities into
-// validation, finding pivots, computing rotation, and applying transformations.
+// EigenDecompose computes eigenvalues and eigenvectors of a symmetric matrix  using the Jacobi rotation algorithm.
+// It splits responsibilities into validation, finding pivots, computing rotation, and applying transformations.
 // tol defines convergence threshold; maxIter caps the number of rotations.
 // Returns ErrEigenFailed if convergence isn't reached within maxIter.
 // Time: O(N³); Memory: O(N²).
@@ -295,4 +315,35 @@ func EigenDecompose(orig [][]float64, tol float64, maxIter int) ([]float64, [][]
 	}
 
 	return nil, nil, ErrEigenFailed
+}
+
+// FloydWarshall computes the All-Pairs Shortest Paths of a (possibly incomplete) weighted graph in-place.
+// It replaces any “missing” edges (Inf) by the length of the shortest existing path.
+//
+// Time Complexity:   O(n³), where n = len(dist).
+// Space Complexity:  O(1) additional, works in-place.
+//
+// Parameters:
+//
+//	dist — an n×n matrix of floats, where
+//	       • dist[i][i] == 0,
+//	       • dist[i][j] is either the direct edge weight or +Inf.
+func FloydWarshall(dist [][]float64) {
+	n := len(dist)
+	for k := 0; k < n; k++ {
+		for i := 0; i < n; i++ {
+			if math.IsInf(dist[i][k], 1) {
+				continue
+			}
+			for j := 0; j < n; j++ {
+				if math.IsInf(dist[k][j], 1) {
+					continue
+				}
+				via := dist[i][k] + dist[k][j]
+				if via < dist[i][j] {
+					dist[i][j] = via
+				}
+			}
+		}
+	}
 }

@@ -1,23 +1,40 @@
-// Package tsp provides Travelling Salesman Problem solvers.
+// Package tsp provides Travelling Salesman Problem solvers on distance matrices,
+// offering both exact and approximate algorithms with unified API and error handling.
 //
-// It includes two algorithms on a distance matrix ([][]float64):
+// What & Why:
+//   - Solve the TSP on a complete or partially complete metric graph represented
+//     as an n×n [][]float64 distance matrix.
+//   - Use TSPExact (Held–Karp) for n ≲ 16 when an optimal solution is required.
+//   - Use TSPApprox (Christofides 1.5-approx) for larger n when a fast, near-optimal
+//     solution suffices.
 //
-//   - TSPExact — uses the Held–Karp dynamic‐programming algorithm.
+// Algorithms:
 //
-//   - Complexity: O(n²·2ⁿ)
+//   - TSPExact(dist, opts):
+//     – Exact Held–Karp dynamic programming.
+//     – Time:    O(n² · 2ⁿ)
+//     – Memory:  O(n · 2ⁿ)
 //
-//   - Memory:     O(n·2ⁿ)
+//   - TSPApprox(dist, opts):
+//     – Christofides’ algorithm with greedy perfect matching.
+//     – Time:    O(n³)
+//     – Memory:  O(n²)
 //
-//   - Supports “missing” edges via math.Inf(1).
+// Input Matrix Requirements:
 //
-//   - TSPApprox — Christofides’ 1.5-approximation (coming soon).
+//	– Square (n×n) matrix.
+//	– dist[i][i] == 0.
+//	– dist[i][j] ≥ 0 and dist[i][j] == dist[j][i].
+//	– math.Inf(1) signals “missing edge” (used to represent partial graphs).
 //
-//   - Complexity: O(n³)
+// Options:
+//   - type Options struct{}            – placeholder for future parameters.
+//   - func DefaultOptions() Options    – always use to initialize opts.
 //
-// All functions accept a complete or partially complete distance matrix:
-//   - A distance of math.Inf(1) signals “no direct edge.”
-//   - If no tour exists, TSPExact returns ErrTSPIncompleteGraph.
+// Errors:
+//   - ErrBadInput       – invalid matrix (empty, ragged, negative weights,
+//     non-zero diagonal, asymmetry).
+//   - ErrIncompleteGraph– no Hamiltonian cycle exists (disconnected graph).
 //
-// Use this package when you need to solve or approximate the TSP
-// on small‐to-medium sized instances (n≲16 for TSPExact).
+// See: docs/TSP.md for full tutorial with math, pseudocode, diagrams, and best practices.
 package tsp

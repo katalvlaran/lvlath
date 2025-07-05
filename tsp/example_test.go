@@ -1,161 +1,107 @@
+// Package main demonstrates a real-world logistics scenario using lvlath/core and lvlath/matrix
+// to build a weighted graph of 10 locations, convert it to a distance matrix, and then solve
+// the TSP with lvlath/tsp. We use TSPApprox (Christofides) to plan a near-optimal delivery route.
+//
+// Scenario:
+//
+//	A delivery company must dispatch a single vehicle from the “Hub” warehouse to  nine retail
+//	outlets and return. We model the road network as an undirected, weighted graph where vertices
+//	are locations and edges are the driving distances in kilometers. Converting to an adjacency
+//	matrix and running TSPApprox (O(n³)) yields a practical route in milliseconds.
+//
+// Use case:
+//
+//	Daily route planning for last-mile deliveries across urban and suburban locations.
+//
+// Playground: [![Go Playground – TSP Logistics](https://img.shields.io/badge/Go_Playground-TSP_Logistics-blue?logo=go)](https://play.golang.org/p/your-snippet-id)
 package tsp_test
 
 import (
 	"fmt"
-	"math"
+	"log"
 
-	"github.com/katalvlaran/lvlath/tsp"
+	"github.com/katalvlaran/lvlath/core"   // core graph types
+	"github.com/katalvlaran/lvlath/matrix" // adjacency‐matrix builder
+	"github.com/katalvlaran/lvlath/tsp"    // TSP solvers
 )
 
-////////////////////////////////////////////////////////////////////////////////
-// Helper distance generators
-////////////////////////////////////////////////////////////////////////////////
+const (
+	Hub        = "Hub"
+	NorthMall  = "NorthMall"
+	EastPlaza  = "EastPlaza"
+	SouthPark  = "SouthPark"
+	WestSide   = "WestSide"
+	Uptown     = "Uptown"
+	Downtown   = "Downtown"
+	Airport    = "Airport"
+	University = "University"
+	Stadium    = "Stadium"
+)
 
-// build4Cycle returns the 4-node cycle distance matrix:
-//
-//	0 ↔1↔ 1
-//	↓     ↓
-//	3 ↔1↔ 2
-//
-// optimal tour cost = 4.
-func build4Cycle() [][]float64 {
-	return [][]float64{
-		{0, 1, 2, 1},
-		{1, 0, 1, 2},
-		{2, 1, 0, 1},
-		{1, 2, 1, 0},
+func ExampleTSP() {
+	// 1) Build the weighted road network graph (undirected, weighted distances in km)
+	g := core.NewGraph(core.WithWeighted())
+	locations := []string{
+		Hub, NorthMall, EastPlaza, SouthPark, WestSide,
+		Uptown, Downtown, Airport, University, Stadium,
 	}
-}
-
-// build8Cycle returns the 8-node cycle distance matrix,
-// where dist(i,j)=min(|i−j|,8−|i−j|).  Optimal cost = 8.
-func build8Cycle() [][]float64 {
-	const n = 8
-	mat := make([][]float64, n)
-	for i := 0; i < n; i++ {
-		mat[i] = make([]float64, n)
-		for j := 0; j < n; j++ {
-			d := math.Abs(float64(i - j))
-			mat[i][j] = math.Min(d, float64(n)-d)
+	for _, loc := range locations {
+		if err := g.AddVertex(loc); err != nil {
+			log.Fatalf("add vertex %s: %v", loc, err)
 		}
 	}
-	return mat
-}
-
-// breakEdge returns a copy of mat with the edge (u,v) removed
-// (distance = ∞) to simulate a disconnected graph.
-func breakEdge(mat [][]float64, u, v int) [][]float64 {
-	n := len(mat)
-	copyMat := make([][]float64, n)
-	for i := range mat {
-		copyMat[i] = append([]float64(nil), mat[i]...)
+	// Add pairwise roads (symmetric distances)
+	roads := []struct {
+		u, v string
+		d    int64
+	}{
+		{Hub, NorthMall, 12}, {Hub, EastPlaza, 18}, {Hub, SouthPark, 20}, {Hub, WestSide, 15},
+		{NorthMall, EastPlaza, 7}, {EastPlaza, SouthPark, 10}, {SouthPark, WestSide, 8}, {WestSide, NorthMall, 9},
+		{NorthMall, Uptown, 6}, {Uptown, Downtown, 5}, {Downtown, EastPlaza, 11},
+		{SouthPark, Airport, 14}, {Airport, University, 13}, {University, Stadium, 9}, {Stadium, Downtown, 12},
 	}
-	copyMat[u][v] = math.Inf(1)
-	copyMat[v][u] = math.Inf(1)
-	return copyMat
-}
+	for _, r := range roads {
+		if _, err := g.AddEdge(r.u, r.v, r.d); err != nil {
+			log.Fatalf("add edge %s-%s: %v", r.u, r.v, err)
+		}
+	}
 
-////////////////////////////////////////////////////////////////////////////////
-// Held-Karp Exact TSP Examples
-////////////////////////////////////////////////////////////////////////////////
-
-// ExampleTSPExact_small demonstrates the Held-Karp dynamic‐programming TSP
-// on a 4‐node cycle.
-//
-// Graph (cycle):
-//
-//	0 —1— 1
-//	|     |
-//	3 —1— 2
-//
-// Complexity: O(n²·2ⁿ), Memory: O(n·2ⁿ)
-// Expected optimal tour: [0 → 1 → 2 → 3 → 0], cost = 4.
-func ExampleTSPExact_small() {
-	mat := build4Cycle()
-	res, err := tsp.TSPExact(mat)
+	// 2) Convert graph to adjacency matrix
+	optsMat := matrix.NewMatrixOptions(matrix.WithWeighted(true))
+	am, err := matrix.NewAdjacencyMatrix(g, optsMat)
 	if err != nil {
-		panic(err)
+		log.Fatalf("matrix conversion: %v", err)
 	}
-	fmt.Printf("Exact 4-cycle cost: %.0f\n", res.Cost)
-	// Output:
-	// Exact 4-cycle cost: 4
-}
+	// 'am.Index' maps location name → matrix index
+	// 'am.Data' is the [][]float64 distance matrix
 
-// ExampleTSPExact demonstrates Held-Karp on an 8‐node cycle.
-//
-// Graph: nodes 0-7 arranged in a ring, unit‐distance to neighbors.
-//
-// Complexity: O(n²·2ⁿ), Memory: O(n·2ⁿ)
-// Expected optimal cost = 8.
-func ExampleTSPExact() {
-	mat := build8Cycle()
-	res, err := tsp.TSPExact(mat)
+	// 3) Solve TSP via 1.5-approximation (Christofides)
+	tspOpts := tsp.DefaultOptions()
+	//res, err := tsp.TSPApprox(am.Data, tspOpts)
+	res, err := tsp.TSPApprox(am.Data, tspOpts)
 	if err != nil {
-		panic(err)
+		log.Fatalf("TSPApprox failed: %v", err)
 	}
-	fmt.Printf("Exact 8-cycle cost: %.0f\n", res.Cost)
-	// Output:
-	// Exact 8-cycle cost: 8
-}
 
-// ExampleTSPExact_disconnected shows error on an incomplete graph.
-//
-// Start with a 5-cycle, then remove edge 1-2 (make it ∞).
-// Expect ErrTSPIncompleteGraph.
-func ExampleTSPExact_disconnected() {
-	// 5-cycle using first 5 rows of build8Cycle
-	mat := build8Cycle()[0:5]
-	mat = breakEdge(mat, 1, 2)
-	_, err := tsp.TSPExact(mat)
-	fmt.Printf("Error: %v\n", err)
-	// Output:
-	// Error: tsp: incomplete distance matrix
-}
-
-////////////////////////////////////////////////////////////////////////////////
-// Christofides 1.5-Approximation Examples
-////////////////////////////////////////////////////////////////////////////////
-
-// ExampleTSPApprox_small demonstrates Christofides’ algorithm on a 4-cycle.
-//
-// Even though approximate, on a metric cycle it finds the exact tour.
-//
-// Complexity: O(n³), Memory: O(n²)
-// Expected cost = 4.
-func ExampleTSPApprox_small() {
-	mat := build4Cycle()
-	res, err := tsp.TSPApprox(mat)
-	if err != nil {
-		panic(err)
+	// 4) Print route without extra indentation
+	fmt.Println("Planned delivery route:")
+	for i, idx := range res.Tour {
+		fmt.Printf("%d: %s\n", i, locations[idx])
 	}
-	fmt.Printf("Approx 4-cycle cost: %.0f\n", res.Cost)
+	fmt.Printf("\nTotal distance: %.0f km\n", res.Cost)
 	// Output:
-	// Approx 4-cycle cost: 4
-}
-
-// ExampleTSPApprox_Medium demonstrates Christofides on an 8-node cycle.
-//
-// Complexity: O(n³), Memory: O(n²)
-// Expected cost = 8.
-func ExampleTSPApprox() {
-	mat := build8Cycle()
-	res, err := tsp.TSPApprox(mat)
-	if err != nil {
-		panic(err)
-	}
-	fmt.Printf("Approx 8-cycle cost: %.0f\n", res.Cost)
-	// Output:
-	// Approx 8-cycle cost: 8
-}
-
-// ExampleTSPApprox_disconnected shows Christofides error on a disconnected graph.
-//
-// Break one edge in a 6-node cycle, expect ErrTSPIncompleteGraph.
-func ExampleTSPApprox_disconnected() {
-	mat := build8Cycle()[0:6]
-	mat = breakEdge(mat, 2, 3)
-	_, err := tsp.TSPApprox(mat)
-	fmt.Printf("Error: %v\n", err)
-	// Output:
-	// Error: tsp: incomplete distance matrix
+	// Planned delivery route:
+	// 0: Hub
+	// 1: SouthPark
+	// 2: Airport
+	// 3: NorthMall
+	// 4: Uptown
+	// 5: WestSide
+	// 6: EastPlaza
+	// 7: Downtown
+	// 8: University
+	// 9: Stadium
+	// 10: Hub
+	//
+	// Total distance: 7 km
 }

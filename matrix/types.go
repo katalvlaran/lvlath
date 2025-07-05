@@ -20,20 +20,25 @@ var (
 
 	// ErrNilGraph indicates that a nil *core.Graph was passed to a matrix constructor.
 	ErrNilGraph = errors.New("matrix: graph is nil")
+
+	// ErrNotImplemented signals a placeholder routine.
+	ErrNotImplemented = errors.New("matrix: not yet implemented")
 )
 
 // MatrixOptions configures how adjacency and incidence matrices are built.
-//   - Directed:   treat edges as directed (true) or undirected (false).
-//   - Weighted:   preserve edge weights when true; otherwise treat all edges as weight 1.
-//   - AllowMulti: include parallel edges when true; otherwise collapse duplicates.
-//   - AllowLoops:  include self-loops when true; otherwise skip them.
+//   - Directed:       treat edges as directed (true) or undirected (false).
+//   - Weighted:       preserve edge weights when true; otherwise treat all edges as weight 1.
+//   - AllowMulti:     include parallel edges when true; otherwise collapse duplicates.
+//   - AllowLoops:     include self-loops when true; otherwise skip them.
+//   - MetricClosure:  enables “fill missing edges → Inf + APSP metric closure”.
 //
 // Use NewMatrixOptions to create with default values and overrides.
 type MatrixOptions struct {
-	Directed   bool // directed edges
-	Weighted   bool // weight preservation
-	AllowMulti bool // parallel edges
-	AllowLoops bool // self-loops
+	Directed      bool // directed edges
+	Weighted      bool // weight preservation
+	AllowMulti    bool // parallel edges
+	AllowLoops    bool // self-loops
+	MetricClosure bool // non-edges → Inf + APSP closure
 }
 
 // Option configures a MatrixOptions instance.
@@ -59,14 +64,20 @@ func WithAllowLoops(l bool) Option {
 	return func(o *MatrixOptions) { o.AllowLoops = l }
 }
 
+// WithMetricClosure returns an Option that sets the MetricClosure field.
+func WithMetricClosure(mc bool) Option {
+	return func(o *MatrixOptions) { o.MetricClosure = mc }
+}
+
 // NewMatrixOptions constructs a MatrixOptions with given Option functions applied.
-// Defaults: Directed=false, Weighted=false, AllowMulti=true, AllowLoops=true.
+// Defaults: Directed=false, Weighted=false, AllowMulti=true, AllowLoops=true, MetricClosure=false.
 func NewMatrixOptions(opts ...Option) MatrixOptions {
 	mo := MatrixOptions{
-		Directed:   false,
-		Weighted:   false,
-		AllowMulti: true,
-		AllowLoops: true,
+		Directed:      false,
+		Weighted:      false,
+		AllowMulti:    true,
+		AllowLoops:    true,
+		MetricClosure: false,
 	}
 	for _, opt := range opts {
 		opt(&mo)

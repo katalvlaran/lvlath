@@ -1,175 +1,122 @@
 package tsp
 
 import (
-	"errors"
-	"fmt"
-	"math"
+	"fmt"  // formatted I/O for error messages
+	"math" // math constants and functions
+
+	"github.com/katalvlaran/lvlath/matrix" // matrix helpers: MST, matching, Eulerian circuit
 )
 
-// TSPApprox computes a 1.5-approximation to the Travelling Salesman
-// Problem on a metric (symmetric, triangle-inequality) distance matrix
-// using the Christofides algorithm.
+// TSPApprox computes a 1.5-approximation to the Travelling Salesman Problem
+// on a complete, symmetric, metric distance matrix using Christofides’ algorithm.
+// It returns a Hamiltonian cycle starting and ending at opts.StartVertex.
 //
-// Steps:
-//  1. Build a minimum spanning tree (MST) of the complete graph via Prim.
-//  2. Find all vertices of odd degree in the MST.
-//  3. Compute a minimum-weight perfect matching on the induced odd-degree subgraph.
-//     Here we use a greedy heuristic: repeatedly match the two closest unmatched.
-//  4. Combine MST edges and matching edges into a multigraph (Eulerian).
-//  5. Find an Eulerian tour (Hierholzer’s algorithm).
-//  6. Shortcut repeated vertices to obtain a Hamiltonian cycle.
+// Input:
 //
-// Input: n×n symmetric matrix dist, dist[i][i]==0, dist[i][j]=dist[j][i].
+//	dist — an n×n [][]float64 where
+//	       • dist[i][i] == 0
+//	       • dist[i][j] ≥ 0
+//	       • dist[i][j] == dist[j][i]
+//	       • math.Inf(1) signals “no edge” (incomplete graph).
 //
-//	math.Inf(1) entries indicate missing edges (non-metric).
+// Options:
 //
-// Returns a TSResult with Tour (n+1 length, start and end at 0) and Cost.
-// Returns ErrTSPIncompleteGraph if the matrix is invalid or a cycle cannot be formed.
+//	opts.StartVertex    — index in [0..n-1] to start/end the tour.
+//	opts.MatchingAlgo   — GreedyMatch or BlossomMatch for the odd-vertex matching.
+//	opts.BoundAlgo      — reserved for future B&B selection.
 //
-// Time:    O(n² + n³) dominated by matching heuristic and Euler tour.
-// Memory:  O(n²)
-func TSPApprox(dist [][]float64) (TSResult, error) {
-	n := len(dist)
-	if n == 0 {
-		return TSResult{}, errors.New("tsp: empty matrix")
+// Returns:
+//
+//	TSResult{Tour, Cost} on success,
+//	ErrNonSquare      if dist is not square,
+//	ErrNegativeWeight if any dist[i][j] < 0,
+//	ErrNonZeroDiagonal if any dist[i][i] != 0,
+//	ErrAsymmetry      if dist[i][j] != dist[j][i],
+//	ErrIncompleteGraph if no Hamiltonian cycle exists.
+func TSPApprox(dist [][]float64, opts Options) (TSResult, error) {
+	// --- 1. Dimension & symmetry validation ---
+	n := len(dist) // number of vertices
+	if n == 0 {    // empty matrix
+		return TSResult{}, ErrNonSquare
 	}
-	// -- 1. Validate symmetric metric matrix --
 	for i := 0; i < n; i++ {
-		if len(dist[i]) != n {
-			return TSResult{}, fmt.Errorf("tsp: row %d length %d, want %d", i, len(dist[i]), n)
+		if len(dist[i]) != n { // each row must have length n
+			return TSResult{}, ErrNonSquare
 		}
-		for j := 0; j < n; j++ {
-			if i == j {
-				if dist[i][j] != 0 {
-					return TSResult{}, fmt.Errorf("tsp: dist[%d][%d]=%v; self-distance must be 0", i, j, dist[i][j])
-				}
-			} else {
-				if dist[i][j] != dist[j][i] {
-					return TSResult{}, fmt.Errorf("tsp: non-symmetric at [%d][%d]=%v vs [%d][%d]=%v",
-						i, j, dist[i][j], j, i, dist[j][i])
-				}
-				if math.IsInf(dist[i][j], 1) {
-					return TSResult{}, ErrTSPIncompleteGraph
-				}
+		if dist[i][i] != 0 { // self‐distance must be zero
+			return TSResult{}, ErrNonZeroDiagonal
+		}
+		for j := i + 1; j < n; j++ {
+			if dist[i][j] < 0 { // negative distances forbidden
+				return TSResult{}, ErrNegativeWeight
+			}
+			if dist[i][j] != dist[j][i] { // symmetry requirement
+				return TSResult{}, ErrAsymmetry
 			}
 		}
 	}
 
-	// -- 2. Build MST on complete graph via Prim --
-	mstAdj := make([][]int, n)    // adjacency list of MST
-	used := make([]bool, n)       // in-MST flag
-	minEdge := make([]float64, n) // best edge weight to add
-	parent := make([]int, n)      // parent in MST
-	for i := range minEdge {
-		minEdge[i] = math.Inf(1)
-		parent[i] = -1
-	}
-	minEdge[0] = 0
-	for iter := 0; iter < n; iter++ {
-		// pick unused vertex with minimal minEdge
-		u, best := -1, math.Inf(1)
-		for v := 0; v < n; v++ {
-			if !used[v] && minEdge[v] < best {
-				best, u = minEdge[v], v
-			}
-		}
-		if u < 0 {
-			return TSResult{}, ErrTSPIncompleteGraph
-		}
-		used[u] = true
-		if parent[u] >= 0 {
-			mstAdj[u] = append(mstAdj[u], parent[u])
-			mstAdj[parent[u]] = append(mstAdj[parent[u]], u)
-		}
-		// relax neighbors
-		for v := 0; v < n; v++ {
-			if !used[v] && dist[u][v] < minEdge[v] {
-				minEdge[v] = dist[u][v]
-				parent[v] = u
-			}
-		}
+	// --- 2. Validate StartVertex ---
+	if opts.StartVertex < 0 || opts.StartVertex >= n {
+		return TSResult{}, fmt.Errorf("tsp: StartVertex %d out of range [0,%d): %w",
+			opts.StartVertex, n, ErrBadInput)
 	}
 
-	// -- 3. Find odd-degree vertices in MST --
+	// --- 3. Build Minimum Spanning Tree (MST) ---
+	// Prim’s algorithm via matrix.MinimumSpanningTree (O(n²))
+	_, mstAdj, err := MinimumSpanningTree(dist)
+	if err != nil {
+		return TSResult{}, err // could be ErrIncompleteGraph
+	}
+
+	// --- 4. Find odd‐degree vertices in MST ---
 	var odd []int
 	for v := 0; v < n; v++ {
 		if len(mstAdj[v])%2 == 1 {
-			odd = append(odd, v)
+			odd = append(odd, v) // collect odd-degree nodes
 		}
 	}
 
-	// -- 4. Greedy perfect matching among odd vertices --
-	// We'll match nearest pairs repeatedly.
-	paired := make([]bool, n)
-	for len(odd) > 0 {
-		u := odd[0]
-		paired[u] = true
-		odd = odd[1:]
-		// find closest to u
-		bestIdx, bestDist := -1, math.Inf(1)
-		for i, v := range odd {
-			if dist[u][v] < bestDist {
-				bestDist = dist[u][v]
-				bestIdx = i
-			}
+	// --- 5. Perfect matching on odd vertices ---
+	switch opts.MatchingAlgo {
+	case BlossomMatch:
+		if matchErr := blossomMatch(odd, dist, mstAdj); matchErr != nil && matchErr != matrix.ErrNotImplemented {
+			return TSResult{}, matchErr
 		}
-		if bestIdx < 0 {
-			return TSResult{}, ErrTSPIncompleteGraph
-		}
-		v := odd[bestIdx]
-		// add matching edge u–v
-		mstAdj[u] = append(mstAdj[u], v)
-		mstAdj[v] = append(mstAdj[v], u)
-		paired[v] = true
-		// remove v from odd list
-		odd = append(odd[:bestIdx], odd[bestIdx+1:]...)
+	case GreedyMatch:
+		greedyMatch(odd, dist, mstAdj)
+	default:
+		// default to true blossom if available
+		greedyMatch(odd, dist, mstAdj)
 	}
 
-	// -- 5. Find Eulerian tour on the multigraph (Hierholzer) --
-	// Build edge multiset with indices
-	type edge struct{ to, idx int }
-	multi := make([][]edge, n)
-	for u := 0; u < n; u++ {
-		for _, v := range mstAdj[u] {
-			multi[u] = append(multi[u], edge{v, u})
-		}
-	}
-	var tour []int
-	var dfsEuler func(u int)
-	dfsEuler = func(u int) {
-		for len(multi[u]) > 0 {
-			e := multi[u][len(multi[u])-1]
-			multi[u] = multi[u][:len(multi[u])-1]
-			// remove corresponding reverse edge
-			for i, re := range multi[e.to] {
-				if re.to == u {
-					multi[e.to] = append(multi[e.to][:i], multi[e.to][i+1:]...)
-					break
-				}
-			}
-			dfsEuler(e.to)
-		}
-		tour = append(tour, u)
-	}
-	dfsEuler(0)
+	// --- 6. Compute Eulerian circuit on the multigraph ---
+	// Hierholzer’s algorithm via matrix.EulerianCircuit (O(E))
+	euler := EulerianCircuit(mstAdj, opts.StartVertex)
 
-	// -- 6. Shortcut to Hamiltonian cycle --
-	visitedTour := make([]bool, n)
-	var cycle []int
-	for _, v := range tour {
-		if !visitedTour[v] {
+	// --- 7. Shortcut to Hamiltonian cycle ---
+	visit := make([]bool, n)     // mark visited vertices
+	cycle := make([]int, 0, n+1) // pre-allocate n+1 spots
+	for _, v := range euler {
+		if !visit[v] { // include only first visit
 			cycle = append(cycle, v)
-			visitedTour[v] = true
+			visit[v] = true
 		}
 	}
-	cycle = append(cycle, cycle[0]) // close cycle
+	cycle = append(cycle, opts.StartVertex) // close the cycle
 
-	// compute cost
-	var total float64
-	for i := 0; i < len(cycle)-1; i++ {
-		u, v := cycle[i], cycle[i+1]
-		total += dist[u][v]
+	// --- 8. Compute total tour cost ---
+	var cost float64
+	for k := 0; k < len(cycle)-1; k++ {
+		u, v := cycle[k], cycle[k+1]
+		d := dist[u][v]
+		if math.IsInf(d, 1) { // missing edge ⇒ no Hamiltonian cycle
+			return TSResult{}, ErrIncompleteGraph
+		}
+		cost += d
 	}
+	// Round cost to nanosecond precision to avoid floating-point noise
+	cost = math.Round(cost*1e9) / 1e9
 
-	return TSResult{Tour: cycle, Cost: total}, nil
+	return TSResult{Tour: cycle, Cost: cost}, nil
 }

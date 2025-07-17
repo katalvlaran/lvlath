@@ -51,11 +51,11 @@
 //
 // Sentinel Errors
 //
-//	ErrUnknownVertex     // referenced vertex not found in index
-//	ErrDimensionMismatch // incompatible matrix dimensions
-//	ErrNonBinaryIncidence// non-±1 entry in unweighted incidence matrix
-//	ErrEigenFailed       // eigen decomposition did not converge
-//	ErrNilGraph          // nil *core.Graph passed to constructor
+//	ErrUnknownVertex           // referenced vertex not found in index
+//	ErrMatrixDimensionMismatch // incompatible matrix dimensions
+//	ErrNonBinaryIncidence      // non-±1 entry in unweighted incidence matrix
+//	ErrMatrixEigenFailed             // eigen decomposition did not converge
+//	ErrMatrixNilGraph          // nil *core.Graph passed to constructor
 //
 // See docs/matrix.md for a full tutorial and best practices.
 package matrix

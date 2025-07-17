@@ -4,80 +4,89 @@ package matrix
 
 import "errors"
 
-// Sentinel errors for matrix package operations.
+// VertexID uniquely identifies a graph vertex.
+type VertexID string
+
+// Weight represents an edge weight; must be finite and non-NaN.
+type Weight float64
+
+// Sentinel errors for matrix operations.
 var (
-	// ErrUnknownVertex indicates a referenced vertex is not present in the matrix.
-	ErrUnknownVertex = errors.New("matrix: unknown vertex")
+	// ErrMatrixUnknownVertex indicates that a referenced VertexID is not present.
+	ErrMatrixUnknownVertex = errors.New("matrix: unknown vertex")
 
-	// ErrDimensionMismatch indicates two matrices have incompatible dimensions for the operation.
-	ErrDimensionMismatch = errors.New("matrix: dimension mismatch")
+	// ErrMatrixDimensionMismatch indicates incompatible dimensions.
+	ErrMatrixDimensionMismatch = errors.New("matrix: dimension mismatch")
 
-	// ErrNonBinaryIncidence indicates a non-binary entry in an unweighted incidence matrix.
-	ErrNonBinaryIncidence = errors.New("matrix: non-binary incidence in unweighted matrix")
+	// ErrMatrixNonBinaryIncidence indicates non-±1 entries in unweighted incidence.
+	ErrMatrixNonBinaryIncidence = errors.New("matrix: non-binary incidence")
 
-	// ErrEigenFailed indicates that eigen decomposition did not converge.
-	ErrEigenFailed = errors.New("matrix: eigen decomposition failed")
+	// ErrMatrixNilGraph indicates a nil *core.Graph was passed.
+	ErrMatrixNilGraph = errors.New("matrix: nil graph")
 
-	// ErrNilGraph indicates that a nil *core.Graph was passed to a matrix constructor.
-	ErrNilGraph = errors.New("matrix: graph is nil")
-
-	// ErrNotImplemented signals a placeholder routine.
-	ErrNotImplemented = errors.New("matrix: not yet implemented")
+	// ErrMatrixNotImplemented is a placeholder for future methods.
+	ErrMatrixNotImplemented = errors.New("matrix: not implemented")
 )
 
-// MatrixOptions configures how adjacency and incidence matrices are built.
-//   - Directed:       treat edges as directed (true) or undirected (false).
-//   - Weighted:       preserve edge weights when true; otherwise treat all edges as weight 1.
-//   - AllowMulti:     include parallel edges when true; otherwise collapse duplicates.
-//   - AllowLoops:     include self-loops when true; otherwise skip them.
-//   - MetricClosure:  enables “fill missing edges → Inf + APSP metric closure”.
+// Default configuration values for MatrixOptions.
+const (
+	DefaultDirected      = false
+	DefaultWeighted      = false
+	DefaultAllowMulti    = true
+	DefaultAllowLoops    = true
+	DefaultMetricClosure = false
+)
+
+// MatrixOptions configures graph→matrix transformation.
+// Zero value means:
 //
-// Use NewMatrixOptions to create with default values and overrides.
+//	Directed=false, Weighted=false, AllowMulti=true, AllowLoops=true, MetricClosure=false.
 type MatrixOptions struct {
 	Directed      bool // directed edges
-	Weighted      bool // weight preservation
-	AllowMulti    bool // parallel edges
-	AllowLoops    bool // self-loops
-	MetricClosure bool // non-edges → Inf + APSP closure
+	Weighted      bool // preserve actual weights
+	AllowMulti    bool // include parallel edges
+	AllowLoops    bool // include self-loops
+	MetricClosure bool // fill missing edges with +Inf and run APSP
 }
 
-// Option configures a MatrixOptions instance.
-type Option func(*MatrixOptions)
+// MatrixOption configures how adjacency/incidence matrices are built.
+// Panics on invalid use (programmer error).
+type MatrixOption func(*MatrixOptions)
 
-// WithDirected returns an Option that sets the Directed field.
-func WithDirected(d bool) Option {
+// WithDirected sets Directed mode.
+func WithDirected(d bool) MatrixOption {
 	return func(o *MatrixOptions) { o.Directed = d }
 }
 
-// WithWeighted returns an Option that sets the Weighted field.
-func WithWeighted(w bool) Option {
+// WithWeighted sets Weighted mode.
+func WithWeighted(w bool) MatrixOption {
 	return func(o *MatrixOptions) { o.Weighted = w }
 }
 
-// WithAllowMulti returns an Option that sets the AllowMulti field.
-func WithAllowMulti(m bool) Option {
+// WithAllowMulti sets AllowMulti mode.
+func WithAllowMulti(m bool) MatrixOption {
 	return func(o *MatrixOptions) { o.AllowMulti = m }
 }
 
-// WithAllowLoops returns an Option that sets the AllowLoops field.
-func WithAllowLoops(l bool) Option {
+// WithAllowLoops sets AllowLoops mode.
+func WithAllowLoops(l bool) MatrixOption {
 	return func(o *MatrixOptions) { o.AllowLoops = l }
 }
 
-// WithMetricClosure returns an Option that sets the MetricClosure field.
-func WithMetricClosure(mc bool) Option {
+// WithMetricClosure sets MetricClosure mode.
+func WithMetricClosure(mc bool) MatrixOption {
 	return func(o *MatrixOptions) { o.MetricClosure = mc }
 }
 
-// NewMatrixOptions constructs a MatrixOptions with given Option functions applied.
-// Defaults: Directed=false, Weighted=false, AllowMulti=true, AllowLoops=true, MetricClosure=false.
-func NewMatrixOptions(opts ...Option) MatrixOptions {
+// NewMatrixOptions returns a MatrixOptions populated with defaults
+// and then modified by any provided MatrixOption functions.
+func NewMatrixOptions(opts ...MatrixOption) MatrixOptions {
 	mo := MatrixOptions{
-		Directed:      false,
-		Weighted:      false,
-		AllowMulti:    true,
-		AllowLoops:    true,
-		MetricClosure: false,
+		Directed:      DefaultDirected,
+		Weighted:      DefaultWeighted,
+		AllowMulti:    DefaultAllowMulti,
+		AllowLoops:    DefaultAllowLoops,
+		MetricClosure: DefaultMetricClosure,
 	}
 	for _, opt := range opts {
 		opt(&mo)

@@ -6,10 +6,9 @@ import (
 	"fmt" // fmt is used to print results in examples
 	// Import core to build Graphs
 	"github.com/katalvlaran/lvlath/core"
-	// Import dijkstra to run the Dijkstra algorithm
-	"github.com/katalvlaran/lvlath/dijkstra"
-	// Import matrix to demonstrate building a graph from an adjacency matrix
 	"github.com/katalvlaran/lvlath/matrix"
+
+	"github.com/katalvlaran/lvlath/dijkstra"
 )
 
 // ExampleDijkstra_Triangle demonstrates computing shortest paths on a simple triangle graph.

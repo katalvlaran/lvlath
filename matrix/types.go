@@ -33,7 +33,7 @@ const (
 	DefaultDirected      = false
 	DefaultWeighted      = false
 	DefaultAllowMulti    = true
-	DefaultAllowLoops    = true
+	DefaultAllowLoops    = false
 	DefaultMetricClosure = false
 )
 

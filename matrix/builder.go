@@ -8,7 +8,6 @@ import (
 	"math"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/matrix/ops"
 )
 
 const (
@@ -66,31 +65,37 @@ func applyMetricClosure(mat *Dense) error {
 			// safe at-bound access
 			val, _ = mat.At(u, v)
 			if val == 0 {
-				mat.Set(u, v, math.Inf(1))
+				_ = mat.Set(u, v, math.Inf(1))
 			}
 		}
 	}
 
 	// Stage 3 (Execute): run all-pairs shortest paths
-	return ops.FloydWarshall(mat)
+	return FloydWarshall(mat)
 }
 
 // BuildDenseAdjacency constructs a V×V adjacency matrix in Dense form.
-//   - vertices: ordered slice of unique vertex IDs (length V).
-//   - edges:    slice of *core.Edge to populate (may be empty or nil).
-//   - opts:     MatrixOptions controlling directed, weighted, loops, multi-edge, and metric closure.
+//   - vertices: ordered slice of unique vertex IDs (length V > 0).
+//   - edges:    slice of *core.Edge to populate (nil treated as empty).
+//   - opts:     MatrixOptions controlling directed, weighted, loops, multi-edge collapse, metric closure.
 //
 // Returns:
-//   - idx: map from vertex ID to its row/column index.
-//   - mat: pointer to a Dense matrix of size V×V with populated weights.
-//   - err: any error encountered (invalid dims, unknown vertex, invalid weight).
+//   - idx: map from VertexID → row/column index.
+//   - mat: *Dense of size V×V with properly set weights.
+//   - err: any error encountered (empty vertices, unknown vertex, invalid weight).
 //
 // Stage 1 (Validate): ensure vertices non-empty.
-// Stage 2 (Prepare): build index map and allocate matrix.
-// Stage 3 (Execute): iterate edges, set weights, collapse duplicates.
-// Stage 4 (Finalize): apply metric closure if requested.
-// Stage 5 (Return): return built structures or error.
-func BuildDenseAdjacency(vertices []string, edges []*core.Edge, opts MatrixOptions) (map[string]int, *Dense, error) {
+// Stage 2 (Prepare): build index map and allocate zero-filled matrix.
+// Stage 3 (Execute): process each edge, apply rules, set entries.
+// Stage 4 (Finalize): apply APSP metric closure if requested.
+// Stage 5 (Return): return idx and mat or error.
+//
+// Time Complexity: O(V^2 + E)  (matrix init O(V^2) + edge loop O(E)); Space Complexity: O(V^2)
+func BuildDenseAdjacency(
+	vertices []string,
+	edges []*core.Edge,
+	opts MatrixOptions,
+) (map[string]int, *Dense, error) {
 	// Stage 1: Validate inputs
 	if len(vertices) == 0 {
 		return nil, nil, ErrInvalidDimensions // no vertices to build
@@ -111,26 +116,28 @@ func BuildDenseAdjacency(vertices []string, edges []*core.Edge, opts MatrixOptio
 		w    float64                   // edge weight
 	)
 	for i, id = range vertices {
-		idx[id] = i // assign each vertex an index
+		idx[id] = i // assign deterministic row index
 	}
-	mat, err = NewDense(V, V) // allocate zero-filled matrix
+	mat, err = NewDense(V, V) // zero-filled V×V matrix
 	if err != nil {
 		return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 	}
 
 	// Stage 3: Execute edge population
 	for _, edge = range edges {
-		// lookup source index or fail
+		// Lookup source index or fail
 		src, err = lookupIndex(idx, edge.From)
 		if err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
-		// lookup target index or fail
+
+		// Lookup target index or fail
 		dst, err = lookupIndex(idx, edge.To)
 		if err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
-		// skip loops if not allowed
+
+		// Skip self-loop if not allowed
 		if src == dst && !opts.AllowLoops {
 			continue
 		}
@@ -138,21 +145,24 @@ func BuildDenseAdjacency(vertices []string, edges []*core.Edge, opts MatrixOptio
 		if !opts.AllowMulti && !opts.Directed && shouldSkipMulti(src, dst, seen) {
 			continue
 		}
-		// compute weight
+
+		// Determine weight: actual or default
 		if opts.Weighted {
 			w = float64(edge.Weight)
 		} else {
 			w = defaultWeight
 		}
-		// validate weight is finite
+
+		// Validate weight finite
 		if math.IsNaN(w) || math.IsInf(w, 0) {
 			return nil, nil, ErrInvalidWeight
 		}
-		// set matrix entry
+		// Set matrix entry
 		if err = mat.Set(src, dst, w); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: set(%d,%d): %w", src, dst, err)
 		}
-		// mirror for undirected graphs
+
+		// Mirror for undirected graphs
 		if !opts.Directed {
 			if err = mat.Set(dst, src, w); err != nil {
 				return nil, nil, fmt.Errorf("BuildDenseAdjacency: mirror set(%d,%d): %w", dst, src, err)
@@ -224,11 +234,20 @@ func BuildDenseIncidence(
 		cols = append(cols, e)
 	}
 
-	// Stage 3: Allocate matrix
-	E := len(cols)
-	mat, err := NewDense(V, E)
-	if err != nil {
-		return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: %w", err)
+	// Stage 3: Allocate underlying Dense
+	var (
+		E   = len(cols)
+		mat *Dense
+		err error
+	)
+	if E == 0 {
+		// zero-column incidence: allow cols==0
+		mat = &Dense{r: V, c: 0, data: make([]float64, 0)}
+	} else {
+		mat, err = NewDense(V, E)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: %w", err)
+		}
 	}
 
 	// Stage 4: Populate
@@ -245,11 +264,14 @@ func BuildDenseIncidence(
 		}
 		// Mark source/target
 		if opts.Directed {
-			_ = mat.Set(iFrom, j, -1) // source
-			_ = mat.Set(iTo, j, +1)   // target
+			_ = mat.Set(iFrom, j, srcMark)
+			_ = mat.Set(iTo, j, dstMark)
 		} else {
-			_ = mat.Set(iFrom, j, +1) // both endpoints
-			_ = mat.Set(iTo, j, +1)
+			// undirected: both endpoints +1
+			_ = mat.Set(iFrom, j, loopMark)
+			if iTo != iFrom {
+				_ = mat.Set(iTo, j, loopMark)
+			}
 		}
 	}
 

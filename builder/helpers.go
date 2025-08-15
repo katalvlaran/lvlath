@@ -61,6 +61,22 @@ func addSequentialVertices(g *core.Graph, n int) error {
 	return nil
 }
 
+// addVerticesWithIDFn adds vertices idFn(0..n-1).
+func addVerticesWithIDFn(g *core.Graph, n int, idFn IDFn) error {
+	var (
+		i   int
+		vid string
+		err error
+	)
+	for i = 0; i < n; i++ {
+		vid = idFn(i)
+		if err = g.AddVertex(vid); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 // addCompleteEdges connects every unordered pair in ids with edges of weight w.
 // For directed graphs, mirrors each edge in the opposite direction.
 //

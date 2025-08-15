@@ -124,9 +124,13 @@ func Cycle(n int, opts ...BuilderOption) GraphConstructor {
 
 		// Build the ring: for each i, connect i → (i+1)%n
 		for i = 0; i < n; i++ {
-			u = cfg.idFn(i)                // compute source ID
-			v = cfg.idFn((i + 1) % n)      // compute target ID
-			weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			u = cfg.idFn(i)           // compute source ID
+			v = cfg.idFn((i + 1) % n) // compute target ID
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(u, v, weight); err != nil {
 				// wrap with uniform builder context
 				return builderErrorf(MethodCycle, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
@@ -187,9 +191,13 @@ func Path(n int, opts ...BuilderOption) GraphConstructor {
 
 		// Build the path: for each i in [1..n-1], connect (i-1) → i
 		for i = 1; i < n; i++ {
-			u = cfg.idFn(i - 1)            // compute source ID
-			v = cfg.idFn(i)                // compute target ID
-			weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			u = cfg.idFn(i - 1) // compute source ID
+			v = cfg.idFn(i)     // compute target ID
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(u, v, weight); err != nil {
 				// wrap with uniform builder context
 				return builderErrorf(MethodPath, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
@@ -253,8 +261,11 @@ func Star(n int, opts ...BuilderOption) GraphConstructor {
 			if err = g.AddVertex(leafID); err != nil {
 				return builderErrorf(MethodStar, "AddVertex(%s): %v", leafID, err)
 			}
-
-			weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(CenterVertexID, leafID, weight); err != nil {
 				return builderErrorf(MethodStar, "AddEdge(%s→%s,w=%d): %v", CenterVertexID, leafID, weight, err)
 			}
@@ -317,10 +328,19 @@ func Wheel(n int, opts ...BuilderOption) GraphConstructor {
 
 		// Connect hub to each cycle vertex
 		for i = 0; i < n; i++ {
-			vid = cfg.idFn(i)              // compute cycle vertex ID
-			weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			vid = cfg.idFn(i) // compute cycle vertex ID
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng) // sample weight via configured RNG
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(CenterVertexID, vid, weight); err != nil {
 				return builderErrorf(MethodWheel, "AddEdge(%s→%s,w=%d): %v", CenterVertexID, vid, weight, err)
+			}
+			if g.Directed() {
+				if _, err = g.AddEdge(vid, CenterVertexID, weight); err != nil {
+					return builderErrorf(MethodWheel, "AddEdge(%s→%s,w=%d): %v", vid, CenterVertexID, weight, err)
+				}
 			}
 		}
 
@@ -388,7 +408,11 @@ func Complete(n int, opts ...BuilderOption) GraphConstructor {
 			u = ids[i]
 			for j = i + 1; j < n; j++ {
 				v = ids[j]
-				weight = cfg.weightFn(cfg.rng) // sample weight
+				if g.Weighted() {
+					weight = cfg.weightFn(cfg.rng) // sample weight
+				} else {
+					weight = 0
+				}
 				if _, err = g.AddEdge(u, v, weight); err != nil {
 					return builderErrorf(MethodComplete, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 				}
@@ -434,7 +458,8 @@ func CompleteBipartite(n1, n2 int, opts ...BuilderOption) GraphConstructor {
 		cfg := newBuilderConfig(opts...)
 
 		// 2. Validate partition sizes
-		if err := validatePartition(MethodCompleteBipartite, n1, n2); err != nil {
+		var err error
+		if err = validatePartition(MethodCompleteBipartite, n1, n2); err != nil {
 			return err
 		}
 
@@ -443,7 +468,7 @@ func CompleteBipartite(n1, n2 int, opts ...BuilderOption) GraphConstructor {
 		var i int // loop iterator
 		for i = 0; i < n1; i++ {
 			leftIDs[i] = vertexID("L", i) // e.g. "L0"
-			if err := g.AddVertex(leftIDs[i]); err != nil {
+			if err = g.AddVertex(leftIDs[i]); err != nil {
 				return builderErrorf(MethodCompleteBipartite,
 					"AddVertex(%s): %v", leftIDs[i], err)
 			}
@@ -454,7 +479,7 @@ func CompleteBipartite(n1, n2 int, opts ...BuilderOption) GraphConstructor {
 		var j int // loop iterator
 		for j = 0; j < n2; j++ {
 			rightIDs[j] = vertexID("R", j) // e.g. "R0"
-			if err := g.AddVertex(rightIDs[j]); err != nil {
+			if err = g.AddVertex(rightIDs[j]); err != nil {
 				return builderErrorf(MethodCompleteBipartite, "AddVertex(%s): %v", rightIDs[j], err)
 			}
 		}
@@ -463,13 +488,16 @@ func CompleteBipartite(n1, n2 int, opts ...BuilderOption) GraphConstructor {
 		var (
 			u, v   string
 			weight int64
-			err    error
 		)
 
 		// Connect each left to each right (and mirror if directed)
 		for _, u = range leftIDs {
 			for _, v = range rightIDs {
-				weight = cfg.weightFn(cfg.rng) // sample weight
+				if g.Weighted() {
+					weight = cfg.weightFn(cfg.rng) // sample weight
+				} else {
+					weight = 0
+				}
 				// Add edge u -> v
 				if _, err = g.AddEdge(u, v, weight); err != nil {
 					return builderErrorf(MethodCompleteBipartite, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
@@ -557,7 +585,11 @@ func RandomSparse(n int, p float64, opts ...BuilderOption) GraphConstructor {
 					}
 					if randSrc.Float64() <= p {
 						v = cfg.idFn(j)
-						weight = cfg.weightFn(randSrc)
+						if g.Weighted() {
+							weight = cfg.weightFn(randSrc) // sample weight
+						} else {
+							weight = 0
+						}
 						if _, err = g.AddEdge(u, v, weight); err != nil {
 							return builderErrorf(MethodRandomSparse, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 						}
@@ -571,7 +603,11 @@ func RandomSparse(n int, p float64, opts ...BuilderOption) GraphConstructor {
 				for j = i + 1; j < n; j++ {
 					if randSrc.Float64() <= p {
 						v = cfg.idFn(j)
-						weight = cfg.weightFn(randSrc)
+						if g.Weighted() {
+							weight = cfg.weightFn(randSrc) // sample weight
+						} else {
+							weight = 0
+						}
 						if _, err = g.AddEdge(u, v, weight); err != nil {
 							return builderErrorf(MethodRandomSparse, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 						}
@@ -666,7 +702,11 @@ func RandomRegular(n, degree int, opts ...BuilderOption) GraphConstructor {
 			}
 			u = cfg.idFn(uIdx)
 			v = cfg.idFn(vIdx)
-			weight = cfg.weightFn(cfg.rng)
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng)
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(u, v, weight); err != nil {
 				return builderErrorf(MethodRandomRegular, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 			}
@@ -738,8 +778,12 @@ func Grid(rows, cols int, opts ...BuilderOption) GraphConstructor {
 
 				// Right neighbor at (r, c+1)
 				if c+1 < cols {
-					v = gridVertexID(r, c+1)       // target ID
-					weight = cfg.weightFn(cfg.rng) // sample weight
+					v = gridVertexID(r, c+1) // target ID
+					if g.Weighted() {
+						weight = cfg.weightFn(cfg.rng) // sample weight
+					} else {
+						weight = 0
+					}
 					if _, err = g.AddEdge(u, v, weight); err != nil {
 						return builderErrorf(MethodGrid, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 					}
@@ -753,8 +797,12 @@ func Grid(rows, cols int, opts ...BuilderOption) GraphConstructor {
 
 				// Bottom neighbor at (r+1, c)
 				if r+1 < rows {
-					v = gridVertexID(r+1, c)       // target ID
-					weight = cfg.weightFn(cfg.rng) // sample weight again
+					v = gridVertexID(r+1, c) // target ID
+					if g.Weighted() {
+						weight = cfg.weightFn(cfg.rng) // sample weight again
+					} else {
+						weight = 0
+					}
 					if _, err = g.AddEdge(u, v, weight); err != nil {
 						return builderErrorf(MethodGrid, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 					}
@@ -832,7 +880,11 @@ func Hexagram(variant HexagramVariant, opts ...BuilderOption) GraphConstructor {
 		for _, chord = range chords {
 			u = cfg.idFn(chord.U) // "0", "1", …
 			v = cfg.idFn(chord.V)
-			weight = cfg.weightFn(cfg.rng)
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng)
+			} else {
+				weight = 0
+			}
 			if _, err = g.AddEdge(u, v, weight); err != nil {
 				return builderErrorf(MethodHexagram, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
 			}
@@ -898,7 +950,11 @@ func PlatonicSolid(name PlatonicName, withCenter bool, opts ...BuilderOption) Gr
 		for _, chord = range edges {
 			u = cfg.idFn(chord.U)
 			v = cfg.idFn(chord.V)
-			weight = cfg.weightFn(cfg.rng)
+			if g.Weighted() {
+				weight = cfg.weightFn(cfg.rng) // sample weight
+			} else {
+				weight = 0
+			}
 
 			if _, err = g.AddEdge(u, v, weight); err != nil {
 				return builderErrorf(MethodPlatonicSolid, "AddEdge(%s→%s,w=%d): %v", u, v, weight, err)
@@ -919,7 +975,11 @@ func PlatonicSolid(name PlatonicName, withCenter bool, opts ...BuilderOption) Gr
 			// connect hub to all base vertices
 			for i = 0; i < n; i++ {
 				v = cfg.idFn(i)
-				weight = cfg.weightFn(cfg.rng)
+				if g.Weighted() {
+					weight = cfg.weightFn(cfg.rng) // sample weight
+				} else {
+					weight = 0
+				}
 
 				if _, err = g.AddEdge(CenterVertexID, v, weight); err != nil {
 					return builderErrorf(MethodPlatonicSolid,

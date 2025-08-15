@@ -146,7 +146,10 @@ func (w *walker) enqueueNeighbors(item queueItem) error {
 	if err != nil {
 		return fmt.Errorf("%w: failed to get neighbors of %q: %v", ErrNeighbors, item.id, err)
 	}
-	for _, nbr := range neighbors {
+
+	var nextDepth int
+	var nbr string
+	for _, nbr = range neighbors {
 		// cancellation check inside neighbor iteration
 		select {
 		case <-w.ctx.Done():
@@ -158,7 +161,7 @@ func (w *walker) enqueueNeighbors(item queueItem) error {
 		if !w.opts.FilterNeighbor(item.id, nbr) {
 			continue
 		}
-		nextDepth := item.depth + 1
+		nextDepth = item.depth + 1
 		if w.opts.MaxDepth > 0 && nextDepth > w.opts.MaxDepth {
 			continue
 		}

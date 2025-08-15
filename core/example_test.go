@@ -115,7 +115,7 @@ func extractNeighborInfo(edges []*core.Edge) []string {
 //   - self-loops
 //   - default undirected
 func ExampleGraph_Special() {
-	// 1) Create a weighted, multi-edge, loop-enabled, undirected graph
+	// 1) Create a weighted, multi-edge, loop-enabled, mixed-mode graph
 	g := core.NewGraph(
 		core.WithMixedEdges(),
 		core.WithWeighted(),
@@ -148,15 +148,19 @@ func ExampleGraph_Special() {
 	nbD, _ := g.Neighbors("D")
 	fmt.Println("Neighbors of D:", extractNeighborInfo(nbD))
 
-	// 5) Adjacency matrix example
-	mOpts := matrix.NewMatrixOptions(
-		matrix.WithWeighted(true),
-		matrix.WithAllowMulti(true),
-		matrix.WithAllowLoops(true),
+	// 5) Build an adjacency matrix matching graph features
+	mo := matrix.NewMatrixOptions(
+		matrix.WithDirected(true),   // include directed arcs
+		matrix.WithWeighted(true),   // preserve actual weights
+		matrix.WithAllowMulti(true), // show parallel edges
+		matrix.WithAllowLoops(true), // include self-loops
 	)
-	am, _ := matrix.NewAdjacencyMatrix(g, mOpts)
-	iA, iB := am.Index["A"], am.Index["B"]
-	fmt.Printf("Adjacency A→B weight: %f\n", am.Data[iA][iB])
+	am, _ := matrix.NewAdjacencyMatrix(g, mo)
+
+	// 6) Query the matrix: A→B should be 10.0
+	iA, iB := am.VertexIndex["A"], am.VertexIndex["B"]
+	wAB, _ := am.Mat.At(iA, iB)
+	fmt.Printf("Adjacency A→B weight: %f\n", wAB)
 
 	// Output:
 	// Vertices: [A B C D E F G H I J]

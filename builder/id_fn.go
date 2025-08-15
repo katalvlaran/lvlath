@@ -75,6 +75,25 @@ func HexIDFn(idx int) string {
 	return strconv.FormatInt(int64(idx), 16)
 }
 
+// SymbolNumberIDFn returns prefix + decimal index, e.g. "v0", "v1", ...
+// Complexity: O(d) where d is the number of decimal digits in idx.
+// Panics if idx < 0.
+func SymbolNumberIDFn(prefix string) IDFn {
+	return func(idx int) string {
+		if idx < 0 {
+			panic(fmt.Sprintf("SymbolNumberIDFn: idx must be ≥ 0, got %d", idx))
+		}
+		return prefix + strconv.Itoa(idx)
+	}
+}
+
+// WithSymbNumb sets the ID scheme to SymbolNumberIDFn(prefix).
+// Example: WithSymbNumb("v") → "v0","v1",...
+// Complexity: O(1).
+func WithSymbNumb(prefix string) BuilderOption {
+	return WithIDScheme(SymbolNumberIDFn(prefix))
+}
+
 // WithDefaultIDs resets the ID scheme to DefaultIDFn.
 // Complexity: O(1).
 func WithDefaultIDs() BuilderOption {

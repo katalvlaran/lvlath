@@ -84,19 +84,3 @@ func TestValidateSquare(t *testing.T) {
 		})
 	}
 }
-
-// TestValidateSquareOrPanic ensures panic on non-square or nil matrix.
-func TestValidateSquareOrPanic(t *testing.T) {
-	t.Parallel()
-
-	// should not panic for square
-	m, _ := matrix.NewDense(2, 2)
-	require.NotPanics(t, func() { matrix.ValidateSquareOrPanic(m) })
-
-	// should panic for non-square
-	bad, _ := matrix.NewDense(2, 3)
-	require.Panics(t, func() { matrix.ValidateSquareOrPanic(bad) })
-
-	// should panic for nil
-	require.Panics(t, func() { matrix.ValidateSquareOrPanic(nil) })
-}

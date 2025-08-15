@@ -153,17 +153,22 @@ func (r *BFSResult) PathTo(dest string) ([]string, error) {
 		return nil, fmt.Errorf("bfs: no path to %q", dest)
 	}
 	// build reversed path
-	path := []string{}
-	for cur := dest; ; {
+	var (
+		path      []string
+		cur, prev string
+		ok        bool
+	)
+	for cur = dest; ; {
 		path = append(path, cur)
-		prev, ok := r.Parent[cur]
+		prev, ok = r.Parent[cur]
 		if !ok {
 			break
 		}
 		cur = prev
 	}
 	// reverse to get start → dest
-	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
+	var i, j int
+	for i, j = 0, len(path)-1; i < j; i, j = i+1, j-1 {
 		path[i], path[j] = path[j], path[i]
 	}
 

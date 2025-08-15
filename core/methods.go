@@ -87,7 +87,9 @@ func (g *Graph) RemoveVertex(id string) error {
 	}
 
 	// Remove all incident edges
-	for eid, e := range g.edges {
+	var eid string
+	var e *Edge
+	for eid, e = range g.edges {
 		if e.From == id || (!e.Directed && e.To == id) || (e.Directed && e.To == id) {
 			removeAdjacency(g, e) // remove both directions appropriately
 			delete(g.edges, eid)
@@ -155,7 +157,8 @@ func (g *Graph) AddEdge(from, to string, weight int64, opts ...EdgeOption) (stri
 	// Construct the Edge with the _global_ default directedness
 	e := &Edge{ID: eid, From: from, To: to, Weight: weight, Directed: g.directed}
 	// Apply any per-edge overrides (only WithEdgeDirected exists today)
-	for _, opt := range opts {
+	var opt EdgeOption
+	for _, opt = range opts {
 		opt(e)
 	}
 	// Re-check loops in case WithEdgeDirected changed nothing here, but best to keep the guard in case future options interfere.
@@ -236,9 +239,15 @@ func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 
 	var out []*Edge
 	// Iterate all "to" maps for this vertex
-	for _, edgeSet := range g.adjacencyList[id] {
-		for eid := range edgeSet {
-			e := g.edges[eid]
+
+	var (
+		edgeSet = make(map[string]struct{})
+		eid     string
+		e       *Edge
+	)
+	for _, edgeSet = range g.adjacencyList[id] {
+		for eid = range edgeSet {
+			e = g.edges[eid]
 			// For directed, include only if e.From == id
 			if e.Directed && e.From != id {
 				continue
@@ -265,15 +274,18 @@ func (g *Graph) NeighborIDs(id string) ([]string, error) {
 		return nil, err
 	}
 	seen := make(map[string]struct{}, len(edges))
-	for _, e := range edges {
+	var e *Edge
+	for _, e = range edges {
 		if e.From == id {
 			seen[e.To] = struct{}{}
 		} else if !e.Directed && e.To == id {
 			seen[e.From] = struct{}{}
 		}
 	}
+
 	ids := make([]string, 0, len(seen))
-	for v := range seen {
+	var v string
+	for v = range seen {
 		ids = append(ids, v)
 	}
 	sort.Strings(ids)
@@ -313,8 +325,13 @@ func removeAdjacency(g *Graph, e *Edge) {
 
 // cleanupAdjacency prunes any empty nested maps so HasEdge stays correct.
 func cleanupAdjacency(g *Graph) {
-	for u, m := range g.adjacencyList {
-		for v, em := range m {
+	var (
+		u, v string
+		m    = make(map[string]map[string]struct{})
+		em   = make(map[string]struct{})
+	)
+	for u, m = range g.adjacencyList {
+		for v, em = range m {
 			if len(em) == 0 {
 				delete(m, v)
 			}
@@ -334,9 +351,14 @@ func (g *Graph) AdjacencyList() map[string][]string {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 	result := make(map[string][]string, len(g.adjacencyList))
-	for from, toMap := range g.adjacencyList {
-		for _, edgeMap := range toMap {
-			for eid := range edgeMap {
+	var (
+		from, eid string
+		toMap     = make(map[string]map[string]struct{})
+		edgeMap   = make(map[string]struct{})
+	)
+	for from, toMap = range g.adjacencyList {
+		for _, edgeMap = range toMap {
+			for eid = range edgeMap {
 				result[from] = append(result[from], eid)
 			}
 		}
@@ -371,7 +393,9 @@ func (g *Graph) VerticesMap() map[string]*Vertex {
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
 	out := make(map[string]*Vertex, len(g.vertices))
-	for id, v := range g.vertices {
+	var id string
+	var v *Vertex
+	for id, v = range g.vertices {
 		out[id] = v
 	}
 
@@ -401,7 +425,9 @@ func (g *Graph) CloneEmpty() *Graph {
 	}
 	clone := NewGraph(opts...)
 	// Copy vertices
-	for id, v := range g.vertices {
+	var id string
+	var v *Vertex
+	for id, v = range g.vertices {
 		clone.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
 		clone.adjacencyList[id] = make(map[string]map[string]struct{})
 	}
@@ -416,17 +442,22 @@ func (g *Graph) Clone() *Graph {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 	// Copy edges and adjacency
-	for eid, e := range g.edges {
+	var (
+		eid   string
+		e, ne *Edge
+		ok    bool
+	)
+	for eid, e = range g.edges {
 		// Duplicate Edge struct
-		ne := &Edge{ID: eid, From: e.From, To: e.To, Weight: e.Weight, Directed: e.Directed}
+		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: e.Weight, Directed: e.Directed}
 		clone.edges[eid] = ne
 		// Append to nested adjacency maps
-		if _, ok := clone.adjacencyList[e.From][e.To]; !ok {
+		if _, ok = clone.adjacencyList[e.From][e.To]; !ok {
 			clone.adjacencyList[e.From][e.To] = make(map[string]struct{})
 		}
 		clone.adjacencyList[e.From][e.To][eid] = struct{}{}
 		if !e.Directed && e.From != e.To {
-			if _, ok := clone.adjacencyList[e.To][e.From]; !ok {
+			if _, ok = clone.adjacencyList[e.To][e.From]; !ok {
 				clone.adjacencyList[e.To][e.From] = make(map[string]struct{})
 			}
 			clone.adjacencyList[e.To][e.From][eid] = struct{}{}
@@ -442,7 +473,8 @@ func (g *Graph) Edges() []*Edge {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 	out := make([]*Edge, 0, len(g.edges))
-	for _, e := range g.edges {
+	var e *Edge
+	for _, e = range g.edges {
 		out = append(out, e)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -456,7 +488,8 @@ func (g *Graph) Vertices() []string {
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
 	ids := make([]string, 0, len(g.vertices))
-	for id := range g.vertices {
+	var id string
+	for id = range g.vertices {
 		ids = append(ids, id)
 	}
 	sort.Strings(ids)
@@ -470,7 +503,8 @@ func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 	if err != nil {
 		return 0, 0, 0, err
 	}
-	for _, e := range edges {
+	var e *Edge
+	for _, e = range edges {
 		if e.From == id && e.To == id {
 			undirected++ // self-loop
 		} else if e.From == id {
@@ -492,7 +526,8 @@ func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 func (g *Graph) HasDirectedEdges() bool {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
-	for _, e := range g.edges {
+	var e *Edge
+	for _, e = range g.edges {
 		if e.Directed {
 			return true
 		}
@@ -534,11 +569,14 @@ func (g *Graph) Clear() {
 func (g *Graph) FilterEdges(pred func(*Edge) bool) {
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
-	for eid, e := range g.edges {
+	var eid string
+	var e *Edge
+	for eid, e = range g.edges {
 		if !pred(e) {
 			removeAdjacency(g, e)
 			delete(g.edges, eid)
 		}
 	}
+
 	cleanupAdjacency(g)
 }

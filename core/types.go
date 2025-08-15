@@ -155,7 +155,8 @@ func NewGraph(opts ...GraphOption) *Graph {
 		adjacencyList: make(map[string]map[string]map[string]struct{}),
 	}
 	// Apply options
-	for _, opt := range opts {
+	var opt GraphOption
+	for _, opt = range opts {
 		opt(g)
 	}
 

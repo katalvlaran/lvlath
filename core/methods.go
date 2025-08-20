@@ -15,6 +15,7 @@ import (
 )
 
 const edgeIDPrefix = "e"
+const vertexIDPrefix = "v"
 
 //–– Public API ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 

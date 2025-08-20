@@ -1,122 +1,132 @@
+// Package tsp — Christofides 1.5-approximation.
+//
+// TSPApprox computes a 1.5-approximate Hamiltonian cycle for the symmetric,
+// metric Travelling Salesman Problem using the Christofides pipeline:
+//
+//  1. Minimum Spanning Tree (MST) on the complete metric graph.
+//  2. Minimum-weight perfect matching on odd-degree vertices of the MST.
+//  3. Eulerian circuit on the resulting multigraph.
+//  4. Shortcutting the Eulerian walk to a Hamiltonian cycle (skip revisits).
+//
+// Mathematical guarantee:
+//   - For metric symmetric TSP (triangle inequality, non-negative, symmetric),
+//     the returned tour length ≤ 1.5 · OPT.
+//
+// Contracts (validated by the dispatcher via validateAll):
+//   - dist is square n×n, n ≥ 2,
+//   - diagonal ≈ 0, no negative weights, no NaN,
+//   - symmetric (opts.Symmetric==true / mustEnforceSymmetry(opts) == true),
+//   - if opts.RunMetricClosure==false: no +Inf edges allowed.
+//
+// Options notes:
+//   - opts.StartVertex fixes the start/closure of the cycle.
+//   - opts.MatchingAlgo selects between BlossomMatch (preferred) and GreedyMatch,
+//     with a strict fallback to Greedy when blossom returns ErrMatchingNotImplemented.
+//   - No RNG is used here; determinism is intrinsic.
+//   - Local-search post-passes (2-opt / 3-opt) orchestrates the dispatcher (SolveWithMatrix):
+//   - if EnableLocalSearch && !BestImprovement → fast 2-opt
+//   - if EnableLocalSearch &&  BestImprovement → hybrid [2-opt → 3-opt(best) → 2-opt polish]
+//     This keeps Christofides pure and predictable; tuning lives in the dispatcher.
+//
+// Complexity (dense representation):
+//   - MST (Prim O(n^2)) + odd collection O(n) +
+//     matching (implementation-dependent; greedy O(k^2), blossom polytime) +
+//     Eulerian (O(E)), shortcut O(n)  ⇒ typically O(n^2) for metric instances.
+//
+// Returned value:
+//   - TSResult{Tour, Cost} with stable rounding (1e-9) applied to Cost.
+//   - Tour invariants: len==n+1, Tour[0]==Tour[n]==opts.StartVertex, each vertex appears once.
+//
+// Errors:
+//   - Only strict sentinels from types.go (e.g., ErrStartOutOfRange, ErrIncompleteGraph, …).
+//
+// Guarantee note:
+//   - The 1.5·OPT bound relies on step (2) being a true minimum-weight perfect matching (MWPM).
+//     When Blossom/MWPM is unavailable, the implementation explicitly falls back to a
+//     deterministic greedy matching to keep the pipeline correct and reproducible.
+//     In the greedy fallback the tour remains valid (Eulerian multigraph → shortcut),
+//     but the formal 1.5 factor is not guaranteed. Set MatchingAlgo=GreedyMatch to opt in
+//     explicitly; keep BlossomMatch to automatically benefit once MWPM is enabled.
 package tsp
 
 import (
-	"fmt"  // formatted I/O for error messages
-	"math" // math constants and functions
+	"errors"
 
-	"github.com/katalvlaran/lvlath/matrix" // matrix helpers: MST, matching, Eulerian circuit
+	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// TSPApprox computes a 1.5-approximation to the Travelling Salesman Problem
-// on a complete, symmetric, metric distance matrix using Christofides’ algorithm.
-// It returns a Hamiltonian cycle starting and ending at opts.StartVertex.
+// TSPApprox runs Christofides on a symmetric, metric instance.
 //
-// Input:
-//
-//	dist — an n×n [][]float64 where
-//	       • dist[i][i] == 0
-//	       • dist[i][j] ≥ 0
-//	       • dist[i][j] == dist[j][i]
-//	       • math.Inf(1) signals “no edge” (incomplete graph).
-//
-// Options:
-//
-//	opts.StartVertex    — index in [0..n-1] to start/end the tour.
-//	opts.MatchingAlgo   — GreedyMatch or BlossomMatch for the odd-vertex matching.
-//	opts.BoundAlgo      — reserved for future B&B selection.
-//
-// Returns:
-//
-//	TSResult{Tour, Cost} on success,
-//	ErrNonSquare      if dist is not square,
-//	ErrNegativeWeight if any dist[i][j] < 0,
-//	ErrNonZeroDiagonal if any dist[i][i] != 0,
-//	ErrAsymmetry      if dist[i][j] != dist[j][i],
-//	ErrIncompleteGraph if no Hamiltonian cycle exists.
-func TSPApprox(dist [][]float64, opts Options) (TSResult, error) {
-	// --- 1. Dimension & symmetry validation ---
-	n := len(dist) // number of vertices
-	if n == 0 {    // empty matrix
-		return TSResult{}, ErrNonSquare
-	}
-	for i := 0; i < n; i++ {
-		if len(dist[i]) != n { // each row must have length n
-			return TSResult{}, ErrNonSquare
-		}
-		if dist[i][i] != 0 { // self‐distance must be zero
-			return TSResult{}, ErrNonZeroDiagonal
-		}
-		for j := i + 1; j < n; j++ {
-			if dist[i][j] < 0 { // negative distances forbidden
-				return TSResult{}, ErrNegativeWeight
-			}
-			if dist[i][j] != dist[j][i] { // symmetry requirement
-				return TSResult{}, ErrAsymmetry
-			}
-		}
+// Note: SolveWithMatrix already validated Options + Matrix. Here we keep only
+// lightweight guards that do not duplicate the full O(n^2) validation.
+func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
+	// Lightweight start-range guard (n already known to be ≥ 2 in the dispatcher).
+	n := dist.Rows()
+	if err := validateStartVertex(n, opts.StartVertex); err != nil {
+		return TSResult{}, err
 	}
 
-	// --- 2. Validate StartVertex ---
-	if opts.StartVertex < 0 || opts.StartVertex >= n {
-		return TSResult{}, fmt.Errorf("tsp: StartVertex %d out of range [0,%d): %w",
-			opts.StartVertex, n, ErrBadInput)
-	}
-
-	// --- 3. Build Minimum Spanning Tree (MST) ---
-	// Prim’s algorithm via matrix.MinimumSpanningTree (O(n²))
-	_, mstAdj, err := MinimumSpanningTree(dist)
+	// 1) Minimum Spanning Tree on the metric graph.
+	//    Returns total weight (unused here) and a simple-graph adjacency (no multi-edges).
+	mstW, mstAD, err := MinimumSpanningTree(dist) // O(n^2) Prim (see mst.go)
 	if err != nil {
-		return TSResult{}, err // could be ErrIncompleteGraph
+		return TSResult{}, err
 	}
+	_ = mstW // MST weight is not required by Christofides beyond building the multigraph.
 
-	// --- 4. Find odd‐degree vertices in MST ---
-	var odd []int
-	for v := 0; v < n; v++ {
-		if len(mstAdj[v])%2 == 1 {
-			odd = append(odd, v) // collect odd-degree nodes
+	// 2) Collect odd-degree vertices of the MST.
+	//    V has odd degree iff degree(v) mod 2 == 1. Fast parity check via bit-test.
+	//    len(mstAD[v])&1 == 1  ⇔ degree(v) is odd (LSB set).
+	odd := make([]int, 0, n/2+1) // conservative capacity avoids reslices
+	var v int                    // loop iterator
+	for v = 0; v < n; v++ {
+		if (len(mstAD[v]) & 1) == 1 {
+			odd = append(odd, v)
 		}
 	}
 
-	// --- 5. Perfect matching on odd vertices ---
+	// 3) Add a minimum-weight perfect matching among odd-degree vertices.
+	//    We modify the adjacency in-place, effectively forming the Eulerian multigraph.
 	switch opts.MatchingAlgo {
 	case BlossomMatch:
-		if matchErr := blossomMatch(odd, dist, mstAdj); matchErr != nil && matchErr != matrix.ErrNotImplemented {
-			return TSResult{}, matchErr
+		if mErr := blossomMatch(odd, dist, mstAD); mErr != nil {
+			if errors.Is(mErr, ErrMatchingNotImplemented) {
+				// Deterministic and safe fallback; preserves pipeline validity.
+				greedyMatch(odd, dist, mstAD)
+			} else {
+				return TSResult{}, mErr
+			}
 		}
 	case GreedyMatch:
-		greedyMatch(odd, dist, mstAdj)
+		greedyMatch(odd, dist, mstAD)
 	default:
-		// default to true blossom if available
-		greedyMatch(odd, dist, mstAdj)
+		// Strict but user-friendly: unknown enum ⇒ deterministic greedy.
+		greedyMatch(odd, dist, mstAD)
 	}
 
-	// --- 6. Compute Eulerian circuit on the multigraph ---
-	// Hierholzer’s algorithm via matrix.EulerianCircuit (O(E))
-	euler := EulerianCircuit(mstAdj, opts.StartVertex)
+	// 4) Eulerian circuit on the multigraph (Hierholzer).
+	//    Returns a closed walk that starts at opts.StartVertex and finishes at it.
+	//    The circuit cost is O(E), where E is the number of (multi)edges.
+	euler := EulerianCircuit(mstAD, opts.StartVertex)
 
-	// --- 7. Shortcut to Hamiltonian cycle ---
-	visit := make([]bool, n)     // mark visited vertices
-	cycle := make([]int, 0, n+1) // pre-allocate n+1 spots
-	for _, v := range euler {
-		if !visit[v] { // include only first visit
-			cycle = append(cycle, v)
-			visit[v] = true
-		}
+	// 5) Shortcut revisits to obtain a Hamiltonian tour; then canonicalize direction.
+	tour, err := ShortcutEulerianToHamiltonian(euler, n, opts.StartVertex)
+	if err != nil {
+		return TSResult{}, err
 	}
-	cycle = append(cycle, opts.StartVertex) // close the cycle
+	_ = CanonicalizeOrientationInPlace(tour)
 
-	// --- 8. Compute total tour cost ---
-	var cost float64
-	for k := 0; k < len(cycle)-1; k++ {
-		u, v := cycle[k], cycle[k+1]
-		d := dist[u][v]
-		if math.IsInf(d, 1) { // missing edge ⇒ no Hamiltonian cycle
-			return TSResult{}, ErrIncompleteGraph
-		}
-		cost += d
+	// 6) Compute the stabilized tour cost with strict edge validation.
+	//    tourCost checks Inf/NaN/negatives defensively and rounds to 1e-9.
+	cost, err := TourCost(dist, tour)
+	if err != nil {
+		return TSResult{}, err
 	}
-	// Round cost to nanosecond precision to avoid floating-point noise
-	cost = math.Round(cost*1e9) / 1e9
 
-	return TSResult{Tour: cycle, Cost: cost}, nil
+	// Final invariant check (O(n)) — inexpensive, helps catch wiring mistakes early.
+	if verr := ValidateTour(tour, n, opts.StartVertex); verr != nil {
+		return TSResult{}, verr
+	}
+
+	return TSResult{Tour: tour, Cost: cost}, nil
 }

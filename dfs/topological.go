@@ -71,7 +71,8 @@ func TopologicalSort(g *core.Graph, options ...TopoOption) ([]string, error) {
 	}
 	// 3. Apply optional settings
 	opts := defaultTopoOptions()
-	for _, opt := range options {
+	var opt TopoOption
+	for _, opt = range options {
 		opt(&opts)
 	}
 	// 4. Initialize sorter state
@@ -83,7 +84,8 @@ func TopologicalSort(g *core.Graph, options ...TopoOption) ([]string, error) {
 		order: make([]string, 0, len(verts)),    // capacity hint for post-order
 	}
 	// 5. Drive DFS from every unvisited vertex
-	for _, v := range verts {
+	var v string
+	for _, v = range verts {
 		if sorter.state[v] == White {
 			if err := sorter.visit(v); err != nil {
 				return nil, err
@@ -91,7 +93,8 @@ func TopologicalSort(g *core.Graph, options ...TopoOption) ([]string, error) {
 		}
 	}
 	// 6. Reverse post-order to produce topological order
-	for i, j := 0, len(sorter.order)-1; i < j; i, j = i+1, j-1 {
+	var i, j int
+	for i, j = 0, len(sorter.order)-1; i < j; i, j = i+1, j-1 {
 		sorter.order[i], sorter.order[j] = sorter.order[j], sorter.order[i]
 	}
 
@@ -125,7 +128,8 @@ func (t *topoSorter) visit(id string) error {
 		return fmt.Errorf("%w: %v", ErrNeighborFetch, err)
 	}
 	// 6. Explore each outgoing directed edge
-	for _, e := range neighbors {
+	var e core.Edge
+	for _, e = range neighbors {
 		// 6a. Only honor edges explicitly marked Directed (skip undirected)
 		if !e.Directed {
 			continue

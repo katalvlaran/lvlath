@@ -53,7 +53,7 @@ func mkBad(i, j int, w float64) matrix.Matrix {
 }
 
 // -----------------------------------------------------------------------------
-// 1) Validation — strict sentinels on invalid inputs.
+// 1) Validation - strict sentinels on invalid inputs.
 //    Covered cases: non-square, out-of-range root, NaN, negative, +Inf (disconnected).
 //    Note: nil matrix is intentionally NOT tested here because calling
 //    dist.Rows() on a nil interface would panic at this layer; nil is covered
@@ -117,7 +117,7 @@ func TestOneTree_Errors_StrictSentinels(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 2) Medium — Triangle tightness and degree invariants.
+// 2) Medium - Triangle tightness and degree invariants.
 //    For n=3, the 1-tree equals the tour for ANY multipliers π, therefore
 //    L(π) == optimal tour cost (6). Also check degree structure.
 // -----------------------------------------------------------------------------
@@ -162,7 +162,7 @@ func TestOneTree_Triangle_TightAndDegrees(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 3) Medium — Euclidean pentagon sanity:
+// 3) Medium - Euclidean pentagon sanity:
 //    The lower bound must be positive and ≤ a trivial perimeter tour cost,
 //    and degree invariants must hold.
 // -----------------------------------------------------------------------------
@@ -223,7 +223,7 @@ func TestOneTree_Pentagon_SaneBoundAndDegrees(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 4) Special — Root scan sanity:
+// 4) Special - Root scan sanity:
 //    Take the rounded min lower bound across all roots; no single-root recompute
 //    should produce a strictly smaller rounded value.
 // -----------------------------------------------------------------------------

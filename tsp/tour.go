@@ -1,4 +1,4 @@
-// Package tsp — tour utilities shared by exact/heuristic solvers.
+// Package tsp - tour utilities shared by exact/heuristic solvers.
 //
 // This file contains compact, allocation-conscious utilities that operate purely
 // on tour structure (index sequences), without depending on distance matrices.
@@ -16,7 +16,7 @@
 //   - ShortcutEulerianToHamiltonian: skip revisits in an Eulerian sequence to form a tour.
 //
 // Design:
-//   - No logging, no panics on user input — only sentinel errors from types.go.
+//   - No logging, no panics on user input - only sentinel errors from types.go.
 //   - O(n) time for most helpers; in-place mutations avoid extra allocations.
 //   - Deterministic behavior with clear pre/post-conditions.
 package tsp
@@ -87,7 +87,7 @@ func MakeTourFromPermutation(perm []int, n int, start int) ([]int, error) {
 		}
 	}
 	if pivot == -1 {
-		// The permutation does not contain start — inconsistent input shape.
+		// The permutation does not contain start - inconsistent input shape.
 		return nil, ErrDimensionMismatch
 	}
 
@@ -355,9 +355,9 @@ func DebugString(tour []int) string {
 // into a Hamiltonian cycle by skipping the first revisits and then closing the tour.
 // This is the standard “shortcutting” step in Christofides:
 //
-//	Input:  euler — a vertex sequence of arbitrary length (often O(E)).
-//	        n     — number of unique vertices (0..n-1).
-//	        start — required starting vertex of the resulting tour.
+//	Input:  euler - a vertex sequence of arbitrary length (often O(E)).
+//	        n     - number of unique vertices (0..n-1).
+//	        start - required starting vertex of the resulting tour.
 //
 // Algorithm:
 //   - Maintain a visited[n] boolean array.

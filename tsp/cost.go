@@ -1,4 +1,4 @@
-// Package tsp — cost utilities shared by exact/heuristic solvers.
+// Package tsp - cost utilities shared by exact/heuristic solvers.
 //
 // This file provides small, allocation-conscious helpers to compute the
 // total cost of a Hamiltonian cycle represented by a vertex index tour.

@@ -86,7 +86,7 @@ func TestGreedyMatch_K4_UniquePairs(t *testing.T) {
 // 2) Tiebreak determinism on K6 with equal weights.
 // Greedy pops u from the tail of 'odd' and pairs with the smallest-id partner.
 // With odd=[0,1,2,3,4,5] the deterministic result is (5–0),(3–1),(2–4).
-// (Earlier expectation (4–1),(3–2) was incorrect — see explanation.)
+// (Earlier expectation (4–1),(3–2) was incorrect - see explanation.)
 // -----------------------------------------------------------------------------
 
 func TestGreedyMatch_K6_TieBreakDeterminism(t *testing.T) {

@@ -43,9 +43,9 @@ These methods are defined on `*gridgraph.GridGraph` in `gridgraph.go` and relate
 
 Performs a BFS flood-fill over all `CellValues[y][x] >= 1`, grouping each contiguous region of land into a slice of row-major indices. Returns all components in arbitrary order.
 
-### 9.3.2 ExpandIsland (0–1 BFS)
+### 9.3.2 ExpandIsland (0-1 BFS)
 
-Implements a 0–1 BFS from every cell in source component:
+Implements a 0-1 BFS from every cell in source component:
 
 * **Cost 0** for stepping on land (`CellValues>=1`).
 * **Cost 1** for stepping on water (`CellValues<1`).
@@ -156,7 +156,7 @@ func main() {
 ## 9.6 Pitfalls & Best Practices
 
 * **Connectivity choice**: use **Conn4** for strict orthogonal grids (e.g., mazes), **Conn8** for realistic movements over terrain.
-* **0–1 BFS** offers **O(V+E)** performance: ideal for binary-cost grids.
+* **0-1 BFS** offers **O(V+E)** performance: ideal for binary-cost grids.
 * **Consistent indexing**: row-major indexing (`index(x,y)=y*W+x`) ensures reproducible component ordering.
 * **Memory**: avoid deep recursion; both `ConnectedComponents` and `ExpandIsland` are iterative.
 * **Metadata**: leverage `ToCoreGraph()` to annotate vertices for use with other algorithms.

@@ -126,7 +126,7 @@ Visit sequence with OnVisit: 1 → 2 → 4 → 3
 
 ---
 
-> **Keep your code clean, well‑documented, and benchmarked—hard math on an easy level!**
+> **Keep your code clean, well‑documented, and benchmarked-hard math on an easy level!**
 
 ## 14. FAQ & Troubleshooting
 
@@ -140,7 +140,7 @@ Below are the most common questions, pitfalls, and solutions you may encounter w
 
 **Solutions:**
 
-1. **Sakoe–Chiba Band:** Restrict comparisons to a window of width *w* around the diagonal:
+1. **Sakoe-Chiba Band:** Restrict comparisons to a window of width *w* around the diagonal:
 
 ```go
 opts := dtw.SakoeChiba(windowSize)
@@ -207,7 +207,7 @@ copy := flow.CloneNetwork(orig)
 ff := flow.EdmondsKarp(copy, s, t)
 ```
 
-* **Tip:** Use `flow.Dinic` for larger networks—it builds level graphs to avoid redundant searches.
+* **Tip:** Use `flow.Dinic` for larger networks-it builds level graphs to avoid redundant searches.
 
 ---
 

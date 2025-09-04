@@ -57,7 +57,7 @@ func sameCycleEitherDir(a, b []int) bool {
 }
 
 // -----------------------------------------------------------------------------
-// 1) Medium — TSP: 2-opt removes crossings on a convex hexagon.
+// 1) Medium - TSP: 2-opt removes crossings on a convex hexagon.
 // -----------------------------------------------------------------------------
 
 func TestTwoOpt_TSP_ImprovesConvexHexagon(t *testing.T) {
@@ -88,7 +88,7 @@ func TestTwoOpt_TSP_ImprovesConvexHexagon(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 2) Validation — EPS monotonicity: high-eps cannot beat low-eps.
+// 2) Validation - EPS monotonicity: high-eps cannot beat low-eps.
 // -----------------------------------------------------------------------------
 
 func TestTwoOpt_EpsMonotonicity(t *testing.T) {
@@ -120,7 +120,7 @@ func TestTwoOpt_EpsMonotonicity(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 3) Validation — ATSP: 2-opt must return a valid order under asymmetry.
+// 3) Validation - ATSP: 2-opt must return a valid order under asymmetry.
 // -----------------------------------------------------------------------------
 
 func TestTwoOpt_ATSP_BasicSuccessorOrder(t *testing.T) {
@@ -137,7 +137,7 @@ func TestTwoOpt_ATSP_BasicSuccessorOrder(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 4) Validation — +Inf candidate edges must be rejected (no panics).
+// 4) Validation - +Inf candidate edges must be rejected (no panics).
 // If global validation rejects such a matrix up-front, that’s acceptable too.
 // -----------------------------------------------------------------------------
 
@@ -157,7 +157,7 @@ func TestTwoOpt_RejectsInfCandidates_NoError(t *testing.T) {
 
 	res, err := run2opt(m, epsTiny, true, seedDet, startV, 0)
 	if err != nil {
-		// Some validators reject +Inf globally — also a correct outcome.
+		// Some validators reject +Inf globally - also a correct outcome.
 		if !errors.Is(err, tsp.ErrIncompleteGraph) && !errors.Is(err, tsp.ErrDimensionMismatch) {
 			t.Fatalf("unexpected error: %v", err)
 		}
@@ -177,7 +177,7 @@ func TestTwoOpt_RejectsInfCandidates_NoError(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 5) Special — Determinism: 5 identical runs must produce identical tour/cost.
+// 5) Special - Determinism: 5 identical runs must produce identical tour/cost.
 // -----------------------------------------------------------------------------
 
 func TestTwoOpt_Determinism_Repeat5(t *testing.T) {
@@ -209,12 +209,12 @@ func TestTwoOpt_Determinism_Repeat5(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 6) Special — Soft time budget: nil or ErrTimeLimit are both acceptable outcomes.
+// 6) Special - Soft time budget: nil or ErrTimeLimit are both acceptable outcomes.
 // No panics, no instability.
 // -----------------------------------------------------------------------------
 
 func TestTwoOpt_TimeLimit_SoftBudget(t *testing.T) {
-	// 120 points on a unit circle — decent workload for neighborhood scanning.
+	// 120 points on a unit circle - decent workload for neighborhood scanning.
 	pts := make([][2]float64, radiusN120)
 	var i int
 	var theta float64

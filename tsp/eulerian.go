@@ -1,4 +1,4 @@
-// Package tsp — Eulerian circuit construction (Hierholzer) for undirected multigraphs.
+// Package tsp - Eulerian circuit construction (Hierholzer) for undirected multigraphs.
 //
 // EulerianCircuit builds an Eulerian *circuit* of an undirected multigraph given
 // as adjacency lists, starting and ending at `start`. This implementation uses a
@@ -17,8 +17,8 @@
 //   - Deterministic w.r.t. the given adj order (no RNG, tie-breaks by adjacency order).
 //
 // Complexity:
-//   - Time  : O(E) — each half-edge is visited once.
-//   - Memory: O(E) — half-edge arrays + per-vertex cursors.
+//   - Time  : O(E) - each half-edge is visited once.
+//   - Memory: O(E) - half-edge arrays + per-vertex cursors.
 //
 // Notes:
 //   - The function is deliberately error-less to keep the Christofides pipeline lean.
@@ -58,10 +58,10 @@ func EulerianCircuit(adj [][]int, start int) []int {
 	}
 
 	// Half-edge storage:
-	//   to[e]   — destination vertex of half-edge e
-	//   twin[e] — opposite half-edge id (e ↔ twin[e]); -1 if unmatched (defensive)
-	//   used[e] — visitation mark
-	//   head[v] — list of incident half-edge ids for vertex v (stack semantics)
+	//   to[e]   - destination vertex of half-edge e
+	//   twin[e] - opposite half-edge id (e ↔ twin[e]); -1 if unmatched (defensive)
+	//   used[e] - visitation mark
+	//   head[v] - list of incident half-edge ids for vertex v (stack semantics)
 	var (
 		to   = make([]int, m2)
 		twin = make([]int, m2)
@@ -145,7 +145,7 @@ func EulerianCircuit(adj [][]int, start int) []int {
 		}
 
 		if it[u] == len(head[u]) {
-			// No more edges — emit vertex and pop.
+			// No more edges - emit vertex and pop.
 			circuit = append(circuit, u)
 			stack = stack[:len(stack)-1]
 

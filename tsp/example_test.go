@@ -153,7 +153,7 @@ func makeAsymEuclid(pts [][2]float64, bias float64) matrix.Matrix {
 
 // rotateToStartZero rotates a tour so that it starts at vertex 0 (supports open or closed).
 func rotateToStartZero(tour []int) []int {
-	// If the tour is closed (n+1 with tour[0]==tour[n]) — strip the closing vertex later.
+	// If the tour is closed (n+1 with tour[0]==tour[n]) - strip the closing vertex later.
 	var n = len(tour) // current length
 	// Find index of vertex 0 (guaranteed to exist in valid tours).
 	var i int
@@ -173,7 +173,7 @@ func rotateToStartZero(tour []int) []int {
 
 // toOpen normalizes a cycle to an open tour of length n by removing the closing vertex.
 func toOpen(tour []int) []int {
-	// If closed (n+1, last equals first) — drop the last element.
+	// If closed (n+1, last equals first) - drop the last element.
 	if len(tour) >= 2 && tour[0] == tour[len(tour)-1] {
 		return tour[:len(tour)-1] // return open form
 	}
@@ -181,7 +181,7 @@ func toOpen(tour []int) []int {
 }
 
 // -----------------------------------------------------------------------------
-// 1) Symmetric TSP (n=5) — Christofides → 2-opt on a circular metric.
+// 1) Symmetric TSP (n=5) - Christofides → 2-opt on a circular metric.
 // -----------------------------------------------------------------------------
 
 func Example_Christofides_TwoOpt_Metric5() {
@@ -229,7 +229,7 @@ func Example_Christofides_TwoOpt_Metric5() {
 }
 
 // -----------------------------------------------------------------------------
-// 2) Asymmetric TSP (n=5) — TwoOptOnly on a biased Euclidean metric.
+// 2) Asymmetric TSP (n=5) - TwoOptOnly on a biased Euclidean metric.
 // -----------------------------------------------------------------------------
 
 func Example_TwoOptOnly_ATSP5() {
@@ -284,7 +284,7 @@ func Example_TwoOptOnly_ATSP5() {
 }
 
 // -----------------------------------------------------------------------------
-// 3) Exact Branch-and-Bound (n=6) — ring metric with unique OPT=6.
+// 3) Exact Branch-and-Bound (n=6) - ring metric with unique OPT=6.
 // -----------------------------------------------------------------------------
 
 func Example_BranchAndBound_n6() {

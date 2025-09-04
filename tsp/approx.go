@@ -1,4 +1,4 @@
-// Package tsp — Christofides 1.5-approximation.
+// Package tsp - Christofides 1.5-approximation.
 //
 // TSPApprox computes a 1.5-approximate Hamiltonian cycle for the symmetric,
 // metric Travelling Salesman Problem using the Christofides pipeline:
@@ -123,7 +123,7 @@ func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
 		return TSResult{}, err
 	}
 
-	// Final invariant check (O(n)) — inexpensive, helps catch wiring mistakes early.
+	// Final invariant check (O(n)) - inexpensive, helps catch wiring mistakes early.
 	if verr := ValidateTour(tour, n, opts.StartVertex); verr != nil {
 		return TSResult{}, verr
 	}

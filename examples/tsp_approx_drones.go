@@ -34,57 +34,58 @@
 //   - Total estimated distance of the cycle.
 package main
 
-import (
-	"fmt"
-	"math"
-
-	"github.com/katalvlaran/lvlath/tsp"
-)
-
-func main10() {
-	// 1) Define the delivery points (including base at index 0)
-	points := [][2]float64{
-		{0, 0}, // Base
-		{2, 3},
-		{5, 2},
-		{6, 6},
-		{8, 3},
-		{7, 0},
-	}
-	n := len(points)
-
-	// 2) Build the full symmetric distance matrix (Euclidean distances)
-	dist := make([][]float64, n)
-	for i := range dist {
-		dist[i] = make([]float64, n)
-		for j := range dist {
-			if i == j {
-				dist[i][j] = 0
-			} else {
-				dx := points[i][0] - points[j][0]
-				dy := points[i][1] - points[j][1]
-				dist[i][j] = math.Hypot(dx, dy)
-			}
-		}
-	}
-
-	// 3) Compute the 1.5-approximate TSP tour
-	result, err := tsp.TSPApprox(dist)
-	if err != nil {
-		fmt.Println("Error computing TSP:", err)
-		return
-	}
-
-	// 4) Display the route and total cost
-	fmt.Printf("Drone delivery route (indices): %v\n", result.Tour)
-	fmt.Printf("Total approximate distance: %.2f units\n", result.Cost)
-	fmt.Println("\nVisit order with coordinates:")
-	for _, idx := range result.Tour {
-		p := points[idx]
-		label := "Waypoint"
-		if idx == 0 {
-			label = "Base"
-		}
-		fmt.Printf("  %s %d: (%.0f, %.0f)\n", label, idx, p[0], p[1])
-	}
-}
+//
+//import (
+//	"fmt"
+//	"math"
+//
+//	"github.com/katalvlaran/lvlath/tsp"
+//)
+//
+//func main10() {
+//	// 1) Define the delivery points (including base at index 0)
+//	points := [][2]float64{
+//		{0, 0}, // Base
+//		{2, 3},
+//		{5, 2},
+//		{6, 6},
+//		{8, 3},
+//		{7, 0},
+//	}
+//	n := len(points)
+//
+//	// 2) Build the full symmetric distance matrix (Euclidean distances)
+//	dist := make([][]float64, n)
+//	for i := range dist {
+//		dist[i] = make([]float64, n)
+//		for j := range dist {
+//			if i == j {
+//				dist[i][j] = 0
+//			} else {
+//				dx := points[i][0] - points[j][0]
+//				dy := points[i][1] - points[j][1]
+//				dist[i][j] = math.Hypot(dx, dy)
+//			}
+//		}
+//	}
+//
+//	// 3) Compute the 1.5-approximate TSP tour
+//	result, err := tsp.TSPApprox(dist)
+//	if err != nil {
+//		fmt.Println("Error computing TSP:", err)
+//		return
+//	}
+//
+//	// 4) Display the route and total cost
+//	fmt.Printf("Drone delivery route (indices): %v\n", result.Tour)
+//	fmt.Printf("Total approximate distance: %.2f units\n", result.Cost)
+//	fmt.Println("\nVisit order with coordinates:")
+//	for _, idx := range result.Tour {
+//		p := points[idx]
+//		label := "Waypoint"
+//		if idx == 0 {
+//			label = "Base"
+//		}
+//		fmt.Printf("  %s %d: (%.0f, %.0f)\n", label, idx, p[0], p[1])
+//	}
+//}

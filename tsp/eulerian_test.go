@@ -20,7 +20,7 @@ import (
 )
 
 // degFromCircuit computes vertex degrees induced by a walk of edges.
-// A closed Eulerian circuit encodes E edges as consecutive pairs walk[i]—walk[i+1].
+// A closed Eulerian circuit encodes E edges as consecutive pairs walk[i]-walk[i+1].
 // Complexity: O(E).
 func degFromCircuit(walk []int, n int) []int {
 	deg := make([]int, n)
@@ -147,7 +147,7 @@ func TestEulerian_ShortcutToHamiltonian_Valid_And_CostBound(t *testing.T) {
 // -----------------------------------------------------------------------------
 
 func TestEulerian_Determinism_Repeat3(t *testing.T) {
-	// Nontrivial metric — small ripple to avoid ties; MST is deterministic in our impl.
+	// Nontrivial metric - small ripple to avoid ties; MST is deterministic in our impl.
 	const n = 9
 	pts := make([][2]float64, n)
 	var i int

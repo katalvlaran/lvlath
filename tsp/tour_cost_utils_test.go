@@ -34,7 +34,7 @@ func withEdge(a [][]float64, i, j int, w float64) matrix.Matrix {
 func round1e9(x float64) int64 { return int64(math.Round(x * 1e9)) }
 
 //
-// 1) Validation — tsp.ValidateTour
+// 1) Validation - tsp.ValidateTour
 //
 
 func TestValidateTour_InvalidLength_Duplicates_OOB(t *testing.T) {
@@ -73,7 +73,7 @@ func TestValidateTour_InvalidLength_Duplicates_OOB(t *testing.T) {
 }
 
 //
-// 2) Validation — MakeTourFromPermutation, RotateTourToStart
+// 2) Validation - MakeTourFromPermutation, RotateTourToStart
 //
 
 func TestMakeTourFromPermutation_StartMissing_ErrDimensionMismatch(t *testing.T) {
@@ -95,7 +95,7 @@ func TestRotateTourToStart_StartNotFound_ErrDimensionMismatch(t *testing.T) {
 }
 
 //
-// 3) Validation — TourCost error paths (+Inf/−Inf, negative, NaN)
+// 3) Validation - TourCost error paths (+Inf/−Inf, negative, NaN)
 //    IMPORTANT: tsp.TourCost (в текущей реализации) суммирует РЕБРА ОТКРЫТОГО ПУТИ,
 //    т.е. пары (tour[i], tour[i+1]) без автоматического "замыкания" на старт.
 //    Поэтому проверяемые ребра должны лежать на этих парах.
@@ -158,7 +158,7 @@ func TestTourCost_StrictSentinels_OnBadEdges(t *testing.T) {
 }
 
 //
-// 4) Medium — CanonicalizeOrientationInPlace
+// 4) Medium - CanonicalizeOrientationInPlace
 //     If tour[1] > tour[n-1], reverse segment [1..n-1] in-place.
 //
 
@@ -190,7 +190,7 @@ func TestCanonicalizeOrientationInPlace(t *testing.T) {
 }
 
 //
-// 5) Medium — ShortcutEulerianToHamiltonian
+// 5) Medium - ShortcutEulerianToHamiltonian
 //
 
 func TestShortcutEulerianToHamiltonian(t *testing.T) {
@@ -213,7 +213,7 @@ func TestShortcutEulerianToHamiltonian(t *testing.T) {
 }
 
 //
-// 6) Special — identical cost across different Matrix implementations
+// 6) Special - identical cost across different Matrix implementations
 //
 
 func TestTourCost_IdenticalAcrossImplementations(t *testing.T) {

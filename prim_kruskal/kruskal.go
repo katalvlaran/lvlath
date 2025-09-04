@@ -108,12 +108,14 @@ func Kruskal(graph *core.Graph) ([]core.Edge, int64, error) {
 	// 6. Build MST by iterating over sorted edges.
 	var (
 		mst         []core.Edge // resulting edges in the MST
-		totalWeight int64       // sum of weights
+		e           *core.Edge
+		u, v        string
+		totalWeight int64 // sum of weights
 		numVerts    = len(vertices)
 	)
-	for _, e := range edges {
-		u := e.From // one endpoint
-		v := e.To   // the other endpoint
+	for _, e = range edges {
+		u = e.From // one endpoint
+		v = e.To   // the other endpoint
 		// Check if endpoints are in different components.
 		if find(u) != find(v) {
 			// If disjoint, merge sets and include this edge in MST.

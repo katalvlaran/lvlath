@@ -1,4 +1,4 @@
-// Package tsp — RNG utilities shared by heuristic solvers.
+// Package tsp - RNG utilities shared by heuristic solvers.
 //
 // This file centralizes deterministic random generation for all TSP heuristics.
 //

@@ -54,7 +54,8 @@ func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
 
 	// 2. Apply options
 	dopts := DefaultOptions()
-	for _, fn := range opts {
+	var fn Option
+	for _, fn = range opts {
 		fn(&dopts)
 	}
 
@@ -133,26 +134,28 @@ func (w *dfsWalker) traverse(id string, depth int) error {
 	}
 
 	// 6. Explore each neighbor
-	for _, e := range nbs {
-		nid := e.To
+	var e core.Edge
+	var nid string
+	for _, e = range nbs {
+		nid = e.To
 
-		// 6a. Skip reverse edges in mixed/undirected
+		// Skip reverse edges in mixed/undirected
 		if !e.Directed && !w.graph.Directed() && nid == id {
 			continue
 		}
 
-		// 6b. Skip self‑loops if disallowed
+		// Skip self‑loops if disallowed
 		if nid == id && !w.graph.Looped() {
 			continue
 		}
 
-		// 6c. Neighbor filtering
+		// Neighbor filtering
 		if w.opts.FilterNeighbor != nil && !w.opts.FilterNeighbor(nid) {
 			w.opts.SkippedNeighbors++
 			continue
 		}
 
-		// 6d. Recurse on unvisited
+		// Recurse on unvisited
 		if !w.res.Visited[nid] {
 			w.res.Parent[nid] = id
 			if err = w.traverse(nid, depth+1); err != nil {

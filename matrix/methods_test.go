@@ -1475,7 +1475,6 @@ func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
 	require.NoError(t, G.Set(0, 1, 1))
 	require.NoError(t, G.Set(1, 2, -1))
 	require.NoError(t, G.Set(2, 0, -1))
-	// Узел 3 — изолирован (нет рёбер)
 
 	err = matrix.FloydWarshall(G)
 	require.NoError(t, err)

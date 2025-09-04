@@ -158,7 +158,7 @@ func TestBB_Errors_StrictSentinels(t *testing.T) {
 }
 
 // ---------------------------------------------
-// 2) Correctness — symmetric triangle (exact).
+// 2) Correctness - symmetric triangle (exact).
 // ---------------------------------------------
 
 func TestBB_TSP_Triangle_Exact(t *testing.T) {
@@ -183,7 +183,7 @@ func TestBB_TSP_Triangle_Exact(t *testing.T) {
 }
 
 // ----------------------------------------------------------------------
-// 3) Policy equivalence — results match across bound algorithm policies.
+// 3) Policy equivalence - results match across bound algorithm policies.
 // ----------------------------------------------------------------------
 
 func TestBB_TSP_Policies_EquivalentResults(t *testing.T) {
@@ -245,7 +245,7 @@ func TestBB_TSP_Policies_EquivalentResults(t *testing.T) {
 }
 
 // -----------------------------------------------------------
-// 4) Correctness — ATSP: valid order and positive finite cost.
+// 4) Correctness - ATSP: valid order and positive finite cost.
 // -----------------------------------------------------------
 
 func TestBB_ATSP_Square_BasicValidity(t *testing.T) {
@@ -277,7 +277,7 @@ func TestBB_ATSP_Square_BasicValidity(t *testing.T) {
 }
 
 // --------------------------------------------------------------
-// 5) Time budget — tiny deadline should return tsp.ErrTimeLimit.
+// 5) Time budget - tiny deadline should return tsp.ErrTimeLimit.
 // --------------------------------------------------------------
 
 func TestBB_TimeLimit_TinyBudget_NoBound(t *testing.T) {
@@ -308,11 +308,11 @@ func TestBB_TimeLimit_TinyBudget_NoBound(t *testing.T) {
 }
 
 // -------------------------------------------
-// 6) Determinism — identical runs are equal.
+// 6) Determinism - identical runs are equal.
 // -------------------------------------------
 
 func TestBB_Determinism_Repeat4(t *testing.T) {
-	// Nontrivial symmetric instance — slightly rippled circle.
+	// Nontrivial symmetric instance - slightly rippled circle.
 	const n = 10
 	pts := make([][2]float64, n)
 	var i int

@@ -1,4 +1,4 @@
-// Package tsp — Held–Karp 1-tree (Lagrangian) lower bound for symmetric TSP.
+// Package tsp - Held–Karp 1-tree (Lagrangian) lower bound for symmetric TSP.
 //
 // This module computes an admissible lower bound on OPT via the classical
 // Held–Karp relaxation:

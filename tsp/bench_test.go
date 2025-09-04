@@ -1,4 +1,4 @@
-// Package tsp_test — comprehensive benchmarks for lvlath/tsp algorithms.
+// Package tsp_test - comprehensive benchmarks for lvlath/tsp algorithms.
 // Scope:
 //   - Branch-and-Bound with SimpleBound and OneTreeBound (small n; exact).
 //   - Auto pipeline on symmetric instances (typically Christofides path).
@@ -39,7 +39,7 @@ func deepCopyAdj(adj [][]int) [][]int {
 }
 
 // ------------------------------------------------------------------------------------
-// Branch-and-Bound (exact) — n=9, two bounds: SimpleBound and OneTreeBound.
+// Branch-and-Bound (exact) - n=9, two bounds: SimpleBound and OneTreeBound.
 // These sizes finish comfortably on CI while still exercising the machinery.
 // ------------------------------------------------------------------------------------
 
@@ -124,7 +124,7 @@ func BenchmarkBB_OneTreeRoot_n9(b *testing.B) {
 }
 
 // ------------------------------------------------------------------------------------
-// 2-opt (heuristic) — medium sizes; deterministic shuffle order via Seed.
+// 2-opt (heuristic) - medium sizes; deterministic shuffle order via Seed.
 // We benchmark both TSP (symmetric) and ATSP (directed).
 // ------------------------------------------------------------------------------------
 

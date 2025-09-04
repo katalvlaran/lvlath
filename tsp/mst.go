@@ -1,4 +1,4 @@
-// Package tsp — Minimum Spanning Tree (Prim O(n²)) for dense metric graphs.
+// Package tsp - Minimum Spanning Tree (Prim O(n²)) for dense metric graphs.
 //
 // MinimumSpanningTree builds an MST over a non-negative dense distance matrix.
 // This is step (1) of the Christofides pipeline. We implement Prim in O(n²) to
@@ -41,7 +41,7 @@ func MinimumSpanningTree(dist matrix.Matrix) (totalW float64, adj [][]int, err e
 	return mstGeneric(dist)
 }
 
-// mstDense — Prim O(n²) using *matrix.Dense; avoids interface indirection in hot loops.
+// mstDense - Prim O(n²) using *matrix.Dense; avoids interface indirection in hot loops.
 func mstDense(d *matrix.Dense) (float64, [][]int, error) {
 	var (
 		nr = d.Rows()
@@ -132,7 +132,7 @@ func mstDense(d *matrix.Dense) (float64, [][]int, error) {
 	return round1e9(total), adj, nil
 }
 
-// mstGeneric — Prim O(n²) via the matrix.Matrix interface.
+// mstGeneric - Prim O(n²) via the matrix.Matrix interface.
 func mstGeneric(m matrix.Matrix) (float64, [][]int, error) {
 	var (
 		nr = m.Rows()

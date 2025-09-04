@@ -289,7 +289,7 @@ func TestValidate_Matrix_ShapeAndValues(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 4) Medium: symmetry tolerance — near-equal neighbors vs hard asymmetry
+// 4) Medium: symmetry tolerance - near-equal neighbors vs hard asymmetry
 // -----------------------------------------------------------------------------
 
 func TestValidate_SymmetryTolerance(t *testing.T) {
@@ -328,7 +328,7 @@ func TestValidate_SymmetryTolerance(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 5) Medium: IDs validation — wrong length and duplicates → ErrDimensionMismatch
+// 5) Medium: IDs validation - wrong length and duplicates → ErrDimensionMismatch
 // -----------------------------------------------------------------------------
 
 func TestValidate_IDs_LengthAndDuplicates(t *testing.T) {

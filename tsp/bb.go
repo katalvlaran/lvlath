@@ -1,4 +1,4 @@
-// Package tsp — Branch-and-Bound (exact search with admissible lower bounds).
+// Package tsp - Branch-and-Bound (exact search with admissible lower bounds).
 //
 // TSPBranchAndBound enumerates Hamiltonian cycles via a depth-first
 // Branch-and-Bound (BnB) search with deterministic branching, admissible
@@ -208,7 +208,7 @@ func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 	e.bestCost = math.Inf(1)
 	e.bestTour = make([]int, e.n+1)
 
-	// Symmetric seed — Christofides; safe fallbacks are handled inside TSPApprox.
+	// Symmetric seed - Christofides; safe fallbacks are handled inside TSPApprox.
 	if opts.Symmetric {
 		if res, err := TSPApprox(dist, opts); err == nil {
 			e.recordUB(res.Tour, res.Cost)

@@ -1,4 +1,4 @@
-// Package tsp — unified dispatcher for TSP solvers.
+// Package tsp - unified dispatcher for TSP solvers.
 //
 // This file provides the canonical entry points to run TSP algorithms:
 //
@@ -96,13 +96,13 @@ func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 //   - TwoOptOnly:  O(iter·n^2) (see two_opt.go).
 //   - ThreeOptOnly: O(iter·n^3) (see three_opt.go).
 func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, error) {
-	// Stage 1 — unified validation (Options + matrix + ids).
+	// Stage 1 - unified validation (Options + matrix + ids).
 	n, err := validateAll(dist, ids, opts)
 	if err != nil {
 		return TSResult{}, err
 	}
 
-	// Stage 2 — route by algorithm.
+	// Stage 2 - route by algorithm.
 	var res TSResult
 	switch opts.Algo {
 	case Christofides:
@@ -280,7 +280,7 @@ func trivialRing(n int, start int) ([]int, error) {
 	return out, nil
 }
 
-// nearestNeighbor (optional) — kept private for future use.
+// nearestNeighbor (optional) - kept private for future use.
 // Deterministic NN from start with a simple tie-breaker (smallest index).
 // Not wired by default to keep dispatcher minimal and predictable.
 // If you decide to use it later, validateAll must have allowed complete matrices.
@@ -289,5 +289,5 @@ func trivialRing(n int, start int) ([]int, error) {
 //
 // func nearestNeighbor(dist matrix.Matrix, start int) ([]int, error) { … }
 //
-// We intentionally omit its body here — it will be introduced when we add
+// We intentionally omit its body here - it will be introduced when we add
 // richer initializers for TwoOpt/ThreeOpt per stages 6–7.

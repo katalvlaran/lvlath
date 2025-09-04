@@ -15,7 +15,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Constants — single source of truth for test knobs
+// Constants - single source of truth for test knobs
 // -----------------------------------------------------------------------------
 
 const (

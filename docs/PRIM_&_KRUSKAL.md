@@ -78,9 +78,8 @@ To build intuition for both Prim’s and Kruskal’s algorithms, consider the fo
    \   |9  /   \   |8  /
    6\  |  /4   6\  |  /5
      \ | /       \ | /
-      [G]         [H]
+      [G]────8────[H]
 ```
-
 - **Vertices**:  A, B, C, D, E, F, G, H
 - **Edges (u–v : weight)**:
   | Edge  | Weight |  
@@ -102,7 +101,7 @@ To build intuition for both Prim’s and Kruskal’s algorithms, consider the fo
   |  C–H  |   8    |
   |  B–G  |   9    |
 
-This graph exhibits a mix of **sparse** and **dense** regions, several **alternative paths**, and potential **cycles**—ideal for showcasing:
+This graph exhibits a mix of **sparse** and **dense** regions, several **alternative paths**, and potential **cycles**-ideal for showcasing:
 
 - **Prim’s behavior** when growing a tree from a chosen root (e.g. A), repeatedly pulling the cheapest frontier edge.
 - **Kruskal’s global selection**, sorting all edges and merging components via union-find.

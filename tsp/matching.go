@@ -1,4 +1,4 @@
-// Package tsp — odd-degree matching for Christofides.
+// Package tsp - odd-degree matching for Christofides.
 //
 // This file provides the minimum-weight perfect matching step on the set of
 // odd-degree vertices of the MST. The greedy variant is deterministic and
@@ -29,7 +29,7 @@ import (
 //
 // Complexity: O(k²) time, O(1) extra space besides a local copy of `odd`.
 func greedyMatch(odd []int, dist matrix.Matrix, adj [][]int) {
-	// k==0 is a valid (degenerate) case — nothing to do.
+	// k==0 is a valid (degenerate) case - nothing to do.
 	var k int
 	k = len(odd)
 	if k == 0 {
@@ -86,7 +86,7 @@ func greedyMatch(odd []int, dist matrix.Matrix, adj [][]int) {
 		rem[bestIdx] = rem[last]
 		rem = rem[:last]
 
-		// Add undirected edge u–v (parallel edges are allowed — multigraph).
+		// Add undirected edge u–v (parallel edges are allowed - multigraph).
 		adj[u] = append(adj[u], v)
 		adj[v] = append(adj[v], u)
 	}

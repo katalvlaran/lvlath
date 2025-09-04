@@ -18,9 +18,9 @@
 // Complexity:
 //   - Time:   O(N·M)  (N = len(a), M = len(b))
 //   - Memory:
-//   - FullMatrix: O(N·M) — exact distance + path
-//   - TwoRows:    O(min(N, M)) — distance only
-//   - None:       O(1)        — minimal overhead
+//   - FullMatrix: O(N·M) - exact distance + path
+//   - TwoRows:    O(min(N, M)) - distance only
+//   - None:       O(1)        - minimal overhead
 //
 // Options:
 //
@@ -32,10 +32,10 @@
 //	Use DefaultOptions() for sensible defaults.
 //
 // Errors:
-//   - ErrEmptyInput      — input sequences must be non-empty
-//   - ErrPathNeedsMatrix — ReturnPath=true requires FullMatrix mode
-//   - ErrIncompletePath  — backtracking failed to reach origin
-//   - ErrBadInput        — invalid combination of options
+//   - ErrEmptyInput      - input sequences must be non-empty
+//   - ErrPathNeedsMatrix - ReturnPath=true requires FullMatrix mode
+//   - ErrIncompletePath  - backtracking failed to reach origin
+//   - ErrBadInput        - invalid combination of options
 //
 // See examples in example_test.go and the tutorial in docs/DTW.md
 // for detailed walkthrough and pseudocode.

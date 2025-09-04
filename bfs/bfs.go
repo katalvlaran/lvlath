@@ -47,7 +47,8 @@ func BFS(g *core.Graph, startID string, opts ...Option) (*BFSResult, error) {
 	}
 	// Build options and catch any invalid ones immediately
 	o := DefaultOptions()
-	for _, opt := range opts {
+	var opt Option
+	for _, opt = range opts {
 		opt(&o)
 	}
 	if o.err != nil {

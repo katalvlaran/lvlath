@@ -129,7 +129,7 @@ func EdmondsKarp(
 		// 4d) Check if an augmenting path was found and has positive bottleneck.
 		flowValue := bottle[sink]
 		if !found || flowValue == 0 {
-			// No more augmenting paths — algorithm terminates.
+			// No more augmenting paths - algorithm terminates.
 			break
 		}
 

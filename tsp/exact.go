@@ -1,4 +1,4 @@
-// Package tsp — Held–Karp exact solver (DP O(n²·2ⁿ)) for TSP/ATSP.
+// Package tsp - Held–Karp exact solver (DP O(n²·2ⁿ)) for TSP/ATSP.
 //
 // TSPExact computes an optimal Hamiltonian cycle using the Held–Karp dynamic
 // programming algorithm. Symmetry is NOT required here (ATSP is allowed);
@@ -110,8 +110,8 @@ func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
 	}
 
 	// DP tables in a flat layout to avoid [][] indexing overhead:
-	//   dp[mask*n + j]     — min cost to visit the set "mask" and end at j (mask always contains "start"),
-	//   parent[mask*n + j] — predecessor of j in the optimal transition into (mask, j).
+	//   dp[mask*n + j]     - min cost to visit the set "mask" and end at j (mask always contains "start"),
+	//   parent[mask*n + j] - predecessor of j in the optimal transition into (mask, j).
 	totalMasks := 1 << uint(n)
 	dp := make([]float64, totalMasks*n)
 	parent := make([]int, totalMasks*n)

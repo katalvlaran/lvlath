@@ -6,9 +6,9 @@ import "errors" // we need sentinel error creation
 
 // MemoryMode controls how much of the DP matrix DTW stores.
 //
-//   - NoMemory   — constant O(1) memory, compute distance only.
-//   - TwoRows    — O(min(N,M)) memory, keep two rows, distance only.
-//   - FullMatrix — O(N*M) memory, store entire matrix, supports backtracking.
+//   - NoMemory   - constant O(1) memory, compute distance only.
+//   - TwoRows    - O(min(N,M)) memory, keep two rows, distance only.
+//   - FullMatrix - O(N*M) memory, store entire matrix, supports backtracking.
 type MemoryMode int
 
 const (
@@ -41,11 +41,11 @@ var (
 //
 // Fields:
 //
-//	Window       — Sakoe-Chiba band size: maximum |i-j| allowed. Window <= 0 means no constraint.
-//	SlopePenalty — penalty cost for insertion/deletion steps; controls stretch bias.
-//	ReturnPath   — if true, DTW backtracks and returns the optimal warping path.
+//	Window       - Sakoe-Chiba band size: maximum |i-j| allowed. Window <= 0 means no constraint.
+//	SlopePenalty - penalty cost for insertion/deletion steps; controls stretch bias.
+//	ReturnPath   - if true, DTW backtracks and returns the optimal warping path.
 //	                Requires MemoryMode=FullMatrix.
-//	MemoryMode   — choose NoMemory, TwoRows, or FullMatrix for DP storage.
+//	MemoryMode   - choose NoMemory, TwoRows, or FullMatrix for DP storage.
 type Options struct {
 	Window       int
 	SlopePenalty float64

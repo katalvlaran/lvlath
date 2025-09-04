@@ -1,4 +1,4 @@
-// Package tsp — 3-opt local search (symmetric 3-opt and ATSP 3-opt*).
+// Package tsp - 3-opt local search (symmetric 3-opt and ATSP 3-opt*).
 //
 // ThreeOpt performs local search over 3-edge exchanges on a closed tour.
 // Policies:
@@ -45,7 +45,7 @@ func ThreeOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64,
 	return threeOptCore(dist, initTour, opts, opts.BestImprovement)
 }
 
-// ThreeOptBest — explicit best-improvement entrypoint (policy forced to best).
+// ThreeOptBest - explicit best-improvement entrypoint (policy forced to best).
 func ThreeOptBest(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
 	return threeOptCore(dist, initTour, opts, true /*bestImprovement*/)
 }
@@ -237,7 +237,7 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 							}
 						}
 					} else {
-						// ATSP — 3-opt* tail-swap (orientation-preserving, no reversals).
+						// ATSP - 3-opt* tail-swap (orientation-preserving, no reversals).
 						if checkDeadline() {
 							return nil, 0, ErrTimeLimit
 						}

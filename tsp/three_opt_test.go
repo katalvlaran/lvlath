@@ -1,7 +1,7 @@
 // Package tsp_test exercises the 3-opt local search via the public API.
 // Focus: policy correctness (first vs best), improvement over 2-opt on TSP,
 // validity on ATSP, rejection of +Inf candidates, shuffle determinism,
-// and time-budget behavior — all with strict sentinel errors and stable rounding.
+// and time-budget behavior - all with strict sentinel errors and stable rounding.
 package tsp_test
 
 import (
@@ -70,7 +70,7 @@ func bestLEqFirst(t *testing.T, m matrix.Matrix) {
 }
 
 // -----------------------------------------------------------------------------
-// 1) Medium — TSP: 3-opt should be at least as good as 2-opt on a nontrivial set.
+// 1) Medium - TSP: 3-opt should be at least as good as 2-opt on a nontrivial set.
 //    We generate 10 points on a slightly perturbed circle to create enough
 //    opportunities where 3-opt can improve upon a 2-opt local optimum.
 // -----------------------------------------------------------------------------
@@ -113,12 +113,12 @@ func TestThreeOpt_TSP_ImprovesOverTwoOpt(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 2) Validation — Policy: best-improvement must not perform worse than first.
+// 2) Validation - Policy: best-improvement must not perform worse than first.
 //    This is a direct policy check on the same TSP instance.
 // -----------------------------------------------------------------------------
 
 func TestThreeOpt_Policy_BestVsFirst(t *testing.T) {
-	// Mildly irregular octagon — enough structure for multiple 3-opt choices.
+	// Mildly irregular octagon - enough structure for multiple 3-opt choices.
 	const n = 8
 	pts := make([][2]float64, n)
 	var i int
@@ -135,12 +135,12 @@ func TestThreeOpt_Policy_BestVsFirst(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 3) Validation — ATSP: 3-opt must return a valid permutation on asymmetric
+// 3) Validation - ATSP: 3-opt must return a valid permutation on asymmetric
 //    distances; we also check it is not worse than 2-opt under the same config.
 // -----------------------------------------------------------------------------
 
 func TestThreeOpt_ATSP_Basic(t *testing.T) {
-	// A square with directional penalty — simple ATSP fixture.
+	// A square with directional penalty - simple ATSP fixture.
 	pts := [][2]float64{{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 	m := euclidAsym(pts, 0.2) // reuse helper from two_opt_test.go
 
@@ -171,7 +171,7 @@ func TestThreeOpt_ATSP_Basic(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 4) Validation — +Inf candidates must be rejected without panics.
+// 4) Validation - +Inf candidates must be rejected without panics.
 //    Construct a 5-node instance where a tempting 3-edge reconnection would
 //    require a +Inf chord; solver must avoid that path or reject early.
 // -----------------------------------------------------------------------------
@@ -192,7 +192,7 @@ func TestThreeOpt_RejectsInfCandidates_NoError(t *testing.T) {
 
 	res, err := run3opt(m, true, false, true, epsTiny, seedDet, startV, 0)
 	if err != nil {
-		// If global validation bans +Inf upfront — that is acceptable; assert sentinel clarity.
+		// If global validation bans +Inf upfront - that is acceptable; assert sentinel clarity.
 		if !errors.Is(err, tsp.ErrIncompleteGraph) && !errors.Is(err, tsp.ErrDimensionMismatch) {
 			t.Fatalf("unexpected error for +Inf candidate: %v", err)
 		}
@@ -212,7 +212,7 @@ func TestThreeOpt_RejectsInfCandidates_NoError(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 5) Special — Shuffle determinism: with Seed=0, enabling neighborhood shuffle
+// 5) Special - Shuffle determinism: with Seed=0, enabling neighborhood shuffle
 //    must not change the final tour/cost (order of scanning differs, result same).
 // -----------------------------------------------------------------------------
 
@@ -249,7 +249,7 @@ func TestThreeOpt_ShuffleNeighborhood_Determinism(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 6) Special — Time budget: with best-improvement policy on a medium instance
+// 6) Special - Time budget: with best-improvement policy on a medium instance
 //    and a tiny budget, either ErrTimeLimit is returned or the run exits
 //    cleanly (soft budget). In both cases: no panics, no instability.
 // -----------------------------------------------------------------------------
@@ -272,7 +272,7 @@ func TestThreeOpt_TimeLimit_TinyBudget(t *testing.T) {
 }
 
 // -----------------------------------------------------------------------------
-// 7) Validation — Direct API guardrail: invalid base tour should be rejected.
+// 7) Validation - Direct API guardrail: invalid base tour should be rejected.
 //    Here we call tsp.ThreeOpt directly with an out-of-range index in base.
 //    The function must surface ErrDimensionMismatch (strict sentinel).
 // -----------------------------------------------------------------------------

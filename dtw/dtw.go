@@ -58,17 +58,20 @@ func DTW(a, b []float64, opts *Options) (dist float64, path []Coord, err error) 
 	}
 
 	// 5) Initialize DP boundary for row 0: cost to align zero-length a with prefixes of b
-	for j := 1; j <= m; j++ {
+	var j int
+	for j = 1; j <= m; j++ {
 		prevRow[j] = infinity // cannot align non-zero prefix with empty sequence
 	}
 
 	// 6) Main DP loop: fill rows 1..n
-	for i := 1; i <= n; i++ {
+	var i int // loop iterator
+	var localCost, matchCost, insertCost, deleteCost, bestPrev float64
+	for i = 1; i <= n; i++ {
 		// 6.1) Initialize boundary for column 0: cost to align prefixes of a with empty b
 		currRow[0] = infinity
 
 		// 6.2) Compute columns 1..m
-		for j := 1; j <= m; j++ {
+		for j = 1; j <= m; j++ {
 			// 6.2.1) Enforce Sakoe–Chiba window if enabled
 			if window >= 0 && abs(i-j) > window {
 				currRow[j] = infinity
@@ -76,15 +79,15 @@ func DTW(a, b []float64, opts *Options) (dist float64, path []Coord, err error) 
 			}
 
 			// 6.2.2) Compute local cost = |a[i-1] - b[j-1]|
-			localCost := math.Abs(a[i-1] - b[j-1])
+			localCost = math.Abs(a[i-1] - b[j-1])
 
 			// 6.2.3) Recurrence relation: match (↖), insertion (↑), deletion (←)
-			matchCost := prevRow[j-1]            // cost up to (i-1, j-1)
-			insertCost := prevRow[j] + penalty   // insertion in b (advance i)
-			deleteCost := currRow[j-1] + penalty // insertion in a (advance j)
+			matchCost = prevRow[j-1]            // cost up to (i-1, j-1)
+			insertCost = prevRow[j] + penalty   // insertion in b (advance i)
+			deleteCost = currRow[j-1] + penalty // insertion in a (advance j)
 
 			// 6.2.4) Choose minimum predecessor and add local cost
-			bestPrev := min3(matchCost, insertCost, deleteCost)
+			bestPrev = min3(matchCost, insertCost, deleteCost)
 			currRow[j] = localCost + bestPrev
 		}
 
@@ -106,6 +109,7 @@ func DTW(a, b []float64, opts *Options) (dist float64, path []Coord, err error) 
 	if needPath {
 		path, err = backtrack(dpMatrix, a, b, opts)
 	}
+
 	return dist, path, err
 }
 

@@ -1,4 +1,4 @@
-// Package tsp — 2-opt local search engine (symmetric 2-opt and asymmetric 2-opt*).
+// Package tsp - 2-opt local search engine (symmetric 2-opt and asymmetric 2-opt*).
 //
 // TwoOpt performs deterministic first-improvement 2-opt on a closed tour.
 //   - Symmetric case (opts.Symmetric == true): classic 2-opt reverses segment [i..k].
@@ -167,7 +167,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 						continue // not improving
 					}
 				} else {
-					// ATSP — 2-opt* (no reversal). Replace (a→b),(c→d) with (a→d),(c→b).
+					// ATSP - 2-opt* (no reversal). Replace (a→b),(c→d) with (a→d),(c→b).
 					wab = at(a, b)
 					wcd = at(c, d)
 					wad = at(a, d)
@@ -240,7 +240,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 func applyTwoOptStar(tour []int, start, i, k int) []int {
 	n := len(tour) - 1
 
-	// Build succ[v] from tour — one pass over n arcs of the cycle.
+	// Build succ[v] from tour - one pass over n arcs of the cycle.
 	succ := make([]int, n)
 	var p, u, v int
 	for p = 0; p < n; p++ {

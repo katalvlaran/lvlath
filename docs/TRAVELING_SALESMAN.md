@@ -1,26 +1,24 @@
-## **11. Traveling Salesman (TSP)**
+# **11. Traveling Salesman (TSP)**
 
 **Slogan:** “From exponential exactness to practical approximations.”
 
 ---
 
-### 11.1 Problem Statement
+## 11.1. What, Why, When (+Problem Statement)
 
 The Traveling Salesman Problem (TSP) asks: given a complete weighted graph `G=(V,E)`, find the shortest possible tour that visits each vertex exactly once and returns to the start.
 
 * **Input:** `n` cities, pairwise distances `d(i,j)≥0`.
 * **Output:** a permutation ![\Large \pi](https://latex.codecogs.com/svg.image?\large&space;\pi) of ![\Large \{1..n\}](https://latex.codecogs.com/svg.image?\large&space;\{1..n\}) minimizing ![\Large \sum_{k=1}^{n} d(\pi_k,\pi_{k+1})](https://latex.codecogs.com/svg.image?\large&space;\sum_{k=1}^{n}d(\pi_k,\pi_{k&plus;1})), with ![\Large \pi_{n+1}=\pi_1](https://latex.codecogs.com/svg.image?\large&space;\pi_{n&plus;1}=\pi_1).
 
+---
+## 11.2. Key Concepts & Mathematical Formulation 
 
 > **Complexity:** NP-hard. Exact solutions are ![\Large O(n^2 2^n)](https://latex.codecogs.com/svg.image?\large&space;O(n^2&space;2^n)); approximation algorithms trade optimality for speed.
 
----
-
-### 11.2 Exact Solution: Held–Karp Dynamic Programming
-
 **Time & Space:** ![\Large O(n^2 2^n)](https://latex.codecogs.com/svg.image?\large&space;O(n^2&space;2^n)) time, ![\Large O(n2^n)](https://latex.codecogs.com/svg.image?\large&space;O(n2^n)) memory.
 
-
+## 11.3. Algorithms Overview 11.3.1 1.5‑Approximation: Christofides’ Algorithm
 **Pseudocode (bitmask DP):**
 
 ```text
@@ -39,7 +37,7 @@ answer = min_{i>0}(DP[(1<<n)-1][i] + d(i,0))
 
 ---
 
-### 11.3 1.5‑Approximation: Christofides’ Algorithm
+### 11.3.1 1.5‑Approximation: Christofides’ Algorithm
 
 **Guarantee:** Tour cost ≤ 1.5·OPT in metric graphs (triangle inequality).
 
@@ -64,7 +62,7 @@ return tour
 
 ---
 
-### 11.4 Example: 4‑City Cycle
+### Example: 4‑City Cycle
 
 Consider cities A, B, C, D with distances:
 
@@ -80,7 +78,7 @@ B — 2 — C
     D
 ```
 
-* **Exact (Held–Karp):** computes optimal cost = 2+6+5+7 = **20**.
+* **Exact (Held-Karp):** computes optimal cost = 2+6+5+7 = **20**.
 * **Christofides:**
 
     * MST edges: (B–C:2), (A–B:5), (C–D:4)
@@ -112,9 +110,9 @@ func main() {
 
 ---
 
-### 11.5 Best Practices & Pitfalls
+### 11.5  Pitfalls & Best PracticesBest Practices & Pitfalls
 
-* **Use Held–Karp** only for n ≤ 20; memory explodes otherwise.
+* **Use Held-Karp** only for n ≤ 20; memory explodes otherwise.
 * **Precompute** full distance matrix for O(1) lookups.
 * **Christofides requires** graph to satisfy the triangle inequality. Otherwise, approximation guarantee breaks.
 * **Edge cases:** identical cities, zero-weight loops—filter or handle gracefully.

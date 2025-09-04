@@ -37,7 +37,8 @@ func DetectCycles(g *core.Graph) (bool, [][]string, error) {
 	var cycles [][]string                         // collected distinct cycles
 
 	// 3) Launch DFS from each unvisited vertex
-	for _, v := range verts {
+	var v string
+	for _, v = range verts {
 		if state[v] == White {
 			// If an error occurs during DFS (e.g., neighbor lookup fails),
 			// we abort and return that error.
@@ -95,27 +96,28 @@ func dfsVisit(
 	}
 
 	// 4) Explore each edge from 'id'
-	for _, e := range edges {
-		// 4a) If this edge should be skipped (self-loop not allowed, trivial backtrack in undirected,
-		//     or a directed edge not originating from 'id'), skip it.
+	var e *core.Edge
+	for _, e = range edges {
+		// If this edge should be skipped (self-loop not allowed, trivial backtrack in undirected,
+		// or a directed edge not originating from 'id'), skip it.
 		if shouldSkipEdge(e, id, parent, g) {
 			continue
 		}
 
-		// 4b) Determine actual neighbor ID, handling mixed/mirrored edges:
+		// Determine actual neighbor ID, handling mixed/mirrored edges:
 		//     In an undirected or mixed-edge graph, if e.Directed == false and e.To == id,
 		//     the neighbor is e.From; otherwise it's simply e.To.
 		nbr := getNeighborID(e, id, g)
 
-		// 4c) Examine neighbor's visitation state
+		// Examine neighbor's visitation state
 		switch state[nbr] {
 		case White:
-			// 4c.i) Unvisited: recurse deeper
+			//  Unvisited: recurse deeper
 			if err = dfsVisit(g, nbr, id, state, path, seen, cycles); err != nil {
 				return err // propagate error
 			}
 		case Gray:
-			// 4c.ii) Found a back-edge Gray→Gray: potential cycle detected
+			//  Found a back-edge Gray→Gray: potential cycle detected
 			//        Check for trivial loops and trivial 2-cycles in undirected graphs
 
 			// Find index of 'nbr' in current 'path' stack
@@ -131,7 +133,7 @@ func dfsVisit(
 			if segLen == 2 && !g.Directed() {
 				continue
 			}
-			// 4c.iii) Valid cycle of length ≥2 (or loop): record it
+			// Valid cycle of length ≥2 (or loop): record it
 			recordCycle(nbr, *path, seen, cycles)
 		}
 	}

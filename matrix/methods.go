@@ -336,12 +336,12 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 		return nil, nil, matrixErrorf(opEigen, err)
 	}
 	var (
-		n, cols  = m.Rows(), m.Cols() // n — number of rows (and columns), cols — number of columns
+		n, cols  = m.Rows(), m.Cols() // n - number of rows (and columns), cols - number of columns
 		i, j     int                  // loop iterators over rows and columns
 		aij, aji float64              // off-diagonal entries for symmetry check
 	)
 	if n != cols {
-		// if not square — error out immediately
+		// if not square - error out immediately
 		return nil, nil, matrixErrorf(opEigen, ErrMatrixDimensionMismatch)
 	}
 
@@ -351,7 +351,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 			// read A[i,j] and A[j,i]
 			aij, _ = m.At(i, j)
 			aji, _ = m.At(j, i)
-			// if they differ by more than tol — not symmetric
+			// if they differ by more than tol - not symmetric
 			if math.Abs(aij-aji) > tol {
 				return nil, nil, matrixErrorf(opEigen, ErrNotSymmetric)
 			}
@@ -378,7 +378,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 		iter               int     // iteration counter
 		base               int     // helper offset into the flat data slice
 		p, q               int     // current pivot indices
-		maxOff, off        float64 // maxOff — current max |A[p,q]|; off — temporary
+		maxOff, off        float64 // maxOff - current max |A[p,q]|; off - temporary
 		app, aqq           float64 // diagonal entries A[p,p], A[q,q]
 		aip, aiq, qip, qiq float64 // temporaries for A[i,p], A[i,q] and Q[i,p], Q[i,q]
 		new_ip, new_iq     float64 // updated values for A[i,p] and A[i,q]

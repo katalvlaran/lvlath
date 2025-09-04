@@ -15,21 +15,21 @@
 //
 // # Algorithms & Complexity
 //
-//	ExactHeldKarp (Held–Karp DP) — supports TSP and ATSP
+//	ExactHeldKarp (Held–Karp DP) - supports TSP and ATSP
 //	  Time:   O(n²·2ⁿ)     Memory: O(n·2ⁿ)
 //	  Guards: MaxExactN (=16) to bound resources.
 //
-//	BranchAndBound (exact DFS with pruning) — supports TSP and ATSP
+//	BranchAndBound (exact DFS with pruning) - supports TSP and ATSP
 //	  Bound:  degree-1 relaxation (admissible) and optional root-only 1-tree LB (TSP only).
 //	  Branch: neighbors sorted by weight then index (deterministic).
 //	  Time:   exponential    Memory: O(n) path + O(n²) precomputes.
 //
-//	Christofides (1.5-approx) — symmetric metric TSP only
+//	Christofides (1.5-approx) - symmetric metric TSP only
 //	  Pipeline: MST → minimum perfect matching (Blossom when available; else Greedy) →
 //	            Eulerian circuit → shortcut to tour.
 //	  Time:   typically O(n²) on dense metric instances.
 //
-//	TwoOptOnly / ThreeOptOnly (local search) — TSP and ATSP
+//	TwoOptOnly / ThreeOptOnly (local search) - TSP and ATSP
 //	  2-opt (TSP): segment reversal; Δ = (a→c)+(b→d)−(a→b)−(c→d).
 //	  2-opt* (ATSP): tail swap without reversals.
 //	  3-opt: 7 reconnections (TSP) / 3-opt* (ATSP).

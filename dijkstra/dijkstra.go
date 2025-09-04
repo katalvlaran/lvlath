@@ -62,8 +62,9 @@ import (
 //   - Space: O(V + E)
 func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]string, error) {
 	// 1) Build and validate Options
-	cfg := DefaultOptions("")  // default options
-	for _, opt := range opts { // apply each functional option
+	cfg := DefaultOptions("") // default options
+	var opt Option
+	for _, opt = range opts { // apply each functional option
 		opt(&cfg)
 	}
 
@@ -95,7 +96,8 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 	//    Default is MaxInt64, so this check is effectively always satisfied here.
 
 	// 8) Pre-scan all edges to detect negative weights. Fail fast with ErrNegativeWeight.
-	for _, e := range g.Edges() {
+	var e core.Edge
+	for _, e = range g.Edges() {
 		if e.Weight < 0 {
 			// Return the sentinel error with context of which edge failed.
 			return nil, nil, fmt.Errorf("%w: edge %s→%s weight=%d", ErrNegativeWeight, e.From, e.To, e.Weight)
@@ -201,11 +203,13 @@ func (r *runner) init() {
 func (r *runner) process() error {
 	// Unpack local references for brevity.
 	cfg := r.options
+	var u string
+	var d int64
 	for r.pq.Len() > 0 {
 		// 1) Pop the smallest-distance item from the heap.
 		item := heap.Pop(&r.pq).(*nodeItem)
-		u := item.id
-		d := item.dist
+		u = item.id
+		d = item.dist
 
 		// 2) If this vertex was already visited (finalized), skip stale heap entry.
 		if r.visited[u] {
@@ -245,57 +249,61 @@ func (r *runner) relax(u string) error {
 	}
 
 	// 2) For each edge e in neighbors, attempt relaxation.
-	for _, e := range neighbors {
+	var e core.Edge
+	var v string
+	var w int64
+	var newDist int64
+	for _, e = range neighbors {
 		// e.From and e.To are vertex IDs for this edge.
 		// e.Directed indicates if this edge is one-way; if true, the edge is valid only if e.From == u.
 		// If e.Directed is false, the edge is undirected, and e appears in both u's and neighbor's adjacency lists.
 
-		// 2a) Filter out directed edges that do not originate from u.
-		//     This ensures we do not “walk backwards” along a directed edge that appears in the neighbor list.
+		// Filter out directed edges that do not originate from u.
+		// This ensures we do not “walk backwards” along a directed edge that appears in the neighbor list.
 		if e.Directed && e.From != u {
 			continue // skip edges that do not actually go out of u
 		}
 
-		v := e.To     // neighbor vertex
-		w := e.Weight // edge weight from u → v
+		v = e.To     // neighbor vertex
+		w = e.Weight // edge weight from u → v
 
-		// 2b) Skip any edge that is marked as impassable by InfEdgeThreshold.
-		//     If w >= InfEdgeThreshold, we treat the edge as “infinite” and do not traverse.
+		//  Skip any edge that is marked as impassable by InfEdgeThreshold.
+		//  If w >= InfEdgeThreshold, we treat the edge as “infinite” and do not traverse.
 		if w >= r.options.InfEdgeThreshold {
 			continue
 		}
 
-		// 2c) Safety check: though we pre-scanned for negative weights, double-check nonetheless.
+		// Safety check: though we pre-scanned for negative weights, double-check nonetheless.
 		if w < 0 {
 			return fmt.Errorf("%w: edge %s→%s weight=%d", ErrNegativeWeight, u, v, w)
 		}
 
-		// 2d) Compute candidate distance if we go from Source → … → u → v.
-		newDist := r.dist[u] + w
+		// Compute candidate distance if we go from Source → … → u → v.
+		newDist = r.dist[u] + w
 
-		// 2e) If newDist exceeds MaxDistance, we skip relaxing this neighbor.
+		// If newDist exceeds MaxDistance, we skip relaxing this neighbor.
 		if newDist > r.options.MaxDistance {
 			continue
 		}
 
-		// 2f) If newDist is not strictly better than the current dist[v], skip.
+		// If newDist is not strictly better than the current dist[v], skip.
 		//     Note: we use “<” rather than “≤” to avoid pushing duplicates when distances are equal.
 		if newDist >= r.dist[v] {
 			continue
 		}
 
-		// 2g) We have found a strictly shorter path to v. Update dist[v].
+		// We have found a strictly shorter path to v. Update dist[v].
 		r.dist[v] = newDist
 
-		// 2h) If ReturnPath is requested, record u as the predecessor of v.
-		//     If prev is nil (ReturnPath=false and MemoryModeCompact), this line is skipped.
+		// If ReturnPath is requested, record u as the predecessor of v.
+		// If prev is nil (ReturnPath=false and MemoryModeCompact), this line is skipped.
 		if r.prev != nil {
 			r.prev[v] = u
 		}
 
-		// 2i) Push the updated distance for v onto the heap.
-		//     This is the “lazy-decrease-key” pattern: we do not remove old entries,
-		//     but instead ignore them later when popped if visited[v] is already true.
+		// Push the updated distance for v onto the heap.
+		// This is the “lazy-decrease-key” pattern: we do not remove old entries,
+		// but instead ignore them later when popped if visited[v] is already true.
 		heap.Push(&r.pq, &nodeItem{
 			id:   v,
 			dist: newDist,

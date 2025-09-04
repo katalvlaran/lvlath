@@ -14,7 +14,7 @@ Welcome to **lvlath**, the Go library that makes complex graph and algorithmic o
 4. [Traversals: BFS & DFS](BFS_%26_DFS.md)
 5. [Shortest Paths: Dijkstra](DIJKSTRA.md)
 6. [Minimum Spanning Trees: Prim & Kruskal](PRIM_%26_KRUSKAL.md)
-7. [Max-Flow: Ford–Fulkerson / Edmonds-Karp / Dinic](MAX_FLOW.md)
+7. [Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic](MAX_FLOW.md)
 8. [Dynamic Time Warping (DTW)](DTW.md)
 9. [GridGraph: Grid-based Graphs](GRID_GRAPH.md)
 10. [Matrices: Adjacency & Incidence](MATRICES.md)
@@ -125,7 +125,12 @@ After removing B: [A C]
 Graphs model relationships via **vertices** (nodes) and **edges** (connections). lvlath supports:
 
 * **Directed vs Undirected**
+  * Directed: edges have orientation (u→v).
+  * Undirected: edges mirror in both directions.
+
 * **Weighted vs Unweighted**
+  * Weighted: edges carry `int64` weight.
+  * Unweighted: only weight=0 allowed.
 
 ### Adjacency List
 
@@ -152,6 +157,8 @@ For dense graphs or constant-time lookups, convert to a matrix:
 | B | 5 | 0 | 7 |
 | C | 0 | 7 | 0 |
 
+Use `matrix.NewAdjacencyMatrix(g)` for dense graphs.
+
 ```go
 am := matrix.NewAdjacencyMatrix(g)
 val := am.Data[am.Index["A"]][am.Index["B"]]
@@ -176,7 +183,7 @@ row, _ := im.VertexIncidence("B")
 4. [Traversals: BFS & DFS](BFS_%26_DFS.md)
 5. [Shortest Paths: Dijkstra](DIJKSTRA.md)
 6. [Minimum Spanning Trees: Prim & Kruskal](PRIM_%26_KRUSKAL.md)
-7. [Max-Flow: Ford–Fulkerson / Edmonds-Karp / Dinic](MAX_FLOW.md)
+7. [Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic](MAX_FLOW.md)
 8. [Dynamic Time Warping (DTW)](DTW.md)
 9. [GridGraph: Grid-based Graphs](GRID_GRAPH.md)
 10. [Matrices: Adjacency & Incidence](MATRICES.md)

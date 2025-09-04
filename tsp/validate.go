@@ -1,4 +1,4 @@
-// Package tsp — validation utilities shared by exact/heuristic solvers.
+// Package tsp - validation utilities shared by exact/heuristic solvers.
 //
 // This file contains small, tight, and well-documented helpers that:
 //  1. Validate Options combinations (algo ↔ symmetric, bounds, limits).
@@ -7,7 +7,7 @@
 //
 // Design principles:
 //   - Deterministic, side-effect free functions.
-//   - No logging, no panics on user input — only sentinel errors from types.go.
+//   - No logging, no panics on user input - only sentinel errors from types.go.
 //   - O(n²) worst-case where n is the matrix size; no hidden allocations.
 package tsp
 

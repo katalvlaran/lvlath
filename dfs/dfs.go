@@ -134,7 +134,7 @@ func (w *dfsWalker) traverse(id string, depth int) error {
 	}
 
 	// 6. Explore each neighbor
-	var e core.Edge
+	var e *core.Edge
 	var nid string
 	for _, e = range nbs {
 		nid = e.To

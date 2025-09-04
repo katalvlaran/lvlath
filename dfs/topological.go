@@ -128,7 +128,7 @@ func (t *topoSorter) visit(id string) error {
 		return fmt.Errorf("%w: %v", ErrNeighborFetch, err)
 	}
 	// 6. Explore each outgoing directed edge
-	var e core.Edge
+	var e *core.Edge
 	for _, e = range neighbors {
 		// 6a. Only honor edges explicitly marked Directed (skip undirected)
 		if !e.Directed {

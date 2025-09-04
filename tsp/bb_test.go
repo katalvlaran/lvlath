@@ -188,7 +188,6 @@ func TestBB_TSP_Triangle_Exact(t *testing.T) {
 
 func TestBB_TSP_Policies_EquivalentResults(t *testing.T) {
 	// Use a modest convex hexagon; nontrivial yet fast for BnB.
-	const n = 6
 	pts := [][2]float64{
 		{1, 0}, {0.5, math.Sqrt(3) / 2}, {-0.5, math.Sqrt(3) / 2},
 		{-1, 0}, {-0.5, -math.Sqrt(3) / 2}, {0.5, -math.Sqrt(3) / 2},

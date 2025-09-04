@@ -5,6 +5,7 @@
 package dijkstra_test
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -21,7 +22,7 @@ func TestDijkstra_EmptySource(t *testing.T) {
 	// Create a weighted graph (so it passes the weighted check) but do not pass Source.
 	g := core.NewGraph(core.WithWeighted())
 	_, _, err := dijkstra.Dijkstra(g)
-	if err != dijkstra.ErrEmptySource {
+	if !errors.Is(err, dijkstra.ErrEmptySource) {
 		t.Fatalf("Expected ErrEmptySource, got %v", err)
 	}
 }
@@ -29,7 +30,7 @@ func TestDijkstra_EmptySource(t *testing.T) {
 func TestDijkstra_NilGraphWithoutSource(t *testing.T) {
 	// If graph is nil and no Source is provided, ErrEmptySource has priority over ErrNilGraph.
 	_, _, err := dijkstra.Dijkstra(nil)
-	if err != dijkstra.ErrEmptySource {
+	if !errors.Is(err, dijkstra.ErrEmptySource) {
 		t.Fatalf("Expected ErrEmptySource when graph is nil and Source is empty, got %v", err)
 	}
 }
@@ -37,7 +38,7 @@ func TestDijkstra_NilGraphWithoutSource(t *testing.T) {
 func TestDijkstra_NilGraphWithSource(t *testing.T) {
 	// If graph is nil but Source is provided, Dijkstra should return ErrNilGraph.
 	_, _, err := dijkstra.Dijkstra(nil, dijkstra.Source("X"))
-	if err != dijkstra.ErrNilGraph {
+	if !errors.Is(err, dijkstra.ErrNilGraph) {
 		t.Fatalf("Expected ErrNilGraph when graph is nil, got %v", err)
 	}
 }
@@ -46,7 +47,7 @@ func TestDijkstra_UnweightedGraph(t *testing.T) {
 	// If the graph is not weighted, Dijkstra must return ErrUnweightedGraph.
 	g := core.NewGraph() // unweighted by default
 	_, _, err := dijkstra.Dijkstra(g, dijkstra.Source("A"))
-	if err != dijkstra.ErrUnweightedGraph {
+	if !errors.Is(err, dijkstra.ErrUnweightedGraph) {
 		t.Fatalf("Expected ErrUnweightedGraph, got %v", err)
 	}
 }
@@ -55,7 +56,7 @@ func TestDijkstra_SourceNotFound(t *testing.T) {
 	// If the graph is weighted but does not contain the Source vertex, return ErrVertexNotFound.
 	g := core.NewGraph(core.WithWeighted())
 	_, _, err := dijkstra.Dijkstra(g, dijkstra.Source("X"))
-	if err != dijkstra.ErrVertexNotFound {
+	if !errors.Is(err, dijkstra.ErrVertexNotFound) {
 		t.Fatalf("Expected ErrVertexNotFound, got %v", err)
 	}
 }
@@ -63,7 +64,7 @@ func TestDijkstra_SourceNotFound(t *testing.T) {
 func TestDijkstra_NegativeWeightDetectedEarly(t *testing.T) {
 	// Build a weighted graph with a negative weight edge.
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", -5) // invalid negative weight
+	_, _ = g.AddEdge("A", "B", -5) // invalid negative weight
 	_, _, err := dijkstra.Dijkstra(g, dijkstra.Source("A"))
 	if err == nil || err.Error() == "" || err != dijkstra.ErrNegativeWeight && !contains(err.Error(), "negative edge weight") {
 		t.Fatalf("Expected ErrNegativeWeight, got %v", err)
@@ -77,9 +78,9 @@ func TestDijkstra_NegativeWeightDetectedEarly(t *testing.T) {
 func TestDijkstra_SimpleTriangle_NoPath(t *testing.T) {
 	// Graph: A—B(1), B—C(2), A—C(5), all undirected by default.
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 2)
-	g.AddEdge("A", "C", 5)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 2)
+	_, _ = g.AddEdge("A", "C", 5)
 
 	// Compute distances without requesting the predecessor map.
 	dist, prev, err := dijkstra.Dijkstra(g, dijkstra.Source("A"))
@@ -100,9 +101,9 @@ func TestDijkstra_SimpleTriangle_NoPath(t *testing.T) {
 func TestDijkstra_SimpleTriangle_WithPath(t *testing.T) {
 	// Same triangle graph, but request path reconstruction.
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 2)
-	g.AddEdge("A", "C", 5)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 2)
+	_, _ = g.AddEdge("A", "C", 5)
 
 	// Compute distances and prev map.
 	dist, prev, err := dijkstra.Dijkstra(g, dijkstra.Source("A"), dijkstra.WithReturnPath())
@@ -130,12 +131,12 @@ func TestDijkstra_ChainWithPath(t *testing.T) {
 	//      |
 	//      F—G
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 1)
-	g.AddEdge("C", "D", 1)
-	g.AddEdge("D", "E", 1)
-	g.AddEdge("D", "F", 1)
-	g.AddEdge("F", "G", 1)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 1)
+	_, _ = g.AddEdge("C", "D", 1)
+	_, _ = g.AddEdge("D", "E", 1)
+	_, _ = g.AddEdge("D", "F", 1)
+	_, _ = g.AddEdge("F", "G", 1)
 
 	// Compute with path reconstruction.
 	dist, prev, err := dijkstra.Dijkstra(g, dijkstra.Source("A"), dijkstra.WithReturnPath())
@@ -173,11 +174,11 @@ func TestDijkstra_MediumDirectedGraph(t *testing.T) {
 	// Directed graph:
 	// A→B(2), A→C(1), C→B(1), B→D(3), C→D(5)
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("A", "B", 2)
-	g.AddEdge("A", "C", 1)
-	g.AddEdge("C", "B", 1)
-	g.AddEdge("B", "D", 3)
-	g.AddEdge("C", "D", 5)
+	_, _ = g.AddEdge("A", "B", 2)
+	_, _ = g.AddEdge("A", "C", 1)
+	_, _ = g.AddEdge("C", "B", 1)
+	_, _ = g.AddEdge("B", "D", 3)
+	_, _ = g.AddEdge("C", "D", 5)
 
 	// Compute without requesting prev map.
 	dist, prev, err := dijkstra.Dijkstra(g, dijkstra.Source("A"))
@@ -264,9 +265,9 @@ func TestDijkstra_MixedEdges(t *testing.T) {
 func TestDijkstra_MaxDistanceLimits(t *testing.T) {
 	// Linear graph: A—B(1)—C(1)—D(1)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 1)
-	g.AddEdge("C", "D", 1)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 1)
+	_, _ = g.AddEdge("C", "D", 1)
 
 	// Set MaxDistance = 1: only A and B are within threshold.
 	dist, _, err := dijkstra.Dijkstra(
@@ -296,7 +297,7 @@ func TestDijkstra_MaxDistanceLimits(t *testing.T) {
 func TestDijkstra_MaxDistanceZero(t *testing.T) {
 	// Graph: A—B(1)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("A", "B", 1)
 
 	// Set MaxDistance = 0: only the source itself should be processed.
 	dist, _, err := dijkstra.Dijkstra(
@@ -325,8 +326,8 @@ func TestDijkstra_InfThreshold_DefaultBehavior(t *testing.T) {
 	// If InfEdgeThreshold is not set, default is MaxInt64, so no edges are impassable.
 	// Graph: A—B(10), B—C(20)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 10)
-	g.AddEdge("B", "C", 20)
+	_, _ = g.AddEdge("A", "B", 10)
+	_, _ = g.AddEdge("B", "C", 20)
 
 	dist, _, err := dijkstra.Dijkstra(g, dijkstra.Source("A"))
 	if err != nil {
@@ -342,9 +343,9 @@ func TestDijkstra_InfThreshold_DefaultBehavior(t *testing.T) {
 func TestDijkstra_InfThresholdStopsHeavyEdge(t *testing.T) {
 	// Graph: A—B(2), B—C(4), A—C(10)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 2)
-	g.AddEdge("B", "C", 4)
-	g.AddEdge("A", "C", 10)
+	_, _ = g.AddEdge("A", "B", 2)
+	_, _ = g.AddEdge("B", "C", 4)
+	_, _ = g.AddEdge("A", "C", 10)
 
 	// Set InfEdgeThreshold = 5: edges with weight ≥5 are skipped, so A—C(10) is ignored.
 	dist, _, err := dijkstra.Dijkstra(
@@ -367,21 +368,21 @@ func TestDijkstra_InfObstacle_3x3GridCorrected(t *testing.T) {
 	g := core.NewGraph(core.WithWeighted())
 	coords := []string{"0,0", "0,1", "0,2", "1,0", "1,1", "1,2", "2,0", "2,1", "2,2"}
 	for _, v := range coords {
-		g.AddVertex(v)
+		_ = g.AddVertex(v)
 	}
 	// Connect horizontally and vertically where applicable with weight=1.
-	g.AddEdge("0,0", "0,1", 1)
-	g.AddEdge("0,0", "1,0", 1)
-	g.AddEdge("0,1", "0,2", 1)
-	g.AddEdge("1,0", "2,0", 1)
-	g.AddEdge("1,1", "1,2", 1)
-	g.AddEdge("2,1", "2,2", 1)
+	_, _ = g.AddEdge("0,0", "0,1", 1)
+	_, _ = g.AddEdge("0,0", "1,0", 1)
+	_, _ = g.AddEdge("0,1", "0,2", 1)
+	_, _ = g.AddEdge("1,0", "2,0", 1)
+	_, _ = g.AddEdge("1,1", "1,2", 1)
+	_, _ = g.AddEdge("2,1", "2,2", 1)
 
 	// Now make row y=1 into an “impassable wall” by adding edges with weight=threshold.
 	threshold := int64(5)
 	// Add or replace edges at ("1,0"→"1,1") and ("1,1"→"1,2") with weight=5.
-	g.AddEdge("1,0", "1,1", threshold)
-	g.AddEdge("1,1", "1,2", threshold)
+	_, _ = g.AddEdge("1,0", "1,1", threshold)
+	_, _ = g.AddEdge("1,1", "1,2", threshold)
 
 	// Execute Dijkstra with InfEdgeThreshold = 5. Edges with weight ≥5 are skipped.
 	dist, _, err := dijkstra.Dijkstra(
@@ -406,7 +407,7 @@ func TestDijkstra_InfObstacle_3x3GridCorrected(t *testing.T) {
 func TestDijkstra_SingleVertex_ReturnsZero(t *testing.T) {
 	// Graph with a single vertex "Solo" and no edges.
 	g := core.NewGraph(core.WithWeighted())
-	g.AddVertex("Solo")
+	_ = g.AddVertex("Solo")
 
 	// Compute with ReturnPath.
 	dist, prev, err := dijkstra.Dijkstra(g, dijkstra.Source("Solo"), dijkstra.WithReturnPath())
@@ -428,7 +429,7 @@ func TestDijkstra_EmptyGraph_ReturnsVertexNotFound(t *testing.T) {
 	g := core.NewGraph(core.WithWeighted())
 	// Do not add any vertex, request Source="Any".
 	_, _, err := dijkstra.Dijkstra(g, dijkstra.Source("Any"))
-	if err != dijkstra.ErrVertexNotFound {
+	if !errors.Is(err, dijkstra.ErrVertexNotFound) {
 		t.Errorf("Expected ErrVertexNotFound for empty graph, got %v", err)
 	}
 }

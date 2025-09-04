@@ -96,7 +96,7 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 	//    Default is MaxInt64, so this check is effectively always satisfied here.
 
 	// 8) Pre-scan all edges to detect negative weights. Fail fast with ErrNegativeWeight.
-	var e core.Edge
+	var e *core.Edge
 	for _, e = range g.Edges() {
 		if e.Weight < 0 {
 			// Return the sentinel error with context of which edge failed.
@@ -249,7 +249,7 @@ func (r *runner) relax(u string) error {
 	}
 
 	// 2) For each edge e in neighbors, attempt relaxation.
-	var e core.Edge
+	var e *core.Edge
 	var v string
 	var w int64
 	var newDist int64

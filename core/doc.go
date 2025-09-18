@@ -1,110 +1,168 @@
-// Package core provides a high-performance, thread-safe in-memory Graph
-// implementation with a minimal, composable API surface.
+// SPDX-License-Identifier: MIT
+
+// Package core - deterministic, thread-safe in-memory graphs for serious work.
 //
-// The Graph G = (V,E) supports a rich mix of behaviors:
+// -----------------------------------------------------------------------------
+// -- WHAT ---------------------------------------------------------------------
 //
-//   - Directed vs. undirected edges (WithDirected)
-//   - Global vs. per-edge orientation in “mixed” graphs (WithMixedEdges + WithEdgeDirected)
-//   - Weighted vs. unweighted edges (WithWeighted)
-//   - Parallel edges / multi-graphs (WithMultiEdges)
-//   - Self-loops (WithLoops)
-//   - Constant-time edge operations via nested maps:
-//     adjacencyList[from][to][edgeID] = struct{}{}
-//   - Collision-free atomic Edge.ID generation (“e1”, “e2”, …)
-//   - Separate sync.RWMutex for vertices (muVert) and edges+adjacency (muEdgeAdj)
-//     to minimize lock contention under concurrency
+//	A single, composable Graph type G=(V,E) with predictable iteration order,
+//	strict sentinel errors, zero hidden globals, and explicit functional options.
 //
-// Why use core.Graph?
+// -- WHY ----------------------------------------------------------------------
+//   - Determinism First: all public enumerations have a documented, stable order.
+//     This removes “heisenbugs” in tests, reproducibility drifts and flaky CI.
+//   - Concurrency Without Drama: two RWMutexes (muVert, muEdgeAdj) minimize
+//     contention across vertex/edge heavy codepaths while keeping the model simple.
+//   - Mixed-Mode Mastery: per-edge directedness overrides are explicit, legal
+//     only in mixed mode, and guarded by a sentinel (no silent fallbacks).
+//   - Identity Discipline: monotonic textual Edge.ID (“e1”, “e2”, …) - perfect
+//     for stable logs, diffs, golden tests, and distributed trace heuristics.
+//   - Practical API Surface: one Graph with knobs (Directed/Weighted/Multi/Loops/
+//     Mixed), instead of an exploding matrix of types. Algorithms compose cleanly.
+//   - No Magic, No Surprises: sentinels only (errors.Is), no fmt-wrapping, no
+//     ambient globals, no soft-fallbacks - if a capability is disabled, you see ErrX.
 //
-//   - Single type, composable flags - no explosion of separate graph types.
-//   - Deterministic iteration - Vertices(), Edges(), NeighborIDs() all return sorted results.
-//   - Flexible mixing - combine directed, undirected, loops, weights, multi-edges in one graph.
-//   - Clone support - CloneEmpty (vertices+flags), Clone (deep copy of edges+adjacency).
-//   - Extensible utility methods - degree counts, clear, filter, path-prelude, …
+// -- WHEN ---------------------------------------------------------------------
+//   - Need reproducible graph results (order-sensitive logic, golden tests).
+//   - Need to combine directed/undirected/loops/multiedges in 1 instance.
+//   - Need safe concurrent reads/writes with a clear lock model.
+//   - Need stable Edge IDs across clones/views for debugging/analytics.
 //
-// Configuration Options (GraphOption):
+// -----------------------------------------------------------------------------
+// -- DESIGN INVARIANTS --------------------------------------------------------
+//
+//  1. Deterministic ordering (public contract):
+//     Vertices()            → IDs sorted lex asc
+//     Edges()               → by Edge.ID asc
+//     NeighborIDs(id)       → IDs sorted lex asc
+//     Algorithms rely on this stability; tests must assume it.
+//  2. Sentinel errors only; compare with errors.Is. No fmt-wrapping of sentinels.
+//  3. No mutation of caller-owned inputs; views/clones are explicit and named.
+//  4. Concurrency model: two RWMutexes
+//     muVert    - vertices map + config flags
+//     muEdgeAdj - edges catalog + adjacency nested maps
+//
+// -----------------------------------------------------------------------------
+// -- CONFIGURATION (GraphOption) - explicit, deterministic flags --------------
 //
 //   - WithDirected(defaultDirected bool)
-//     Sets the default orientation of new edges.
-//
-//   - Directed graphs store only “from→to” pointers.
-//
-//   - Undirected graphs mirror edges in adjacencyList[to][from].
+//     Sets the default edge orientation (true=directed).
 //
 //   - WithMixedEdges()
-//     Allows per-edge overrides via EdgeOption.WithEdgeDirected().
-//     Without it, any override returns ErrMixedEdgesNotAllowed.
+//     Allows per-edge overrides (WithEdgeDirected). Without it, attempts to
+//     pass EdgeOption return ErrMixedEdgesNotAllowed (no silent degradation).
 //
 //   - WithWeighted()
-//     Permits non-zero weights globally; otherwise AddEdge(weight≠0) → ErrBadWeight.
+//     Permits non-zero edge weights. Otherwise AddEdge(weight≠0) → ErrBadWeight.
 //
 //   - WithMultiEdges()
-//     Allows multiple parallel edges between the same endpoints.
-//     Otherwise a second AddEdge(from,to) → ErrMultiEdgeNotAllowed.
+//     Permits parallel edges between identical endpoints. Otherwise a second
+//     AddEdge(from,to) → ErrMultiEdgeNotAllowed.
 //
 //   - WithLoops()
-//     Permits self-loops (from == to); otherwise AddEdge(v,v) → ErrLoopNotAllowed.
+//     Permits self-loops (from==to). Otherwise AddEdge(v,v) → ErrLoopNotAllowed.
 //
-// EdgeOptions:
+// -- EdgeOption ---------------------------------------------------------------
 //
 //   - WithEdgeDirected(directed bool)
-//     Override the graph’s default direction per-edge (mixed mode only).
+//     Per-edge orientation override (legal only in mixed mode).
 //
-// Core Methods:
+// -- Helper constructor -------------------------------------------------------
+//   - NewMixedGraph(opts ...GraphOption) = NewGraph(WithMixedEdges(), opts...)
 //
-//	// Vertex lifecycle
-//	AddVertex(id string) error         // O(1)
-//	HasVertex(id string) bool          // O(1)
-//	RemoveVertex(id string) error      // O(deg(v)+M)
+// -----------------------------------------------------------------------------
+// -- ERROR SET (sentinels) ----------------------------------------------------
+//   - ErrEmptyVertexID        - empty vertex ID is illegal
+//   - ErrVertexNotFound       - vertex does not exist
+//   - ErrEdgeNotFound         - edge does not exist
+//   - ErrBadWeight            - non-zero weight in an unweighted graph
+//   - ErrLoopNotAllowed       - self-loop when loops are disabled
+//   - ErrMultiEdgeNotAllowed  - parallel edge when multi-edges are disabled
+//   - ErrMixedEdgesNotAllowed - per-edge overrides when mixed mode is disabled
 //
-//	// Edge lifecycle
-//	AddEdge(from,to string, weight int64, opts ...EdgeOption) (edgeID string, err error) // O(1)†
-//	RemoveEdge(edgeID string) error   // O(1)
-//	HasEdge(from,to string) bool      // O(1)
+// -----------------------------------------------------------------------------
+// -- LIFECYCLE MAPS -----------------------------------------------------------
 //
-//	// Query
-//	Neighbors(id string) ([]*Edge, error)   // O(d·log d), loops appear once, multi-edges repeated
-//	NeighborIDs(id string) ([]string, error)// O(d·log d), unique, sorted
-//	AdjacencyList() map[string][]string      // O(V+E)
-//	Vertices() []string                      // O(V·log V)
-//	Edges() []*Edge                          // O(E·log E)
+// Graph lifecycle (configuration → build → query → transform):
 //
-//	// Counts & degrees
-//	Degree(id string) (in,out,undirected int, err error) // in/out counts + undirected count (loops, mirrors)
-//	VertexCount() int                    // O(1)
-//	EdgeCount() int                      // O(1)
+//	g := core.NewGraph(WithDirected(false), WithWeighted())
+//	g.AddVertex("A"); g.AddVertex("B")
+//	eid, err := g.AddEdge("A", "B", 10)  // undirected by default here
+//	es  := g.Edges()                     // deterministic (Edge.ID asc)
+//	deg := g.Degree("A")                 // (in,out,undirected)
+//	s   := g.Stats()                     // O(V+E) snapshot of flags & counts
+//	g2  := g.Clone()                     // deep copy, preserves edge IDs
+//	uv  := core.UnweightedView(g)        // same topology, weight=0, weighted=false
 //
-//	// Maintenance
-//	Clear()                              // O(1): reset maps, counter; preserve flags
-//	FilterEdges(pred func(*Edge) bool)   // O(E): remove edges failing predicate
+// Vertex lifecycle:
 //
-//	// Cloning
-//	CloneEmpty() *Graph                  // O(V): copy vertices+flags only
-//	Clone() *Graph                       // O(V+E): deep-copy vertices+edges+adjacency
+//   - Create      → AddVertex(id)
+//   - Check       → HasVertex(id)
+//   - Remove      → RemoveVertex(id)        // removes incident edges deterministically
+//   - Enumerate   → Vertices()              // sorted
+//   - Inspect     → VerticesMap()           // shallow copy (ID → *Vertex)
 //
-//	// Shallow view
-//	VerticesMap() map[string]*Vertex     // O(V): read-only copy of vertices
-//	InternalVertices() map[string]*Vertex// live map (no locking!)
+// Edge lifecycle:
 //
-// Edge struct fields:
+//   - Create      → AddEdge(from,to,weight, opts...)   // mixed-mode gate enforced
+//   - Check       → HasEdge(from,to)                   // O(1) membership
+//   - Inspect     → GetEdge(edgeID), Edges()           // Edges() sorted by ID
+//   - Remove      → RemoveEdge(edgeID)                 // mirrors handled automatically
+//   - Filter      → FilterEdges(pred)                  // O(E) + cleanup
 //
-//	ID       string   // “e1”, “e2”, …
-//	From     string   // source vertex ID
-//	To       string   // destination vertex ID
-//	Weight   int64    // cost/capacity (zero in unweighted graphs)
-//	Directed bool     // true=one-way, false=bidirectional (mixed graphs only)
+// Adjacency & Neighborhood:
 //
-// Errors:
+//   - Neighbors(id)   → []*Edge        // sorted by Edge.ID
+//   - NeighborIDs(id) → []string       // unique, sorted
+//   - AdjacencyList() → map[id][]edgeID (per-vertex lists sorted by Edge.ID)
 //
-//		ErrEmptyVertexID       - zero-length vertex ID
-//		ErrVertexNotFound      - missing vertex
-//		ErrEdgeNotFound        - missing edge
-//		ErrBadWeight           - non-zero weight on unweighted graph
-//		ErrLoopNotAllowed      - self-loop when loops disabled
-//		ErrMultiEdgeNotAllowed - parallel edge when multi-edges disabled
-//		ErrMixedEdgesNotAllowed - per-edge override without mixed-mode
+// Cloning & Views:
 //
-//	 also amortized constant time: atomic ID generation + nested-map insertion.
+//   - CloneEmpty() - copy flags + vertices, no edges, carry nextEdgeID
+//   - Clone()      - deep copy (flags + vertices + edges + adjacency), carry nextEdgeID
+//   - UnweightedView(g) - same topology, weight=0, Weighted()=false
+//   - InducedSubgraph(g, keep) - keep subset of vertices + incident edges
 //
-// For a deep dive (pseudocode, math formulation, examples), see docs/CORE.md.
+// -----------------------------------------------------------------------------
+// -- COMPLEXITY SUMMARY -------------------------------------------------------
+//
+//	AddVertex / HasVertex / HasEdge            O(1) amortized
+//	AddEdge / RemoveEdge                       O(1) amortized (+ O(1) membership)
+//	Vertices / Edges                           O(V log V) / O(E log E) for ordering
+//	Neighbors / NeighborIDs                    O(d log d)  (d = degree(id))
+//	AdjacencyList                              O(V+E) to assemble + per-vertex sort
+//	Degree                                     O(d)
+//	CloneEmpty / Clone                         O(V) / O(V+E)
+//	Clear                                      O(1) (map reinit + counter reset)
+//	Stats                                      O(V+E)
+//
+// -----------------------------------------------------------------------------
+// -- AI-HINT (LLM/Copilot/ChatGPT/Claude/Gemini/Qwen guidance) ----------------
+//
+//   - Always assume deterministic ordering when you need stable tests or diffs.
+//     Prefer Vertices()/Edges()/NeighborIDs() outputs directly (already sorted).
+//
+//   - To use per-edge directedness, you MUST construct the graph with WithMixedEdges(),
+//     otherwise AddEdge(..., WithEdgeDirected(...)) → ErrMixedEdgesNotAllowed.
+//     g := core.NewGraph(WithDirected(false), WithMixedEdges())
+//     _, _ = g.AddEdge("A","B", 0, WithEdgeDirected(true))
+//
+//   - Unweighted graphs must add edges with weight==0; else → ErrBadWeight.
+//     g := core.NewGraph()                // unweighted by default
+//     _, err := g.AddEdge("A","B", 5)     // => ErrBadWeight
+//
+//   - No silent fallbacks: loops/multi-edges disabled → explicit sentinels.
+//     Check with errors.Is(err, core.ErrLoopNotAllowed) etc.
+//
+//   - Cloning preserves textual Edge.ID sequence via nextEdgeID carry-over.
+//     If you Clone() then AddEdge(), the new edge ID continues monotonic growth.
+//
+//   - Concurrency model is simple: public methods take care of locking internally.
+//     Do not hold external locks around core methods; let the package manage locks.
+//
+//   - If you only need a subset or weightless view - use InducedSubgraph/UnweightedView.
+//     They do NOT mutate the input graph.
+//
+// -----------------------------------------------------------------------------
+// -- See also: docs/CORE.md for algorithmic notes, proofs, and extended examples.
 package core

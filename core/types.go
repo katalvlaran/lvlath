@@ -1,22 +1,21 @@
-// Package core defines the central Graph, Vertex, and Edge types,
-// and provides thread-safe primitives for building, querying, and cloning graphs.
+// SPDX-License-Identifier: MIT
+
+// Package core defines the central Graph, Vertex, and Edge types and the
+// baseline configuration knobs used across lvlath.
 //
-// All core APIs use separate sync.RWMutex locks internally (muVert for vertices,
-// muEdgeAdj for edges and adjacency), so you can safely mutate your graphs across
-// goroutines with minimal contention.
+// Design invariants (enforced across the codebase):
+//  1. Determinism: enumeration order is stable and documented (vertices by ID asc,
+//     edges by Edge.ID asc, neighbor IDs by ID asc). Algorithms rely on this.
+//  2. Sentinel errors only: functions return package-level sentinels and are
+//     checked via errors.Is; no fmt-wrapping that would obscure equality.
+//  3. No hidden global state: all behavior is explicit and configured via options.
+//  4. No mutation of caller-owned inputs: views/clones are explicit and named as such.
+//  5. Concurrency: vertices and edges/adjacency are protected by separate RWMutexes
+//     to reduce contention; public methods are safe for concurrent use where stated.
 //
-// This file declares Vertex, Edge, Graph, GraphOption, EdgeOption,
-// sentinel errors, and the NewGraph constructor.
-//
-// Errors:
-//
-//	ErrNilVertex         - vertex pointer is nil.
-//	ErrEmptyVertexID     - vertex ID is the empty string.
-//	ErrVertexNotFound    - requested vertex does not exist.
-//	ErrEdgeNotFound      - requested edge does not exist.
-//	ErrBadWeight         - non-zero weight provided to an unweighted graph.
-//	ErrLoopNotAllowed    - self-loop when loops are disabled.
-//	ErrMultiEdgeNotAllowed - attempt to add parallel edge when multi-edges disabled.
+// Complexity notes (types-only file):
+//   - Declaring types and simple option closures is O(1).
+//   - NewGraph (allocation + option application) is O(1) w.r.t. V,E at creation time.
 package core
 
 import (
@@ -24,141 +23,287 @@ import (
 	"sync"
 )
 
-// Sentinel errors for core graph operations.
+////////////////////////////////////////////////////////////////////////////////
+// Sentinel errors (public, stable, and comparable via errors.Is)
+//
+// Rationale:
+// - All exported operations must fail with these exact sentinels on invalid input.
+// - No formatted wrapping is permitted (to preserve equality checks and clarity).
+// - Ownership: these errors describe core-graph shape/flag violations only.
+////////////////////////////////////////////////////////////////////////////////
+
 var (
-	// ErrEmptyVertexID indicates that the provided Vertex has an empty ID.
+	// ErrEmptyVertexID signals that the provided vertex identifier is empty.
+	// Contract: any API that accepts a vertex ID must reject "" with this error.
 	ErrEmptyVertexID = errors.New("core: vertex ID is empty")
 
-	// ErrVertexNotFound indicates an operation referenced a non-existent vertex.
+	// ErrVertexNotFound indicates that a referenced vertex does not exist.
+	// Returned by query/mutation APIs that require a pre-existing vertex.
 	ErrVertexNotFound = errors.New("core: vertex not found")
 
-	// ErrEdgeNotFound indicates an operation referenced a non-existent edge.
+	// ErrEdgeNotFound indicates that a referenced edge (by Edge.ID) was not found.
+	// Returned by edge-removal or lookup routines.
 	ErrEdgeNotFound = errors.New("core: edge not found")
 
-	// ErrBadWeight indicates a non-zero weight provided to an unweighted graph.
+	// ErrBadWeight reports a non-zero weight on an unweighted graph.
+	// Contract: on graphs without WithWeighted(), only weight == 0 is allowed.
 	ErrBadWeight = errors.New("core: bad weight for unweighted graph")
 
-	// ErrLoopNotAllowed indicates a self-loop was attempted when loops are disabled.
+	// ErrLoopNotAllowed reports a self-loop attempt when loops are disabled.
+	// Contract: WithLoops() must be set to allow edges (v -> v).
 	ErrLoopNotAllowed = errors.New("core: self-loop not allowed")
 
-	// ErrMultiEdgeNotAllowed indicates a parallel edge was attempted when multi-edges are disabled.
+	// ErrMultiEdgeNotAllowed reports a parallel edge attempt when multi-edges are disabled.
+	// Contract: WithMultiEdges() must be set to allow (u,v) duplication (or directional duplicates).
 	ErrMultiEdgeNotAllowed = errors.New("core: multi-edges not allowed")
 
-	// ErrMixedEdgesNotAllowed indicates a mixed direction in edges when mixed-edges are disabled.
+	// ErrMixedEdgesNotAllowed reports a per-edge directedness override on a non-mixed graph.
+	// Contract: WithMixedEdges() (or NewMixedGraph) must be set before any WithEdgeDirected(...) override.
 	ErrMixedEdgesNotAllowed = errors.New("core: mixed-mode per-edge overrides not allowed")
 )
 
-// Vertex represents a node in the graph.
+////////////////////////////////////////////////////////////////////////////////
+// Vertex — immutable identity + user metadata pointer.
 //
-// ID uniquely identifies this Vertex within its Graph.
-// Metadata stores arbitrary key-value data and is shared on shallow clones.
+// Notes:
+// - ID is the unique key for referencing this vertex in API calls.
+// - Metadata is caller-managed auxiliary data; Clone performs a shallow copy.
+// - The core does not interpret Metadata; algorithms should treat it as opaque.
+////////////////////////////////////////////////////////////////////////////////
+
 type Vertex struct {
-	// ID is the unique identifier for this Vertex.
+	// ID uniquely identifies a vertex within a single Graph instance.
 	ID string
 
-	// Metadata stores arbitrary user data. It is not deep-copied by Clone.
+	// Metadata holds arbitrary user data. Graph.Clone performs a shallow copy
+	// of this map pointer; if deep-copy is required, callers must handle it externally.
 	Metadata map[string]interface{}
 }
 
-// Edge represents a connection between two vertices.
+////////////////////////////////////////////////////////////////////////////////
+// Edge — unique identity + endpoints + weight + directedness.
 //
-// Each Edge has a unique ID, endpoints From→To, integer Weight, and a Directed flag
-// that overrides the Graph's default directedness when mixed edges are enabled.
+// Notes:
+// - ID is a stable, monotonically increasing identifier ("e1","e2",...) generated by Graph.
+// - From and To are vertex IDs; for undirected edges (Directed=false) adjacency is mirrored.
+// - Weight is int64 (consistent with dijkstra/MST/flow contracts).
+// - Directed indicates whether this edge is one-way (true) or two-way (false).
+//   • In non-mixed graphs, Directed equals the graph default for all edges.
+//   • In mixed graphs (WithMixedEdges), Directed may be overridden per edge.
+////////////////////////////////////////////////////////////////////////////////
+
 type Edge struct {
 	// ID uniquely identifies this edge in the Graph.
 	ID string
 
-	// From is the source vertex ID.
+	// From is the source vertex ID (for undirected edges this is one endpoint).
 	From string
 
-	// To is the destination vertex ID.
+	// To is the destination vertex ID (for undirected edges this is the other endpoint).
 	To string
 
-	// Weight is the cost or capacity of the edge.
+	// Weight is the edge cost/capacity; must be 0 unless the graph is WithWeighted().
 	Weight int64
 
-	// Directed indicates this edge is one-way (true) or bidirectional (false)
-	// when the Graph was constructed with mixed edge support.
+	// Directed = true means the edge is asymmetric (From -> To only).
+	// Directed = false means the edge is symmetric (From <-> To, adjacency mirrored).
 	Directed bool
 }
 
-// GraphOption configures behavior of a Graph before creation.
+////////////////////////////////////////////////////////////////////////////////
+// GraphOption — functional options for Graph construction.
+//
+// Policy:
+// - Options mutate only the newly constructed Graph inside NewGraph.
+// - Invalid option arguments (if any) must panic immediately (programmer error).
+// - Behavior changes are explicit and deterministic; no time-based randomness.
+////////////////////////////////////////////////////////////////////////////////
+
 type GraphOption func(g *Graph)
 
-// WithDirected sets the default directedness for all new edges
-// (true = directed, false = undirected).
+// WithDirected sets the default directedness for all future edges created
+// in this Graph unless overridden (only allowed when mixed-mode is enabled).
+// Complexity: O(1)
 func WithDirected(defaultDirected bool) GraphOption {
+	// AI-HINT: Sets only the default; per-edge override requires WithMixedEdges().
 	return func(g *Graph) { g.directed = defaultDirected }
 }
 
-// WithWeighted allows non-zero edge weights in the Graph.
+// WithWeighted enables non-zero edge weights in this Graph.
+// Complexity: O(1)
 func WithWeighted() GraphOption {
+	// AI-HINT: Without this, AddEdge(weight!=0) returns ErrBadWeight.
 	return func(g *Graph) { g.weighted = true }
 }
 
-// WithMultiEdges permits parallel edges between the same vertices.
+// WithMultiEdges permits parallel edges between the same endpoints.
+// Complexity: O(1)
 func WithMultiEdges() GraphOption {
+	// AI-HINT: Without this, a second AddEdge(from,to,...) returns ErrMultiEdgeNotAllowed.
 	return func(g *Graph) { g.allowMulti = true }
 }
 
 // WithLoops permits self-loops (edges from a vertex to itself).
+// Complexity: O(1)
 func WithLoops() GraphOption {
+	// AI-HINT: Without this, AddEdge(v,v,...) returns ErrLoopNotAllowed.
 	return func(g *Graph) { g.allowLoops = true }
 }
 
-// WithMixedEdges GraphOption to let per-edge directedness overrides take effect:
+// WithMixedEdges enables per-edge directedness overrides (mixed mode).
+// In mixed mode, individual edges may specify Directed=true/false via EdgeOption.
+// Complexity: O(1)
 func WithMixedEdges() GraphOption {
+	// AI-HINT: Enables per-edge orientation override via WithEdgeDirected(...).
 	return func(g *Graph) { g.allowMixed = true }
 }
 
-// EdgeOption configures properties of individual edges when added.
+////////////////////////////////////////////////////////////////////////////////
+// EdgeOption — functional options applied per-edge in AddEdge.
+//
+// Policy:
+// - Edge options must never mutate global graph state.
+// - Directed override is honored only when the Graph was created with WithMixedEdges.
+// - Option constructors must validate arguments and may panic on nonsensical input.
+////////////////////////////////////////////////////////////////////////////////
+
 type EdgeOption func(*Edge)
 
-// WithEdgeDirected overrides the Graph's default directedness for this edge.
+// WithEdgeDirected overrides directedness for a single edge.
+// Contract: effective only if the Graph was created with WithMixedEdges.
+// Complexity: O(1)
 func WithEdgeDirected(directed bool) EdgeOption {
+	// AI-HINT: Effective only if the Graph was created with WithMixedEdges(); else AddEdge will return ErrMixedEdgesNotAllowed.
 	return func(e *Edge) { e.Directed = directed }
 }
 
-// Graph is the core in-memory graph data structure.
+////////////////////////////////////////////////////////////////////////////////
+// Graph — thread-safe, deterministic in-memory graph.
 //
-// It supports: directed vs. undirected, weighted vs. unweighted,
-// parallel edges (multi-edges) and self-loops.
-// muVert protects vertices map; muEdgeAdj protects edges map and adjacencyList.
-// nextEdgeID is an atomic counter for unique Edge.ID generation.
-type Graph struct {
-	muVert    sync.RWMutex // guards vertices
-	muEdgeAdj sync.RWMutex // guards edges and adjacency
+// Concurrency model:
+// - muVert protects vertex-level state (vertices map + graph flag reads).
+// - muEdgeAdj protects edges map and adjacencyList.
+// - Separation reduces contention in algorithms that iterate neighbors frequently.
+//
+// Storage model:
+// - vertices: map[string]*Vertex — vertex catalog by ID.
+// - edges:    map[string]*Edge   — edge catalog by unique Edge.ID.
+// - adjacencyList: map[fromID]map[toID]map[edgeID]struct{} for O(1) membership.
+//
+// Configuration flags (set only at construction time via GraphOption):
+// - directed:   default edge orientation (true=directed, false=undirected).
+// - weighted:   non-zero weights allowed when true.
+// - allowMulti: parallel edges allowed when true.
+// - allowLoops: self-loops allowed when true.
+// - allowMixed: per-edge directedness overrides allowed when true.
+//
+// ID generation:
+// - nextEdgeID is a monotonic counter used to assign unique Edge.ID values.
+// - Clone is expected to carry over the counter to prevent collisions (implemented elsewhere).
+////////////////////////////////////////////////////////////////////////////////
 
-	// Configuration flags
-	directed   bool // default directedness
+type Graph struct {
+	// muVert guards vertex map and configuration flags to allow safe, low-contention reads.
+	muVert sync.RWMutex
+
+	// muEdgeAdj guards edge catalog and adjacency list for consistent graph topology updates.
+	muEdgeAdj sync.RWMutex
+
+	// Configuration flags (read under muVert; written only during construction).
+	directed   bool // default directedness for future edges
 	weighted   bool // allow non-zero weights
 	allowMulti bool // allow parallel edges
 	allowLoops bool // allow self-loops
-	allowMixed bool // allow mixed directed edges
+	allowMixed bool // allow per-edge directedness overrides (mixed mode)
 
-	// Storage
-	nextEdgeID uint64             // atomic edge ID generator
-	vertices   map[string]*Vertex // vertex ID → Vertex
-	edges      map[string]*Edge   // edge ID → Edge
+	// Monotonic edge ID generator (incremented on each AddEdge).
+	nextEdgeID uint64
 
-	// adjacencyList[(from)Vertex.ID][(to)Vertex.ID][Edge.ID] = struct{}{}
+	// Vertex catalog: ID -> *Vertex (caller-visible IDs, stable across runtime).
+	vertices map[string]*Vertex
+
+	// Edge catalog: EdgeID -> *Edge (unique identities across the graph’s lifetime).
+	edges map[string]*Edge
+
+	// Adjacency: fromID -> toID -> edgeID -> unit. Provides O(1) membership checks
+	// and deterministic extraction (final sorting happens at API boundaries).
 	adjacencyList map[string]map[string]map[string]struct{}
 }
 
-// NewGraph creates an empty Graph with the given flags and options.
-// By default, Graph is undirected, unweighted, no loops, no multi-edges.
-// Complexity: O(1)
+////////////////////////////////////////////////////////////////////////////////
+// GraphStats — read-only result object summarizing graph state.
+//
+// Purpose:
+// - One-shot, deterministic summary for diagnostics, tests, and admission checks.
+// - Filled by (*Graph).Stats() in O(V+E) (implemented outside this file).
+//
+// Semantics:
+// - DirectedDefault reflects the graph's default orientation (not the presence of
+//   directed edges; see DirectedEdgeCount).
+// - Weighted/AllowsMulti/AllowsLoops/MixedMode mirror the graph flags.
+// - VertexCount/EdgeCount report catalog sizes (not degrees).
+// - DirectedEdgeCount and UndirectedEdgeCount count edges by their Edge.Directed flag.
+//
+// Stability:
+// - Field names and meanings are part of the public contract.
+// - This type is pure data (no methods) to keep types.go logic-free per project standards.
+////////////////////////////////////////////////////////////////////////////////
+
+type GraphStats struct {
+	// DirectedDefault is the graph-wide default orientation (true=directed).
+	DirectedDefault bool
+
+	// Weighted is true when non-zero edge weights are permitted.
+	Weighted bool
+
+	// AllowsMulti is true when parallel edges are permitted.
+	AllowsMulti bool
+
+	// AllowsLoops is true when self-loops are permitted.
+	AllowsLoops bool
+
+	// MixedMode is true when per-edge Directed overrides are permitted.
+	MixedMode bool
+
+	// VertexCount is the number of vertices present in the graph.
+	VertexCount int
+
+	// EdgeCount is the number of edges present in the graph.
+	EdgeCount int
+
+	// DirectedEdgeCount is the number of edges with Directed == true.
+	DirectedEdgeCount int
+
+	// UndirectedEdgeCount is the number of edges with Directed == false.
+	UndirectedEdgeCount int
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// Constructor — NewGraph
+//
+// Behavior:
+// - Allocates empty catalogs and adjacency.
+// - Applies options in call order deterministically.
+// - Leaves nextEdgeID at 0; IDs are assigned by AddEdge.
+//
+// Complexity: O(1) allocations + O(len(opts)) option applications.
+////////////////////////////////////////////////////////////////////////////////
+
 func NewGraph(opts ...GraphOption) *Graph {
+	// Allocate a new Graph with empty maps; sizes grow amortized O(1).
 	g := &Graph{
 		vertices:      make(map[string]*Vertex),
 		edges:         make(map[string]*Edge),
 		adjacencyList: make(map[string]map[string]map[string]struct{}),
 	}
-	// Apply options
+
+	// Apply user-provided options deterministically (left-to-right).
 	var opt GraphOption
 	for _, opt = range opts {
 		opt(g)
 	}
 
+	// Return the configured, empty graph. All mutations happen via methods
+	// that enforce invariants, determinism, and sentinel errors.
 	return g
 }

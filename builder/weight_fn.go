@@ -8,6 +8,10 @@ import (
 	"math/rand"
 )
 
+// DefaultEdgeWeight is the default weight assigned to each edge when no
+// custom WeightFn is provided.
+const DefaultEdgeWeight int64 = 1
+
 // WeightFn produces an edge weight given an optional *rand.Rand source.
 // It must be deterministic for a given RNG seed; panics in constructors
 // indicate programmer error in configuration.

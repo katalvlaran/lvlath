@@ -1,103 +1,105 @@
-// Package builder provides internal configuration types and functional options
-// for graph constructors. It centralizes common settings such as random number
-// generator, vertex ID scheme, and edge weight distribution to keep builder
-// implementations DRY and consistent.
+// SPDX-License-Identifier: MIT
+// Package: lvlath/builder
 //
-// The key type is BuilderOption, a function that mutates a builderConfig.
-// builderConfig holds three fields:
-//   - rng:     *rand.Rand source for randomness (nil → deterministic).
-//   - idFn:    IDFn to produce vertex identifiers from integer indices.
-//   - weightFn: WeightFn to produce edge weights given an RNG.
+// impl_config.go — internal configuration and deterministic defaults.
 //
-// Use newBuilderConfig to obtain a config with sensible defaults, then apply
-// any number of BuilderOption in order. Later options override earlier ones.
+// Design:
+//   • builderConfig is the single source of truth for all builder knobs.
+//   • Defaults are deterministic and documented; no globals.
+//   • newBuilderConfig applies options in-order (later overrides earlier).
 //
-// Complexity: newBuilderConfig applies N options in O(N) time, O(1) extra space.
+// Deterministic defaults (no surprises):
+//   • idFn        = decimalID          ("0","1","2",...)
+//   • rng         = nil                 (pure/deterministic unless seeded)
+//   • weightFn    = constWeight(defaultConstWeight)
+//   • left/right  = "L" / "R"
+//   • amplitude   = 1.0
+//   • frequency   = 1.0
+//   • trendK      = 0.0
+//   • noiseSigma  = 0.0
+//
+// AI-Hints:
+//   • Set WithSeed for reproducible RandomSparse/RandomRegular fixtures.
+//   • Override WithIDScheme for human-readable labels in examples/golden tests.
+//   • WithPartitionPrefix influences K_{m,n} side IDs only (bipartite).
+//   • Weight policy matters only if the core graph is weighted.
+
 package builder
 
 import (
-	"math/rand"
+	"math/rand" // RNG for stochastic builders
+	"strconv"   // decimal vertex IDs ("0","1",...)
 )
 
-// BuilderOption customizes the behavior of a graph constructor.
-// It mutates the builderConfig before graph construction begins.
-//
-// As a rule, option constructors never panic at runtime, and ignore nil inputs.
-type BuilderOption func(cfg *builderConfig)
-
-// builderConfig holds the configurable parameters for graph builders:
-//   - rng:     source of randomness (nil means deterministic).
-//   - idFn:    function mapping index→vertex ID (IDFn).
-//   - weightFn: function mapping rng→edge weight (WeightFn).
-//
-// builderConfig is not safe for concurrent mutation; each builder invocation
-// should create its own config via newBuilderConfig.
+// builderConfig aggregates all knobs used by constructors.
+// It is passed by VALUE to constructors (immutable to callers).
 type builderConfig struct {
-	rng      *rand.Rand // optional RNG; nil means deterministic behavior
-	idFn     IDFn       // function to generate vertex IDs from indices
-	weightFn WeightFn   // function to generate edge weights
+	// Vertex ID strategy: index -> ID (deterministic).
+	idFn func(int) string
+	// RNG for stochastic choices; nil means “no randomness”.
+	rng *rand.Rand
+	// Weight generator for edges; used only for weighted graphs.
+	weightFn func(*rand.Rand) int64
+
+	// Bipartite ID prefixes (left/right). Empty → defaults resolved below.
+	leftPrefix  string
+	rightPrefix string
+
+	// Sequence dataset controls (Pulse/Chirp/OHLC).
+	amplitude  float64 // >0
+	frequency  float64 // >0 for periodic/ chirp
+	trendK     float64 // any real
+	noiseSigma float64 // >=0
 }
 
-// newBuilderConfig returns a builderConfig initialized with defaults, then
-// applies each provided BuilderOption in order. If opts is empty, returns
-// defaults: nil RNG, DefaultIDFn, DefaultWeightFn.
-//
-// Complexity: O(len(opts)) time, O(1) extra space.
-func newBuilderConfig(opts ...BuilderOption) *builderConfig {
-	// Initialize defaults
-	cfg := &builderConfig{
-		rng:      nil,             // no RNG → deterministic ID and weight functions
-		idFn:     DefaultIDFn,     // decimal IDs "0","1",…
-		weightFn: DefaultWeightFn, // constant DefaultEdgeWeight
+// Deterministic defaults (named, no magic numbers).
+const (
+	defaultLeftPrefix  = "L"      // bipartite left side label
+	defaultRightPrefix = "R"      // bipartite right side label
+	defaultAmplitude   = 1.0      // sequence amplitude
+	defaultFrequency   = 1.0      // base frequency
+	defaultTrend       = 0.0      // linear trend coefficient
+	defaultNoiseSigma  = 0.0      // Gaussian noise stdev
+	defaultConstWeight = int64(1) // constant edge weight when weighted
+)
+
+// newBuilderConfig constructs a config with deterministic defaults and applies
+// all options in order. Options may leave some string fields empty; we resolve
+// those to defaults here to keep downstream code branch-free.
+// Complexity: O(len(opts)) time, O(1) space.
+func newBuilderConfig(opts ...BuilderOption) builderConfig {
+	// Start with strict, deterministic defaults.
+	cfg := builderConfig{
+		idFn:        decimalID,                                            // "0","1","2",...
+		rng:         nil,                                                  // no RNG unless explicitly set
+		weightFn:    func(*rand.Rand) int64 { return defaultConstWeight }, // constant weight
+		leftPrefix:  defaultLeftPrefix,                                    // "L"
+		rightPrefix: defaultRightPrefix,                                   // "R"
+		amplitude:   defaultAmplitude,                                     // 1.0
+		frequency:   defaultFrequency,                                     // 1.0
+		trendK:      defaultTrend,                                         // 0.0
+		noiseSigma:  defaultNoiseSigma,                                    // 0.0
 	}
 
-	// Apply each option in order; later options override earlier ones
-	var opt BuilderOption
-	for _, opt = range opts {
-		opt(cfg)
+	// Apply options in the given order; last-wins semantics.
+	for _, opt := range opts {
+		opt(&cfg)
 	}
 
+	// Resolve empty bipartite prefixes to defaults (deterministic fallback).
+	if cfg.leftPrefix == "" {
+		cfg.leftPrefix = defaultLeftPrefix
+	}
+	if cfg.rightPrefix == "" {
+		cfg.rightPrefix = defaultRightPrefix
+	}
+
+	// Return by value to encourage immutability for callers.
 	return cfg
 }
 
-// WithIDScheme injects a custom IDFn into the builderConfig.
-// If idFn is nil, this option is a no-op.
-// Complexity: O(1) time, O(1) space.
-func WithIDScheme(idFn IDFn) BuilderOption {
-	return func(cfg *builderConfig) {
-		if idFn != nil {
-			cfg.idFn = idFn
-		}
-	}
-}
-
-// WithWeightFn injects a custom WeightFn into the builderConfig.
-// If wfn is nil, this option is a no-op.
-// Complexity: O(1) time, O(1) space.
-func WithWeightFn(wfn WeightFn) BuilderOption {
-	return func(cfg *builderConfig) {
-		if wfn != nil {
-			cfg.weightFn = wfn
-		}
-	}
-}
-
-// WithRand sets an explicit *rand.Rand source for randomness.
-// If rng is nil, this option is a no-op and leaves the original RNG.
-// Complexity: O(1) time, O(1) space.
-func WithRand(rng *rand.Rand) BuilderOption {
-	return func(cfg *builderConfig) {
-		if rng != nil {
-			cfg.rng = rng
-		}
-	}
-}
-
-// WithSeed creates a new *rand.Rand seeded with the given value and
-// assigns it as the RNG source. Use this for reproducible randomness.
-// Complexity: O(1) time, O(1) space.
-func WithSeed(seed int64) BuilderOption {
-	return func(cfg *builderConfig) {
-		cfg.rng = rand.New(rand.NewSource(seed))
-	}
+// decimalID renders an index as a base-10 string ("0","1","2",...).
+// Deterministic and allocation-light; suitable for golden tests.
+func decimalID(i int) string {
+	return strconv.Itoa(i)
 }

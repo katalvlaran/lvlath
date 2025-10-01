@@ -46,7 +46,7 @@ func TestBuilders_Functional(t *testing.T) {
 	// For symmetric constructions, counts must match expected.
 	tests := []struct {
 		name        string
-		ctor        builder.GraphConstructor
+		ctor        builder.Constructor
 		wantV       int                               // expected number of vertices
 		wantE       int                               // expected number of edges
 		sampleCheck func(t *testing.T, g *core.Graph) // additional topology-specific checks
@@ -144,7 +144,7 @@ func TestBuilders_Functional(t *testing.T) {
 		},
 		{
 			name:  "RandomSparse_p0(5)",
-			ctor:  builder.RandomSparse(5, 0.0, builder.WithSeed(1)),
+			ctor:  builder.RandomSparse(5, 0.0),
 			wantV: 5, wantE: 0, // p=0 yields no edges
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 0 {
@@ -154,7 +154,7 @@ func TestBuilders_Functional(t *testing.T) {
 		},
 		{
 			name:  "RandomSparse_p1(5)",
-			ctor:  builder.RandomSparse(5, 1.0, builder.WithSeed(1)),
+			ctor:  builder.RandomSparse(5, 1.0),
 			wantV: 5, wantE: 10, // 5*4/2 = 10
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 10 {
@@ -164,7 +164,7 @@ func TestBuilders_Functional(t *testing.T) {
 		},
 		{
 			name:  "RandomRegular(6,2)",
-			ctor:  builder.RandomRegular(6, 2, builder.WithSeed(1)),
+			ctor:  builder.RandomRegular(6, 2),
 			wantV: 6, wantE: 6, // n*d/2 = 6*2/2 = 6 edges
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 6 {
@@ -229,7 +229,7 @@ func TestBuilders_Functional(t *testing.T) {
 			t.Parallel()
 			// build into a weighted graph so AddEdge never returns ErrBadWeight
 			graphOpts := []core.GraphOption{core.WithWeighted()}
-			g, err := builder.BuildGraph(graphOpts, tc.ctor)
+			g, err := builder.BuildGraph(graphOpts, []builder.BuilderOption{}, tc.ctor)
 			if err != nil {
 				t.Fatalf("BuildGraph(%s) returned error: %v", tc.name, err)
 			}
@@ -248,7 +248,7 @@ func TestBuilders_Functional(t *testing.T) {
 			tc.sampleCheck(t, g)
 
 			// idempotence: rerun builder on a fresh weighted graph
-			g2, err2 := builder.BuildGraph(graphOpts, tc.ctor)
+			g2, err2 := builder.BuildGraph(graphOpts, []builder.BuilderOption{}, tc.ctor)
 			if err2 != nil {
 				t.Fatalf("second BuildGraph(%s) returned error: %v", tc.name, err2)
 			}

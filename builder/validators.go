@@ -1,9 +1,20 @@
 // Package builder provides validation helpers to enforce
-// parameter contracts in GraphConstructor factories.
+// parameter contracts in Constructor factories.
 //
 // Each function returns a formatted error via builderErrorf
 // when its precondition is violated.
 package builder
+
+// MinProbability is the lower bound for the probability parameter p in
+// RandomSparse (Erdős–Rényi) graph construction, inclusive.
+const MinProbability = 0.0
+
+// MaxProbability is the upper bound for the probability parameter p in
+// RandomSparse construction, inclusive.
+const MaxProbability = 1.0
+
+// MaxPartition .
+const MaxPartition = 1
 
 // validateMin ensures that the provided integer 'got' is ≥ 'min'.
 // Returns an error "<Method>: parameter must be ≥ <min>, got <got>" otherwise.

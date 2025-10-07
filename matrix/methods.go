@@ -5,7 +5,6 @@
 package matrix
 
 import (
-	"errors"
 	"fmt"
 	"math"
 )
@@ -33,17 +32,17 @@ const (
 	opQR            = "QR"
 )
 
-// ErrSingular is returned when a zero pivot is encountered during inversion.
-var ErrSingular = errors.New("ops: matrix is singular")
-
-// ErrNotSymmetric is returned when the input matrix is not symmetric.
-var ErrNotSymmetric = errors.New("ops: matrix is not symmetric")
-
-// ErrEigenFailed is returned if the algorithm does not converge within max iterations.
-var ErrEigenFailed = errors.New("ops: eigen decomposition did not converge")
-
-// ErrNilMatrix indicates that a nil Matrix was passed to an operation.
-var ErrNilMatrix = errors.New("matrix: nil Matrix")
+//// ErrSingular is returned when a zero pivot is encountered during inversion.
+//var ErrSingular = errors.New("ops: matrix is singular")
+//
+//// ErrNotSymmetric is returned when the input matrix is not symmetric.
+//var ErrNotSymmetric = errors.New("ops: matrix is not symmetric")
+//
+//// ErrEigenFailed is returned if the algorithm does not converge within max iterations.
+//var ErrEigenFailed = errors.New("ops: eigen decomposition did not converge")
+//
+//// ErrNilMatrix indicates that a nil Matrix was passed to an operation.
+//var ErrNilMatrix = errors.New("matrix: nil Matrix")
 
 // matrixErrorf wraps an underlying error with the given tag.
 func matrixErrorf(tag string, err error) error {
@@ -178,7 +177,7 @@ func Mul(a, b Matrix) (Matrix, error) {
 		return nil, matrixErrorf(opMul, err)
 	}
 	if a.Cols() != b.Rows() {
-		return nil, matrixErrorf(opMul, ErrMatrixDimensionMismatch)
+		return nil, matrixErrorf(opMul, ErrDimensionMismatch)
 	}
 
 	// Stage 2: Allocate result Dense
@@ -328,7 +327,7 @@ func Scale(m Matrix, alpha float64) (Matrix, error) {
 // It returns a slice of eigenvalues and a matrix of eigenvectors Q (columns of Q).
 // tol specifies convergence threshold for off-diagonal elements.
 // maxIter caps the number of Jacobi sweeps.
-// Returns ErrMatrixDimensionMismatch, ErrNotSymmetric, or ErrEigenFailed.
+// Returns ErrDimensionMismatch, ErrNotSymmetric, or ErrEigenFailed.
 // Time Complexity: O(maxIter·n³); Space Complexity: O(n²).
 func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	// Stage 1: Validate input non-nil and square
@@ -342,7 +341,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	)
 	if n != cols {
 		// if not square - error out immediately
-		return nil, nil, matrixErrorf(opEigen, ErrMatrixDimensionMismatch)
+		return nil, nil, matrixErrorf(opEigen, ErrDimensionMismatch)
 	}
 
 	// Stage 2: Check symmetry within tolerance
@@ -531,7 +530,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 
 // FloydWarshall computes the shortest‐path distances between all pairs of vertices
 // in‐place on the provided matrix m. m must be square, with +Inf representing
-// absent edges. Returns ErrMatrixDimensionMismatch if m is not square, or any
+// absent edges. Returns ErrDimensionMismatch if m is not square, or any
 // error from At/Set. Detects *Dense for a fast in‐slice inner loop.
 // Time Complexity: O(n³); Space Complexity: O(1) extra.
 func FloydWarshall(m Matrix) error {
@@ -744,7 +743,7 @@ func Inverse(m Matrix) (Matrix, error) {
 
 // LU performs Doolittle LU decomposition on a square matrix m.
 // It returns L (unit lower triangular) and U (upper triangular) matrices.
-// Returns ErrMatrixDimensionMismatch if m is not square, or any error from allocation.
+// Returns ErrDimensionMismatch if m is not square, or any error from allocation.
 // Time Complexity: O(n³); Space Complexity: O(n²).
 func LU(m Matrix) (Matrix, Matrix, error) {
 	// Stage 1: Validate input non‐nil and square
@@ -840,7 +839,7 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 }
 
 // QR returns Q and R for the decomposition m = Q×R using Householder reflections.
-// It returns ErrMatrixDimensionMismatch if m is not square.
+// It returns ErrDimensionMismatch if m is not square.
 // Time Complexity: O(n³); Space Complexity: O(n²).
 func QR(m Matrix) (Matrix, Matrix, error) {
 	// Stage 1: Validate input non‐nil and square

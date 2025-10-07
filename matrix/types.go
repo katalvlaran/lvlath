@@ -1,96 +1,63 @@
-// Package matrix defines configuration options and sentinel errors
-// for adjacency and incidence matrix operations.
+// SPDX-License-Identifier: MIT
+
+// Package matrix: domain types used by adapters and dense operations.
+// This file intentionally contains ONLY domain-facing types (IDs, weights,
+// helper keys) and, for now, preserves the public Matrix interface to avoid
+// breaking existing code at Stage-1. Errors and options live in dedicated
+// files (errors.go, options.go) per the global conventions.
 package matrix
 
-import "errors"
+// VertexID uniquely identifies a graph vertex (core uses string IDs).
+// Determinism relies on lexicographic ordering of these IDs across adapters.
+type VertexID string // string-based ID (stable lex order)
 
-// VertexID uniquely identifies a graph vertex.
-type VertexID string
+// Weight represents an edge weight for adapters/numeric ingestion.
+// All weights must be finite under the numeric policy; NaN/Inf is rejected.
+type Weight float64 // enforced via ValidateNaNInf policy
 
-// Weight represents an edge weight; must be finite and non-NaN.
-type Weight float64
+// pairKey is an ordered pair (u,v) used to de-duplicate parallel edges under
+// "first-edge-wins" policy in directed mode. For undirected mode we normalize
+// into {min,max} and still store in pairKey (u=min, v=max). Using ints keeps
+// the key compact and hash-friendly.
+// Complexity: O(1) to build; used in O(E) scans during ingestion.
+type pairKey struct {
+	u int // source row index
+	v int // destination column index
+}
 
-// Sentinel errors for matrix operations.
-var (
-	// ErrMatrixUnknownVertex indicates that a referenced VertexID is not present.
-	ErrMatrixUnknownVertex = errors.New("matrix: unknown vertex")
-
-	// ErrMatrixDimensionMismatch indicates incompatible dimensions.
-	ErrMatrixDimensionMismatch = errors.New("matrix: dimension mismatch")
-
-	// ErrMatrixNonBinaryIncidence indicates non-±1 entries in unweighted incidence.
-	ErrMatrixNonBinaryIncidence = errors.New("matrix: non-binary incidence")
-
-	// ErrMatrixNilGraph indicates a nil *core.Graph was passed.
-	ErrMatrixNilGraph = errors.New("matrix: nil graph")
-
-	// ErrMatrixNotImplemented is a placeholder for future methods.
-	ErrMatrixNotImplemented = errors.New("matrix: not implemented")
-)
-
-// Default configuration values for MatrixOptions.
-const (
-	DefaultDirected      = false
-	DefaultWeighted      = false
-	DefaultAllowMulti    = true
-	DefaultAllowLoops    = false
-	DefaultMetricClosure = false
-)
-
-// MatrixOptions configures graph→matrix transformation.
-// Zero value means:
+// Matrix represents a two-dimensional mutable array of float64 values.
+// We KEEP the interface at Stage-1 to preserve current callers, while
+// planning a Stage-4 migration to a concrete *Matrix for performance and
+// stronger invariants (fixed row-major layout, fewer virtual calls).
 //
-//	Directed=false, Weighted=false, AllowMulti=true, AllowLoops=true, MetricClosure=false.
-type MatrixOptions struct {
-	Directed      bool // directed edges
-	Weighted      bool // preserve actual weights
-	AllowMulti    bool // include parallel edges
-	AllowLoops    bool // include self-loops
-	MetricClosure bool // fill missing edges with +Inf and run APSP
-}
+// Rationale (why keep interface now):
+//   - Minimal churn at Stage-1 (options/errors refactor only).
+//   - Tests and existing impl_* likely depend on the interface.
+//   - We can introduce concrete *Matrix later (Stage-4) that still
+//     implements this interface for a smooth transition.
+//
+// Complexity notes: all methods are expected O(1) except Clone (O(r*c)).
+type Matrix interface {
+	// Rows returns the number of rows in the matrix.
+	// Complexity: O(1).
+	Rows() int
 
-// MatrixOption configures how adjacency/incidence matrices are built.
-// Panics on invalid use (programmer error).
-type MatrixOption func(*MatrixOptions)
+	// Cols returns the number of columns in the matrix.
+	// Complexity: O(1).
+	Cols() int
 
-// WithDirected sets Directed mode.
-func WithDirected(d bool) MatrixOption {
-	return func(o *MatrixOptions) { o.Directed = d }
-}
+	// At retrieves the element at position (i, j).
+	// Returns ErrIndexOutOfBounds if i<0, i>=Rows(), j<0 or j>=Cols().
+	// Complexity: O(1).
+	At(i, j int) (float64, error)
 
-// WithWeighted sets Weighted mode.
-func WithWeighted(w bool) MatrixOption {
-	return func(o *MatrixOptions) { o.Weighted = w }
-}
+	// Set assigns the value v at position (i, j).
+	// Returns ErrIndexOutOfBounds if indices are invalid.
+	// Complexity: O(1).
+	Set(i, j int, v float64) error
 
-// WithAllowMulti sets AllowMulti mode.
-func WithAllowMulti(m bool) MatrixOption {
-	return func(o *MatrixOptions) { o.AllowMulti = m }
-}
-
-// WithAllowLoops sets AllowLoops mode.
-func WithAllowLoops(l bool) MatrixOption {
-	return func(o *MatrixOptions) { o.AllowLoops = l }
-}
-
-// WithMetricClosure sets MetricClosure mode.
-func WithMetricClosure(mc bool) MatrixOption {
-	return func(o *MatrixOptions) { o.MetricClosure = mc }
-}
-
-// NewMatrixOptions returns a MatrixOptions populated with defaults
-// and then modified by any provided MatrixOption functions.
-func NewMatrixOptions(opts ...MatrixOption) MatrixOptions {
-	mo := MatrixOptions{
-		Directed:      DefaultDirected,
-		Weighted:      DefaultWeighted,
-		AllowMulti:    DefaultAllowMulti,
-		AllowLoops:    DefaultAllowLoops,
-		MetricClosure: DefaultMetricClosure,
-	}
-	for _, opt := range opts {
-		opt(&mo)
-	}
-
-	return mo
+	// Clone returns a deep copy of the matrix.
+	// The returned Matrix is independent of the original.
+	// Complexity: O(rows*cols).
+	Clone() Matrix
 }

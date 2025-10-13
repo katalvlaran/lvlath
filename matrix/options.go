@@ -198,6 +198,23 @@ func WithBinaryWeights() Option {
 
 // ---------- Defaults & aggregation ----------
 
+// NewMatrixOptions returns a MatrixOptions populated with defaults
+// and then modified by any provided MatrixOption functions.
+func NewMatrixOptions(opts ...Option) Options {
+	mo := Options{
+		directed:    DefaultDirected,
+		weighted:    DefaultWeighted,
+		allowMulti:  DefaultAllowMulti,
+		allowLoops:  DefaultAllowLoops,
+		metricClose: DefaultMetricClosure,
+	}
+	for _, opt := range opts {
+		opt(&mo)
+	}
+
+	return mo
+}
+
 // defaultOptions returns the documented defaults (single source of truth).
 // Complexity: O(1).
 func defaultOptions() Options {

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Package matrix — incidence builders (dense) with strict invariants.
 //
-// Stage-3 deliverables (per TA-MATRIX):
+// Deliverables (per TA-MATRIX):
 //   1) Nil-guards for "light" getters (panic on nil receiver/Mat with fixed message).
 //   2) Clarified signs: directed uses −1 at source and +1 at target; undirected uses +1/+1;
 //      self-loop in directed sums (−1 + +1) in the *same row* ⇒ 0 column; in undirected a loop
@@ -11,15 +11,15 @@
 //   5) Sentinel errors unified (ErrGraphNil, ErrUnknownVertex, ErrDimensionMismatch, ErrNilMatrix).
 //
 // AI-Hints:
-//   • Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
-//   • Incidence ignores numeric weights by design; it captures topology only (sign/endpoint).
-//   • For undirected graphs, a self-loop appears as +2 in the single row — this is conventional in
+//   - Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
+//   - Incidence ignores numeric weights by design; it captures topology only (sign/endpoint).
+//   - For undirected graphs, a self-loop appears as +2 in the single row — this is conventional in
 //     incidence algebra; downstream tools that expect strictly {−1,0,+1} should normalize if needed.
-//   • Determinism is guaranteed if you pass a deterministic vertex order and core returns edges by ID.
+//   - Determinism is guaranteed if you pass a deterministic vertex order and core returns edges by ID.
 //
 // Complexity:
-//   • BuildDenseIncidence: O(|V| + |E|) time, O(|V| + |E|) space (index map + column list + dense matrix).
-//   • Accessors: O(1) except VertexIncidence (O(#edges) to copy the row).
+//   - BuildDenseIncidence: O(|V| + |E|) time, O(|V| + |E|) space (index map + column list + dense matrix).
+//   - Accessors: O(1) except VertexIncidence (O(#edges) to copy the row).
 
 package matrix
 

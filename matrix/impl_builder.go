@@ -1,6 +1,23 @@
 // SPDX-License-Identifier: MIT
 // Package matrix — canonical builders for Dense adjacency and incidence matrices.
-// Deterministic, sentinel-accurate, and aligned with Stage-2/3 contracts.
+// Deterministic, sentinel-accurate, and aligned with contracts.
+//
+// Purpose:
+//   - Deterministic builders for dense adjacency and incidence matrices from core.Graph,
+//     honoring Options (Directed/Weighted/AllowLoops/AllowMulti/MetricClosure).
+//
+// Policy & Contracts:
+//   - Adjacency: 0/weight; metric-closure toggles to distances (+Inf as “no edge”, diag=0) then APSP.
+//   - Incidence: directed (−1 on source, +1 on target; self-loop → zero column), undirected (+1/+1; self-loop → +2).
+//
+// Determinism:
+//   - First-edge-wins when AllowMulti=false (ordered or unordered key by directedness).
+//   - Stable vertex order as provided by caller; no implicit sorting.
+//
+// AI-Hints:
+//   - If you need lex order, pre-sort vertices in the caller.
+//   - For sparse graphs, consider future sparse adapters; these are dense by design.
+
 package matrix
 
 import (
@@ -54,80 +71,6 @@ func allZeroWeights(edges []*core.Edge) bool {
 	return true
 }
 
-// initDistancesInPlace converts adjacency (0 / w) -> distance matrix in-place:
-//
-//	diag = 0; off-diagonal 0 -> +Inf; non-zero -> unchanged.
-//
-// Requires square matrix. Returns ErrDimensionMismatch otherwise.
-// Complexity: O(n^2).
-func initDistancesInPlace(mat *Dense) error {
-	r, c := mat.Rows(), mat.Cols()
-	if r != c {
-		return fmt.Errorf("initDistancesInPlace: non-square %dx%d: %w", r, c, ErrDimensionMismatch)
-	}
-
-	// Rewrite values row-by-row in a fixed order for determinism.
-	var i, j int
-	var v float64
-	for i = 0; i < r; i++ {
-		for j = 0; j < c; j++ {
-			if i == j {
-				// Distance from a node to itself is zero.
-				if err := mat.Set(i, j, 0.0); err != nil {
-					return fmt.Errorf("initDistancesInPlace: Set(%d,%d,0): %w", i, j, err)
-				}
-				continue
-			}
-			// Read current adjacency value.
-			v, _ = mat.At(i, j) // safe after shape validation
-			if v == 0.0 {
-				// No direct edge: set +Inf to represent "no path" initially.
-				if err := mat.Set(i, j, math.Inf(1)); err != nil {
-					return fmt.Errorf("initDistancesInPlace: Set(%d,%d,+Inf): %w", i, j, err)
-				}
-			}
-		}
-	}
-
-	return nil
-}
-
-// floydWarshallInPlace runs APSP in-place over the dense distance matrix.
-// It expects +Inf for "no path" and 0 on the diagonal, as set by
-// initDistancesInPlace. Loop order is fixed (k outer, i middle, j inner)
-// to ensure deterministic accumulation order across runs and architectures.
-//
-// Complexity: O(n^3) time, O(1) extra space (besides the matrix itself).
-func floydWarshallInPlace(mat *Dense) {
-	n := mat.Rows() // square already validated upstream
-	var k, i, j int
-	var dik, dkj, dij, cand float64
-	// Triple nested loops with fixed order (k, i, j).
-	for k = 0; k < n; k++ {
-		for i = 0; i < n; i++ {
-			// Read d(i,k) once per i to reduce At overhead in inner loop.
-			dik, _ = mat.At(i, k) // public At returns (val,error); ignore err after earlier validation
-			for j = 0; j < n; j++ {
-				// Read d(k,j) and current d(i,j).
-				dkj, _ = mat.At(k, j)
-				dij, _ = mat.At(i, j)
-
-				// If either segment is +Inf, path i→k→j is not improving.
-				if math.IsInf(dik, +1) || math.IsInf(dkj, +1) {
-					continue
-				}
-
-				// Candidate via k.
-				cand = dik + dkj
-				// Update when strictly better (deterministic tie-break: keep existing).
-				if cand < dij {
-					_ = mat.Set(i, j, cand)
-				}
-			}
-		}
-	}
-}
-
 // isLexSorted returns true if s is non-decreasing in lexicographic order.
 // Used defensively for vertex-list order enforcement in wrapper.
 // Complexity: O(n).
@@ -143,7 +86,7 @@ func isLexSorted(s []string) bool {
 
 // BuildDenseAdjacency constructs a dense adjacency matrix from an explicit
 // vertex-id list and an edge list, applying Options policy.
-// Behavior highlights (Stage-2):
+// Behavior highlights:
 //   - Directed + DisallowMulti ⇒ first-edge-wins on ordered (u,v).
 //   - Undirected + DisallowMulti ⇒ first-edge-wins on unordered {min,max}.
 //   - No mirroring for loops (u==v) in undirected case.
@@ -254,8 +197,8 @@ func BuildDenseAdjacency(
 		}
 
 		// Decide adjacency cell value for this edge:
-		//   • if useWeight, we preserve float64(e.Weight);
-		//   • otherwise we write 1 (binary).
+		//   - if useWeight, we preserve float64(e.Weight);
+		//   - otherwise we write 1 (binary).
 		// NOTE: we do not reject zero-weight *edges* here; under "weighted mode"
 		// the earlier degradation logic switches us to binary if all were zero.
 		if useWeight {
@@ -282,8 +225,8 @@ func BuildDenseAdjacency(
 	// --- Stage 4: Optional metric closure (APSP) ---
 	if opts.metricClose {
 		// Convert adjacency (0 / weight) into distance matrix:
-		//  • diag = 0,
-		//  • off-diagonal: 0 → +Inf (no edge), otherwise keep weight.
+		//  - diag = 0,
+		//  - off-diagonal: 0 → +Inf (no edge), otherwise keep weight.
 		if err = initDistancesInPlace(mat); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
@@ -305,7 +248,7 @@ func BuildDenseAdjacency(
 // BuildDenseIncidence constructs a dense incidence matrix from a vertex-id list and an edge list,
 // applying MatrixOptions policy deterministically.
 //
-// Behavior highlights (Stage-3):
+// Behavior highlights:
 //   - Directed: −1 at source row, +1 at target row; directed self-loop ⇒ column of zeros.
 //   - Undirected: +1 at both endpoints; undirected self-loop ⇒ +2 in the single row.
 //   - DisallowMulti: first-edge-wins (ordered for directed; unordered for undirected).
@@ -401,7 +344,9 @@ func BuildDenseIncidence(
 	var err error
 	if Ep == 0 {
 		// allow zero-column incidence
-		mat = &Dense{r: V, c: 0, data: make([]float64, 0)}
+		if mat, err = newDenseZeroOK(V, 0); err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: newDenseZeroOK(%d,0): %w", V, err)
+		}
 	} else {
 		if mat, err = NewDense(V, Ep); err != nil {
 			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDense(%d,%d): %w", V, Ep, err)

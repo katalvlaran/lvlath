@@ -4,9 +4,10 @@
 // package. All algorithms MUST return these sentinels and tests MUST check them
 // via errors.Is. No algorithm should panic on user-triggered error conditions.
 // Panics are reserved for programmer errors in private helpers (if any).
+
 package matrix
 
-import "errors" // standard library errors for sentinel creation
+import "errors"
 
 // NOTE ON NAMING & PREFIXING
 // --------------------------

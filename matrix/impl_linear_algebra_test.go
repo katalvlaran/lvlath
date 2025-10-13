@@ -200,7 +200,7 @@ func TestAdd_DimensionMismatch(t *testing.T) {
 	A, _ := matrix.NewDense(3, 4)
 	B, _ := matrix.NewDense(4, 3)
 	_, err = matrix.Add(A, B)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
 func TestAdd_Succeeds(t *testing.T) {
@@ -315,7 +315,7 @@ func TestSub_DimensionMismatch(t *testing.T) {
 	A, _ := matrix.NewDense(3, 5)
 	B, _ := matrix.NewDense(3, 4)
 	_, err = matrix.Sub(A, B)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
 func TestSub_Succeeds(t *testing.T) {
@@ -457,7 +457,7 @@ func TestMul_DimensionMismatch(t *testing.T) {
 	A, _ := matrix.NewDense(4, 3) // inner = 3
 	B, _ := matrix.NewDense(2, 5) // inner = 2 → mismatch
 	_, err = matrix.Mul(A, B)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
 func TestMul_Succeeds(t *testing.T) {
@@ -806,11 +806,11 @@ func TestScale_Properties_Composition_And_SpecialAlphas(t *testing.T) {
 		}
 	}
 
-	// (αβ)·M
+	// (αβ)*M
 	left, err := matrix.Scale(M, alpha*beta)
 	require.NoError(t, err)
 
-	// α·(β·M)
+	// α*(β*M)
 	bm, err := matrix.Scale(M, beta)
 	require.NoError(t, err)
 	right, err := matrix.Scale(bm, alpha)
@@ -933,14 +933,14 @@ func TestEigen_Errors(t *testing.T) {
 	// non-square → ErrMatrixDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.Eigen(ns, 1e-10, 50)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 
 	// not symmetric within tol → ErrNotSymmetric
 	asym, _ := matrix.NewDense(3, 3)
 	require.NoError(t, asym.Set(0, 1, 1))
 	require.NoError(t, asym.Set(1, 0, 2)) // violates symmetry > tol
 	_, _, err = matrix.Eigen(asym, 1e-12, 50)
-	require.ErrorIs(t, err, matrix.ErrNotSymmetric)
+	require.ErrorIs(t, err, matrix.ErrAsymmetry)
 
 	// zero iterations with nonzero off-diagonals → ErrEigenFailed
 	sym, _ := matrix.NewDense(3, 3)
@@ -995,7 +995,7 @@ func TestEigen_Diagonal_NoRotation(t *testing.T) {
 	}
 }
 
-// TestEigen_2x2_Analytic: [[2,1],[1,2]] has eigenvalues {1,3}; Q orthonormal; A·Q≈Q·D.
+// TestEigen_2x2_Analytic: [[2,1],[1,2]] has eigenvalues {1,3}; Q orthonormal; A*Q≈Q*D.
 func TestEigen_2x2_Analytic(t *testing.T) {
 	t.Parallel()
 
@@ -1057,7 +1057,7 @@ func TestEigen_BlockDiagonal_Degenerate(t *testing.T) {
 	propReconstruction(t, orig, Q, vals, 1e-9)
 }
 
-// TestEigen_Reconstruction_SPD_6x6: SPD A=MᵀM, check QᵀQ≈I, A≈QDQᵀ and A·Q≈Q·D.
+// TestEigen_Reconstruction_SPD_6x6: SPD A=MᵀM, check QᵀQ≈I, A≈QDQᵀ and A*Q≈Q*D.
 func TestEigen_Reconstruction_SPD_6x6(t *testing.T) {
 	t.Parallel()
 
@@ -1134,13 +1134,13 @@ func TestEigen_Errors(t *testing.T) {...}
 // TestEigen_Diagonal_NoRotation: diagonal matrices return exact diagonal as eigenvalues and Q=I.
 func TestEigen_Diagonal_NoRotation(t *testing.T) {...}
 
-// TestEigen_2x2_Analytic: [[2,1],[1,2]] has eigenvalues {1,3}; Q orthonormal; A·Q≈Q·D.
+// TestEigen_2x2_Analytic: [[2,1],[1,2]] has eigenvalues {1,3}; Q orthonormal; A*Q≈Q*D.
 func TestEigen_2x2_Analytic(t *testing.T) {...}
 
 // TestEigen_BlockDiagonal_Degenerate: block diag([2], [[3,1],[1,3]]) ⇒ eigenvalues {2,2,4}.
 func TestEigen_BlockDiagonal_Degenerate(t *testing.T) {...}
 
-// TestEigen_Reconstruction_SPD_6x6: SPD A=MᵀM, check QᵀQ≈I, A≈QDQᵀ and A·Q≈Q·D.
+// TestEigen_Reconstruction_SPD_6x6: SPD A=MᵀM, check QᵀQ≈I, A≈QDQᵀ and A*Q≈Q*D.
 func TestEigen_Reconstruction_SPD_6x6(t *testing.T) {...}
 
 // ---------- 5. FloydWarshall ----------
@@ -1184,7 +1184,7 @@ func TestInverse_WrappedInput_MatchesDense(t *testing.T) {...}
 // Property: A A^{-1}≈I and A^{-1} A≈I on 6×6 SPD. And the input does not mutate.
 func TestInverse_IdentityProduct_SPD_6x6(t *testing.T) {...}
 
-// Scaling property: (αA)^{-1} = (1/α)·A^{-1} for α≠0.
+// Scaling property: (αA)^{-1} = (1/α)*A^{-1} for α≠0.
 func TestInverse_ScaleProperty(t *testing.T) {...}
 
 // ---------- 7. LU ----------
@@ -1192,8 +1192,8 @@ func TestInverse_ScaleProperty(t *testing.T) {...}
 // Errors: nil and non-square are rejected.
 func TestLU_Errors(t *testing.T) {...}
 
-// Basic (3×3): pick L,U explicitly (Doolittle form, diag(L)=1), set A=L·U,
-// then verify LU(A) reproduces the same factors and A≈L·U exactly.
+// Basic (3×3): pick L,U explicitly (Doolittle form, diag(L)=1), set A=L*U,
+// then verify LU(A) reproduces the same factors and A≈L*U exactly.
 func TestLU_Known3x3_Doolittle_FastPath_Correctness(t *testing.T) {...}
 
 // Fast-path vs Fallback (3×3): wrapping the input to hide its concrete type
@@ -1201,7 +1201,7 @@ func TestLU_Known3x3_Doolittle_FastPath_Correctness(t *testing.T) {...}
 func TestLU_Known3x3_Fallback_MatchesFast(t *testing.T) {...}
 
 // Properties on 6×6: construct L (unit lower) and U (upper) with simple integer
-// patterns, set A=L·U, then check (i) structure, (ii) reconstruction, and (iii) exact recovery.
+// patterns, set A=L*U, then check (i) structure, (ii) reconstruction, and (iii) exact recovery.
 func TestLU_Factor_Reconstruction_6x6(t *testing.T) {...}
 
 // --- local property-check helpers (test-only, unexported) ---
@@ -1209,10 +1209,10 @@ func TestLU_Factor_Reconstruction_6x6(t *testing.T) {...}
 // propOrthonormal asserts QᵀQ ≈ I within delta.
 func propOrthonormal(t *testing.T, Q matrix.Matrix, delta float64) {...}
 
-// propReconstruction asserts A ≈ Q·diag(vals)·Qᵀ within delta.
+// propReconstruction asserts A ≈ Q*diag(vals)*Qᵀ within delta.
 func propReconstruction(t *testing.T, A, Q matrix.Matrix, vals []float64, delta float64) {...}
 
-// propEigenEquation asserts A·Q ≈ Q·diag(vals) within delta.
+// propEigenEquation asserts A*Q ≈ Q*diag(vals) within delta.
 func propEigenEquation(t *testing.T, A, Q matrix.Matrix, vals []float64, delta float64) {...}
 
 // propUnitLowerTriangular checks diag(L)=1 and L[i,j]=0 for j>i.
@@ -1223,7 +1223,7 @@ func propUnitLowerTriangular(t *testing.T, L matrix.Matrix, delta float64) {...}
 // delta=0 demands exact zeros below diagonal.
 func propUpperTriangular(t *testing.T, U matrix.Matrix, delta float64) {...}
 
-// propReconstructionLU verifies A ≈ L·U within delta.
+// propReconstructionLU verifies A ≈ L*U within delta.
 func propReconstructionLU(t *testing.T, A, L, U matrix.Matrix, delta float64) {...}
 
 */
@@ -1242,7 +1242,7 @@ func TestFloydWarshall_Errors(t *testing.T) {
 	// non-square → ErrMatrixDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	err = matrix.FloydWarshall(ns)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
 // Classic CLRS example (5×5, directed, with negative edges but no negative cycles).
@@ -1505,7 +1505,7 @@ func TestInverse_Errors(t *testing.T) {
 	// non-square → ErrMatrixDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, err = matrix.Inverse(ns)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 
 	// singular → ErrSingular (two equal strings)
 	sing, _ := matrix.NewDense(3, 3)
@@ -1694,7 +1694,7 @@ func TestInverse_IdentityProduct_SPD_6x6(t *testing.T) {
 	}
 }
 
-// Scaling property: (αA)^{-1} = (1/α)·A^{-1} for α≠0.
+// Scaling property: (αA)^{-1} = (1/α)*A^{-1} for α≠0.
 func TestInverse_ScaleProperty(t *testing.T) {
 	t.Parallel()
 
@@ -1736,7 +1736,7 @@ func TestInverse_ScaleProperty(t *testing.T) {
 	InvAlphaA, err := matrix.Inverse(alphaA)
 	require.NoError(t, err)
 
-	// Wait Inv(αA) ≈ (1/α)·Inv(A)
+	// Wait Inv(αA) ≈ (1/α)*Inv(A)
 	scaleInvA, err := matrix.Scale(InvA, 1.0/alpha)
 	require.NoError(t, err)
 
@@ -1765,11 +1765,11 @@ func TestLU_Errors(t *testing.T) {
 	// non-square → ErrMatrixDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.LU(ns)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
-// Basic (3×3): pick L,U explicitly (Doolittle form, diag(L)=1), set A=L·U,
-// then verify LU(A) reproduces the same factors and A≈L·U exactly.
+// Basic (3×3): pick L,U explicitly (Doolittle form, diag(L)=1), set A=L*U,
+// then verify LU(A) reproduces the same factors and A≈L*U exactly.
 func TestLU_Known3x3_Doolittle_FastPath_Correctness(t *testing.T) {
 	t.Parallel()
 
@@ -1804,7 +1804,7 @@ func TestLU_Known3x3_Doolittle_FastPath_Correctness(t *testing.T) {
 	require.NoError(t, Uexp.Set(1, 2, 9))
 	require.NoError(t, Uexp.Set(2, 2, 10))
 
-	// Build A = L·U
+	// Build A = L*U
 	A, err := matrix.Mul(Lexp, Uexp)
 	require.NoError(t, err)
 
@@ -1832,7 +1832,7 @@ func TestLU_Known3x3_Doolittle_FastPath_Correctness(t *testing.T) {
 		}
 	}
 
-	// Reconstruction A ≈ L·U
+	// Reconstruction A ≈ L*U
 	propReconstructionLU(t, A, Lgot, Ugot, 0)
 
 	// Input must not mutate
@@ -1902,7 +1902,7 @@ func TestLU_Known3x3_Fallback_MatchesFast(t *testing.T) {
 }
 
 // Properties on 6×6: construct L (unit lower) and U (upper) with simple integer
-// patterns, set A=L·U, then check (i) structure, (ii) reconstruction, and (iii) exact recovery.
+// patterns, set A=L*U, then check (i) structure, (ii) reconstruction, and (iii) exact recovery.
 func TestLU_Factor_Reconstruction_6x6(t *testing.T) {
 	t.Parallel()
 
@@ -1934,7 +1934,7 @@ func TestLU_Factor_Reconstruction_6x6(t *testing.T) {
 		}
 	}
 
-	// A = L·U
+	// A = L*U
 	A, err := matrix.Mul(Lexp, Uexp)
 	require.NoError(t, err)
 
@@ -1960,7 +1960,7 @@ func TestLU_Factor_Reconstruction_6x6(t *testing.T) {
 		}
 	}
 
-	// Reconstruction A ≈ L·U
+	// Reconstruction A ≈ L*U
 	propReconstructionLU(t, A, Lgot, Ugot, 0)
 }
 
@@ -1979,7 +1979,7 @@ func TestQR_Errors(t *testing.T) {
 	// non-square → ErrMatrixDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.QR(ns)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 }
 
 // Classic 3×3 Householder example (well-known benchmark):
@@ -1998,12 +1998,12 @@ func TestQR_Errors(t *testing.T) {
 //		[ 3/7,    158/175,    6/175],
 //		[-2/7,      6/35,    -33/35]]
 //
-// Our routine returns A ≈ Qᵀ·R. We canonicalize diag(R) ≥ 0 by left-multiplying
-// both Q and R by the same diagonal S, which preserves A = Qᵀ·R. Then we:
+// Our routine returns A ≈ Qᵀ*R. We canonicalize diag(R) ≥ 0 by left-multiplying
+// both Q and R by the same diagonal S, which preserves A = Qᵀ*R. Then we:
 //
 //	check |R| against the canonical magnitudes;
 //	compare columns of Qᵀ with the canonical Q up to per-column sign;
-//	assert QᵀQ≈I and A≈Qᵀ·R;
+//	assert QᵀQ≈I and A≈Qᵀ*R;
 //	assert input immutability.
 func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 	t.Parallel()
@@ -2042,7 +2042,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 			require.NoError(t, S.Set(i, i, -1.0))
 		}
 	}
-	// Correct invariance: (SQ)^T·(SR) = Q^T·R
+	// Correct invariance: (SQ)^T*(SR) = Q^T*R
 	SQ, err := matrix.Mul(S, Q)
 	require.NoError(t, err)
 	SR, err := matrix.Mul(S, R)
@@ -2050,7 +2050,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 	Q = SQ
 	R = SR
 
-	// quick sanity: after normalization A ≈ Qᵀ·R must still hold
+	// quick sanity: after normalization A ≈ Qᵀ*R must still hold
 	propReconstructionQR(t, Acopy, Q, R, 1e-12)
 	// --- end canonicalization ---
 
@@ -2107,7 +2107,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 		}
 	}
 
-	// Orthogonality and final reconstruction under A ≈ Qᵀ·R.
+	// Orthogonality and final reconstruction under A ≈ Qᵀ*R.
 	propOrthonormal(t, Q, 1e-12)
 	propReconstructionQR(t, Acopy, Q, R, 1e-12)
 
@@ -2171,7 +2171,7 @@ func TestQR_Fallback_MatchesFast_5x5(t *testing.T) {
 	propReconstructionQR(t, M, Q2, R2, 1e-11)
 }
 
-// 8.4 Properties on 6×6: QᵀQ≈I, R is upper-triangular, and A≈Qᵀ·R.
+// 8.4 Properties on 6×6: QᵀQ≈I, R is upper-triangular, and A≈Qᵀ*R.
 // Also assert the input is not mutated. Include a zero column to exercise the “skip zero” branch.
 func TestQR_Properties_6x6_WithZeroColumn(t *testing.T) {
 	t.Parallel()
@@ -2206,7 +2206,7 @@ func TestQR_Properties_6x6_WithZeroColumn(t *testing.T) {
 	propOrthonormal(t, Q, 1e-12)
 	propUpperTriangular(t, R, 1e-12)
 
-	// Reconstruction: A ≈ Qᵀ·R
+	// Reconstruction: A ≈ Qᵀ*R
 	propReconstructionQR(t, Acopy, Q, R, 1e-11)
 
 	// Input must not mutate
@@ -2255,7 +2255,7 @@ func propOrthonormal(t *testing.T, Q matrix.Matrix, delta float64) {
 	}
 }
 
-// propReconstruction asserts A ≈ Q·diag(vals)·Qᵀ within delta.
+// propReconstruction asserts A ≈ Q*diag(vals)*Qᵀ within delta.
 func propReconstruction(t *testing.T, A, Q matrix.Matrix, vals []float64, delta float64) {
 	t.Helper()
 
@@ -2295,7 +2295,7 @@ func propReconstruction(t *testing.T, A, Q matrix.Matrix, vals []float64, delta 
 	}
 }
 
-// propEigenEquation asserts A·Q ≈ Q·diag(vals) within delta.
+// propEigenEquation asserts A*Q ≈ Q*diag(vals) within delta.
 func propEigenEquation(t *testing.T, A, Q matrix.Matrix, vals []float64, delta float64) {
 	t.Helper()
 
@@ -2328,7 +2328,7 @@ func propEigenEquation(t *testing.T, A, Q matrix.Matrix, vals []float64, delta f
 			require.NoError(t, err)
 			r, err = QD.At(i, j)
 			require.NoError(t, err)
-			require.InDeltaf(t, l, r, delta, "A·Q vs Q·D mismatch at [%d,%d]", i, j)
+			require.InDeltaf(t, l, r, delta, "A*Q vs Q*D mismatch at [%d,%d]", i, j)
 		}
 	}
 }
@@ -2397,7 +2397,7 @@ func propUpperTriangular(t *testing.T, U matrix.Matrix, delta float64) {
 	}
 }
 
-// propReconstructionLU verifies A ≈ L·U within delta.
+// propReconstructionLU verifies A ≈ L*U within delta.
 func propReconstructionLU(t *testing.T, A, L, U matrix.Matrix, delta float64) {
 	t.Helper()
 
@@ -2422,17 +2422,17 @@ func propReconstructionLU(t *testing.T, A, L, U matrix.Matrix, delta float64) {
 			require.NoError(t, err)
 
 			if delta == 0 {
-				require.Equalf(t, ar, lr, "A vs L·U at [%d,%d]", i, j)
+				require.Equalf(t, ar, lr, "A vs L*U at [%d,%d]", i, j)
 			} else {
-				require.InDeltaf(t, ar, lr, delta, "A vs L·U at [%d,%d]", i, j)
+				require.InDeltaf(t, ar, lr, delta, "A vs L*U at [%d,%d]", i, j)
 			}
 		}
 	}
 }
 
-// propReconstructionQR verifies A ≈ Qᵀ·R within a given tolerance.
+// propReconstructionQR verifies A ≈ Qᵀ*R within a given tolerance.
 // Note: With the current implementation, reflectors are accumulated on the left,
-// so the decomposition realized by the function is m ≈ Qᵀ·R (not Q·R).
+// so the decomposition realized by the function is m ≈ Qᵀ*R (not Q*R).
 func propReconstructionQR(t *testing.T, A, Q, R matrix.Matrix, delta float64) {
 	t.Helper()
 
@@ -2457,7 +2457,7 @@ func propReconstructionQR(t *testing.T, A, Q, R matrix.Matrix, delta float64) {
 			require.NoError(t, err)
 			rv, err = QtR.At(i, j)
 			require.NoError(t, err)
-			require.InDeltaf(t, lv, rv, delta, "A vs Qᵀ·R mismatch at [%d,%d]", i, j)
+			require.InDeltaf(t, lv, rv, delta, "A vs Qᵀ*R mismatch at [%d,%d]", i, j)
 		}
 	}
 }

@@ -3,7 +3,7 @@
 // Package matrix: domain types used by adapters and dense operations.
 // This file intentionally contains ONLY domain-facing types (IDs, weights,
 // helper keys) and, for now, preserves the public Matrix interface to avoid
-// breaking existing code at Stage-1. Errors and options live in dedicated
+// breaking existing code. Errors and options live in dedicated
 // files (errors.go, options.go) per the global conventions.
 package matrix
 
@@ -26,15 +26,11 @@ type pairKey struct {
 }
 
 // Matrix represents a two-dimensional mutable array of float64 values.
-// We KEEP the interface at Stage-1 to preserve current callers, while
-// planning a Stage-4 migration to a concrete *Matrix for performance and
-// stronger invariants (fixed row-major layout, fewer virtual calls).
+// We KEEP the interface to preserve current callers, while.
 //
-// Rationale (why keep interface now):
-//   - Minimal churn at Stage-1 (options/errors refactor only).
+// Rationale:
+//   - Minimal churn (options/errors refactor only).
 //   - Tests and existing impl_* likely depend on the interface.
-//   - We can introduce concrete *Matrix later (Stage-4) that still
-//     implements this interface for a smooth transition.
 //
 // Complexity notes: all methods are expected O(1) except Clone (O(r*c)).
 type Matrix interface {

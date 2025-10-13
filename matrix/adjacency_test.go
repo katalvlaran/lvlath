@@ -6,6 +6,7 @@ package matrix_test
 import (
 	"errors"
 	"fmt"
+	"math"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/builder"
@@ -20,7 +21,7 @@ func TestAdjacency_Blueprint(t *testing.T) {
 	// Stage 1 (Validate): nil graph should return ErrMatrixNilGraph
 	am, err := matrix.NewAdjacencyMatrix(nil, matrix.NewMatrixOptions())
 	require.Nil(t, am)
-	require.ErrorIs(t, err, matrix.ErrMatrixNilGraph)
+	require.ErrorIs(t, err, matrix.ErrGraphNil)
 
 	// Stage 2 (Prepare): build a complete graph of V vertices with weighted, multi-edge, loops
 	g, err := builder.BuildGraph(
@@ -53,7 +54,7 @@ func TestNeighbors_TableDriven(t *testing.T) {
 	type scenario struct {
 		name       string
 		graphOpts  []core.GraphOption
-		matrixOpts []matrix.MatrixOption
+		matrixOpts []matrix.Option
 		wantCount  int
 	}
 
@@ -61,13 +62,13 @@ func TestNeighbors_TableDriven(t *testing.T) {
 		{
 			name:       "Undirected_Unweighted",
 			graphOpts:  []core.GraphOption{},
-			matrixOpts: []matrix.MatrixOption{}, // defaults: undirected, unweighted, collapse parallels, no loops
-			wantCount:  V - 1,                   // each vertex connects to all others
+			matrixOpts: []matrix.Option{}, // defaults: undirected, unweighted, collapse parallels, no loops
+			wantCount:  V - 1,             // each vertex connects to all others
 		},
 		{
 			name:      "Directed_Weighted",
 			graphOpts: []core.GraphOption{core.WithDirected(true), core.WithWeighted()},
-			matrixOpts: []matrix.MatrixOption{
+			matrixOpts: []matrix.Option{
 				matrix.WithDirected(true),
 				matrix.WithWeighted(true),
 			},
@@ -76,7 +77,7 @@ func TestNeighbors_TableDriven(t *testing.T) {
 		{
 			name:      "WithLoops",
 			graphOpts: []core.GraphOption{core.WithLoops()},
-			matrixOpts: []matrix.MatrixOption{
+			matrixOpts: []matrix.Option{
 				matrix.WithAllowLoops(true),
 			},
 			wantCount: V - 1, // self-loop plus V-1 neighbors
@@ -174,9 +175,125 @@ func TestNeighbors_ErrorCases(t *testing.T) {
 	// Stage 2 (Execute & Validate): unknown vertex
 	_, err = am.Neighbors("unknown")
 	require.Error(t, err)
-	require.True(t, errors.Is(err, matrix.ErrMatrixUnknownVertex))
+	require.True(t, errors.Is(err, matrix.ErrUnknownVertex))
 
 	// Stage 3 (Finalize): VertexCount on nil receiver panics
 	var nilAM *matrix.AdjacencyMatrix
 	require.Panics(t, func() { _ = nilAM.VertexCount() })
+}
+
+// helper: build n×n Dense filled with +Inf off-diag and 0 on the diagonal
+// then apply a list of edges (i,j,val). Keeps deterministic row-major layout.
+func buildInfAdj(n int, edges [][3]float64) *matrix.Dense {
+	d, _ := matrix.NewDense(n, n)
+	// fill with +Inf off-diag, 0 on diag
+	for i := 0; i < n; i++ {
+		for j := 0; j < n; j++ {
+			if i == j {
+				_ = d.Set(i, j, 0)
+			} else {
+				_ = d.Set(i, j, math.Inf(+1))
+			}
+		}
+	}
+	// set provided edges (weight as given)
+	for _, e := range edges {
+		i, j, w := int(e[0]), int(e[1]), e[2]
+		_ = d.Set(i, j, w)
+	}
+	return d
+}
+
+// helper: wrap Dense into a minimal AdjacencyMatrix for tests with stable order.
+func wrapAdjForTest(d *matrix.Dense, directed, allowLoops bool) *matrix.AdjacencyMatrix {
+	n := d.Rows()
+	idx := make(map[string]int, n)
+	rev := make([]string, n)
+	for i := 0; i < n; i++ {
+		id := string(rune('A' + i)) // A,B,C,... deterministic ids
+		idx[id] = i
+		rev[i] = id
+	}
+	return &matrix.AdjacencyMatrix{
+		Mat:           d,
+		VertexIndex:   idx,
+		vertexByIndex: rev,
+		opts: matrix.Options{
+			directed:   directed,
+			weighted:   true,
+			allowMulti: false,
+			allowLoops: allowLoops,
+		},
+	}
+}
+
+func almostEqualSlice(a, b []float64, eps float64) bool {
+	if len(a) != len(b) {
+		return false
+	}
+	for i := range a {
+		if math.Abs(a[i]-b[i]) > eps {
+			return false
+		}
+	}
+	return true
+}
+
+func TestDegreeVector_Directed_Unweighted(t *testing.T) {
+	// Graph: 4 vertices: A,B,C,D
+	// Edges: A→B, A→C, B→C, C→C(loop), no edges from D
+	// All weights = 1; +Inf = no edge; loop counts as 1.
+	d := buildInfAdj(4, [][3]float64{
+		{0, 1, 1}, // A→B
+		{0, 2, 1}, // A→C
+		{1, 2, 1}, // B→C
+		{2, 2, 1}, // C→C (loop)
+	})
+	am := wrapAdjForTest(d, true, true)
+
+	got, err := am.DegreeVector()
+	if err != nil {
+		t.Fatalf("DegreeVector error: %v", err)
+	}
+	// A: 2 (B,C); B:1 (C); C:1 (loop only ⇒ counts as 1); D:0
+	want := []float64{2, 1, 1, 0}
+	if !almostEqualSlice(got, want, 1e-12) {
+		t.Fatalf("DegreeVector mismatch.\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestDegreeVector_Undirected_Unweighted(t *testing.T) {
+	// Undirected: edges mirrored in adjacency.
+	// A—B, B—C; degrees: deg(A)=1, deg(B)=2, deg(C)=1, deg(D)=0
+	d := buildInfAdj(4, [][3]float64{
+		{0, 1, 1}, {1, 0, 1}, // A—B
+		{1, 2, 1}, {2, 1, 1}, // B—C
+	})
+	am := wrapAdjForTest(d, false, false)
+
+	got, err := am.DegreeVector()
+	if err != nil {
+		t.Fatalf("DegreeVector error: %v", err)
+	}
+	want := []float64{1, 2, 1, 0}
+	if !almostEqualSlice(got, want, 1e-12) {
+		t.Fatalf("DegreeVector mismatch.\n got: %v\nwant: %v", got, want)
+	}
+}
+
+func TestDegreeVector_LoopWeightedCountsAsOne(t *testing.T) {
+	// Single vertex with a heavy loop (weight 7) must count as exactly 1.
+	d := buildInfAdj(1, [][3]float64{
+		{0, 0, 7}, // loop weight should not matter
+	})
+	am := wrapAdjForTest(d, false, true)
+
+	got, err := am.DegreeVector()
+	if err != nil {
+		t.Fatalf("DegreeVector error: %v", err)
+	}
+	want := []float64{1}
+	if !almostEqualSlice(got, want, 1e-12) {
+		t.Fatalf("DegreeVector mismatch.\n got: %v\nwant: %v", got, want)
+	}
 }

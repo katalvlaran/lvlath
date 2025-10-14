@@ -8,11 +8,13 @@
 // Note:
 //   • Consider moving this file to internal/matrixtest to avoid leaking testing helpers into the main package surface.
 
-package matrix
+package matrix_test
 
 import (
 	"math/rand"
 	"testing"
+
+	"github.com/katalvlaran/lvlath/matrix"
 )
 
 // Canonical lengths for small test matrices.
@@ -68,7 +70,7 @@ var (
 
 // Random fills m with reproducible pseudorandoms in [-1, 1].
 // Seed controls determinism; panics avoided via t.Fatalf on Set errors.
-func Random(t *testing.T, m Matrix, seed int64) {
+func Random(t *testing.T, m matrix.Matrix, seed int64) {
 	t.Helper()
 	rng := rand.New(rand.NewSource(seed))
 	r, c := m.Rows(), m.Cols()
@@ -89,7 +91,7 @@ func Random(t *testing.T, m Matrix, seed int64) {
 
 // Compare asserts that m matches the 2-D slice want exactly; fails the test on mismatch.
 // Intended for small fixtures; use AllClose for tolerant comparisons.
-func Compare(t *testing.T, want [][]float64, m Matrix) {
+func Compare(t *testing.T, want [][]float64, m matrix.Matrix) {
 	t.Helper()
 	r, c := m.Rows(), m.Cols()
 	if len(want) != r {

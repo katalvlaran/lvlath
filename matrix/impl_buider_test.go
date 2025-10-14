@@ -29,6 +29,7 @@ func TestBuildDenseAdjacency_NilEdges(t *testing.T) {
 	iA, iB := idx["A"], idx["B"]
 	valAB, _ := mat.At(iA, iB)
 	require.Equal(t, 0.0, valAB)
+
 	valBA, _ := mat.At(iB, iA)
 	require.Equal(t, 0.0, valBA)
 }

@@ -930,7 +930,7 @@ func TestEigen_Errors(t *testing.T) {
 
 	var err error
 
-	// non-square → ErrMatrixDimensionMismatch
+	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.Eigen(ns, 1e-10, 50)
 	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
@@ -1239,7 +1239,7 @@ func TestFloydWarshall_Errors(t *testing.T) {
 	err = matrix.FloydWarshall(nil)
 	require.ErrorIs(t, err, matrix.ErrNilMatrix)
 
-	// non-square → ErrMatrixDimensionMismatch
+	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	err = matrix.FloydWarshall(ns)
 	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
@@ -1502,7 +1502,7 @@ func TestInverse_Errors(t *testing.T) {
 	_, err = matrix.Inverse(nil)
 	require.ErrorIs(t, err, matrix.ErrNilMatrix)
 
-	// non-square → ErrMatrixDimensionMismatch
+	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, err = matrix.Inverse(ns)
 	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
@@ -1762,7 +1762,7 @@ func TestLU_Errors(t *testing.T) {
 	_, _, err = matrix.LU(nil)
 	require.ErrorIs(t, err, matrix.ErrNilMatrix)
 
-	// non-square → ErrMatrixDimensionMismatch
+	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.LU(ns)
 	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
@@ -1976,7 +1976,7 @@ func TestQR_Errors(t *testing.T) {
 	_, _, err = matrix.QR(nil)
 	require.ErrorIs(t, err, matrix.ErrNilMatrix)
 
-	// non-square → ErrMatrixDimensionMismatch
+	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	_, _, err = matrix.QR(ns)
 	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)

@@ -30,8 +30,8 @@ func TestValidateSameShape(t *testing.T) {
 		{"first nil", nil, identity(2, 2), matrix.ErrNilMatrix},
 		{"second nil", identity(2, 2), nil, matrix.ErrNilMatrix},
 		{"equal 2x3", identity(2, 3), identity(2, 3), nil},
-		{"row mismatch", identity(2, 3), identity(3, 3), matrix.ErrMatrixDimensionMismatch},
-		{"col mismatch", identity(2, 3), identity(2, 4), matrix.ErrMatrixDimensionMismatch},
+		{"row mismatch", identity(2, 3), identity(3, 3), matrix.ErrDimensionMismatch},
+		{"col mismatch", identity(2, 3), identity(2, 4), matrix.ErrDimensionMismatch},
 	}
 
 	for _, tc := range tests {
@@ -67,7 +67,7 @@ func TestValidateSquare(t *testing.T) {
 		{"nil", nil, matrix.ErrNilMatrix},
 		{"1x1", identity(1), nil},
 		{"3x3", identity(3), nil},
-		{"2x3", func() matrix.Matrix { m, _ := matrix.NewDense(2, 3); return m }(), matrix.ErrMatrixDimensionMismatch},
+		{"2x3", func() matrix.Matrix { m, _ := matrix.NewDense(2, 3); return m }(), matrix.ErrDimensionMismatch},
 	}
 
 	for _, tc := range tests {

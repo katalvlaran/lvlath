@@ -18,7 +18,7 @@ import (
 // TestAdjacency_Blueprint verifies NewAdjacencyMatrix follows the 5-stage Blueprint.
 func TestAdjacency_Blueprint(t *testing.T) {
 	t.Parallel()
-	// Stage 1 (Validate): nil graph should return ErrMatrixNilGraph
+	// Stage 1 (Validate): nil graph should return ErrNilGraph
 	am, err := matrix.NewAdjacencyMatrix(nil, matrix.NewMatrixOptions())
 	require.Nil(t, am)
 	require.ErrorIs(t, err, matrix.ErrGraphNil)

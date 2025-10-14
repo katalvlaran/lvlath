@@ -346,35 +346,3 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 
 	return nil // success
 }
-
-/*
-
-matrix/doc.go
-
-// База
-matrix/types.go
-matrix/errors.go
-matrix/validators.go           // (единая точка) ValidateNotNil/ValidateSquare/ValidateSameShape/... ValidateVecLen/ValidateGraph/ValidateSymmetric
-matrix/options.go
-matrix/impl_dense.go
-
-// Графовые адаптеры
-matrix/impl_graph_adjacency.go // AdjacencyMatrix, VertexCount, Neighbors, DegreeVector, ..., + BuildDenseAdjacency, build*FromGraph, ToGraph, returnEdge, утилиты pair/lookup
-matrix/impl_graph_incidence.go // IncidenceMatrix + BuildDenseIncidence
-
-// Ядра — линалг
-matrix/impl_linear_algebra.go          // (full: core+factorization+eigen) Add, Sub, Hadamard, Transpose, Scale, Mul, MatVec +  LU, QR, Inverse + Eigen
-
-// Ядра — граф
-matrix/impl_floydwarshall.go   // FloydWarshall, floydWarshallInPlace, initDistancesInPlace
-
-// Элементные и статистика
-matrix/ops_elementwise.go
-matrix/ops_sanitize_compare.go // Clip(), AllClose(), ReplaceInfNaN() — публичные над ew*
-matrix/stats.go                // (full: center+normalize+covcorr)
-
-// Публичные фасады
-matrix/api.go                  // (full: construct+linalg+graph)
-
-
-*/

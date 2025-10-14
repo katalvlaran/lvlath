@@ -50,7 +50,7 @@ func validatorErrorf(tag string, err error) error {
 // ValidateSameShape checks that two matrices have identical shape.
 // Stage 1 (Validate): nil-checks via ValidateNotNil.
 // Stage 2 (Execute): compare rows and cols.
-// Stage 3 (Finalize): return nil or wrapped ErrMatrixDimensionMismatch.
+// Stage 3 (Finalize): return nil or wrapped ErrDimensionMismatch.
 // Complexity: O(1).
 func ValidateSameShape(a, b Matrix) error {
 	// Disallow nil inputs to avoid ambiguous panics downstream.

@@ -23,10 +23,10 @@ const EComplete = V * (V - 1) / 2
 func TestIncidence_Blueprint(t *testing.T) {
 	t.Parallel()
 
-	// Stage 1 (Validate): nil graph should return ErrMatrixNilGraph
+	// Stage 1 (Validate): nil graph should return ErrGraphNil
 	im, err := matrix.NewIncidenceMatrix(nil, matrix.NewMatrixOptions())
 	require.Nil(t, im)
-	require.ErrorIs(t, err, matrix.ErrMatrixNilGraph)
+	require.ErrorIs(t, err, matrix.ErrGraphNil)
 
 	// Stage 2 (Prepare): build a complete undirected graph of V vertices
 	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, builder.Complete(V))
@@ -50,7 +50,7 @@ func TestVertexIncidence_TableDriven(t *testing.T) {
 	type scenario struct {
 		name       string
 		coreOpts   []core.GraphOption
-		matrixOpts []matrix.MatrixOption
+		matrixOpts []matrix.Option
 		// expected number of non-zero entries per vertex
 		wantDeg []int
 		// if directed: expected negative count (outgoing) and positive count (incoming) per vertex
@@ -67,7 +67,7 @@ func TestVertexIncidence_TableDriven(t *testing.T) {
 		{
 			name:       "Directed_Path",
 			coreOpts:   []core.GraphOption{core.WithDirected(true)},
-			matrixOpts: []matrix.MatrixOption{matrix.WithDirected(true)},
+			matrixOpts: []matrix.Option{matrix.WithDirected(true)},
 			wantDeg:    []int{1, 2, 2, 2, 2, 2, 2, 1}, // same count but signed
 			wantNeg:    []int{1, 1, 1, 1, 1, 1, 1, 0}, // outgoing edges count
 			wantPos:    []int{0, 1, 1, 1, 1, 1, 1, 1}, // incoming edges count
@@ -136,9 +136,9 @@ func TestEdgeEndpoints_Cases(t *testing.T) {
 
 	// Stage 3 (Execute & Validate): invalid indices should error
 	_, _, err = im.EdgeEndpoints(-1)
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 	_, _, err = im.EdgeEndpoints(im.EdgeCount())
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 
 	// Stage 4 (Finalize): valid indices return matching endpoints
 	for j := 0; j < im.EdgeCount(); j++ {

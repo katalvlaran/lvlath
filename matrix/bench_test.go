@@ -72,7 +72,7 @@ func BenchmarkMulDense(b *testing.B) {
 		N := N
 		b.Run(fmt.Sprintf("Mul %dx%d", N, N), func(b *testing.B) {
 			// Stage 2 (Prepare): create two N×N random Dense matrices
-			a, _ := matrix.NewDense(N, N)
+			a, _ := matrix.NewIdentity(N)
 			c := rand.New(rand.NewSource(42))
 			for i := 0; i < N; i++ {
 				for j := 0; j < N; j++ {

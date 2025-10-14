@@ -54,18 +54,18 @@ func TestMethods_DimensionMismatch(t *testing.T) {
 	m2, _ := matrix.NewDense(4, 3) // 4 rows, 3 columns
 
 	// Add should error on shape mismatch
-	_, err := matrix.Add(m1, m2)                               // call Add on mismatched shapes
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch) // expect ErrDimensionMismatch
+	_, err := matrix.Add(m1, m2)                         // call Add on mismatched shapes
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch) // expect ErrDimensionMismatch
 
 	// Sub should error on shape mismatch
-	_, err = matrix.Sub(m1, m2)                                // call Sub on mismatched shapes
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch) // expect ErrDimensionMismatch
+	_, err = matrix.Sub(m1, m2)                          // call Sub on mismatched shapes
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch) // expect ErrDimensionMismatch
 
 	// Mul should error when inner dims mismatch (4 != 4 is okay, but  m1.Cols()!=m2.Rows()? 4==4 → OK)
 	// To force mismatch, use 3×4 × 2×2
-	m3, _ := matrix.NewDense(2, 2)                             // 2×2 matrix
-	_, err = matrix.Mul(m1, m3)                                // call Mul on inner-dimension mismatch
-	require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch) // expect ErrDimensionMismatch
+	m3, _ := matrix.NewDense(2, 2)                       // 2×2 matrix
+	_, err = matrix.Mul(m1, m3)                          // call Mul on inner-dimension mismatch
+	require.ErrorIs(t, err, matrix.ErrDimensionMismatch) // expect ErrDimensionMismatch
 }
 
 func TestMethods_HappyPaths(t *testing.T) {
@@ -203,7 +203,7 @@ func TestMethods_TableDriven(t *testing.T) {
 			// Test Add
 			_, err := matrix.Add(a, b)
 			if c.wantAddErr {
-				require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+				require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 			} else {
 				require.NoError(t, err)
 			}
@@ -211,7 +211,7 @@ func TestMethods_TableDriven(t *testing.T) {
 			// Test Sub
 			_, err = matrix.Sub(a, b)
 			if c.wantSubErr {
-				require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+				require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 			} else {
 				require.NoError(t, err)
 			}
@@ -219,7 +219,7 @@ func TestMethods_TableDriven(t *testing.T) {
 			// Test Mul
 			_, err = matrix.Mul(a, b)
 			if c.wantMulErr {
-				require.ErrorIs(t, err, matrix.ErrMatrixDimensionMismatch)
+				require.ErrorIs(t, err, matrix.ErrDimensionMismatch)
 			} else {
 				require.NoError(t, err)
 			}

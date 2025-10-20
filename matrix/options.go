@@ -9,8 +9,9 @@
 //
 // Design goals:
 //   - Deterministic behavior: no global state, no implicit randomness.
-//   - No dead options: each switch affects behavior and is test-covered.
-//   - Validation in constructors only; algorithms never panic on user input.
+//   - No dead switches: each flag impacts behavior and is tested.
+//   - Safe by construction: panic only on invalid parameters.
+//   - Reusability: Options is internal; use ...Option externally.
 package matrix
 
 import (
@@ -90,18 +91,19 @@ type Options struct {
 // ---------- Constructors (WithX) ----------
 
 // WithEpsilon sets the numeric tolerance eps used by structural checks.
-// Panics if eps < 0 or not finite.
+// Panics if eps < 0 or not finite (NaN, Inf).
 // Complexity: O(1).
 func WithEpsilon(eps float64) Option {
 	if math.IsNaN(eps) || math.IsInf(eps, 0) || eps < 0 {
 		panic("matrix: WithEpsilon: eps must be finite, non-negative")
 	}
-	return func(o *Options) { // assign validated epsilon
-		o.eps = eps
-	}
+
+	// Assign validated epsilon
+	return func(o *Options) { o.eps = eps }
 }
 
 // WithValidateNaNInf enables strict finite-value validation.
+// Enforce rejection of NaN/±Inf in inputs (Set, Clone, Transpose, Induced, IdentityLike).
 // Complexity: O(1).
 func WithValidateNaNInf() Option {
 	return func(o *Options) { o.validateNaNInf = true }
@@ -166,9 +168,8 @@ func WithUnweighted() Option {
 	return func(o *Options) { o.weighted = false }
 }
 
-// WithMetricClosure converts adjacency into all-pairs shortest-path distances
-// via Floyd–Warshall (APSP). Under this mode, ToGraph is intentionally
-// unsupported and MUST return ErrMatrixNotImplemented.
+// WithMetricClosure converts adjacency into all-pairs shortest-path distances via Floyd–Warshall (APSP).
+// Under this mode, ToGraph is intentionally unsupported and MUST return ErrMatrixNotImplemented.
 // Complexity: O(1) to set (O(n^3) later when applied).
 func WithMetricClosure() Option {
 	return func(o *Options) { o.metricClose = true }
@@ -181,6 +182,7 @@ func WithEdgeThreshold(t float64) Option {
 	if math.IsNaN(t) || math.IsInf(t, 0) {
 		panic("matrix: WithEdgeThreshold: threshold must be finite")
 	}
+
 	return func(o *Options) { o.edgeThreshold = t }
 }
 
@@ -196,23 +198,25 @@ func WithBinaryWeights() Option {
 	return func(o *Options) { o.keepWeights = false }
 }
 
-// ---------- Defaults & aggregation ----------
+// --------------------------- Deprecated Aliases ---------------------------
+
+// Deprecated: Use WithNoValidateNaNInf.
+func DisableValidateNaNInf() Option {
+	return WithNoValidateNaNInf()
+}
+
+// --------------------------- Option Resolution ---------------------------
 
 // NewMatrixOptions returns a MatrixOptions populated with defaults
 // and then modified by any provided MatrixOption functions.
+// Complexity: O(k), k = len(opts).
 func NewMatrixOptions(opts ...Option) Options {
-	mo := Options{
-		directed:    DefaultDirected,
-		weighted:    DefaultWeighted,
-		allowMulti:  DefaultAllowMulti,
-		allowLoops:  DefaultAllowLoops,
-		metricClose: DefaultMetricClosure,
-	}
+	o := defaultOptions()
 	for _, opt := range opts {
-		opt(&mo)
+		opt(&o)
 	}
 
-	return mo
+	return o
 }
 
 // defaultOptions returns the documented defaults (single source of truth).
@@ -249,5 +253,6 @@ func gatherOptions(user ...Option) Options {
 	// Derive export 'undirected' from build 'directed' (unless future code
 	// chooses to override explicitly inside export path).
 	o.undirected = !o.directed
+
 	return o
 }

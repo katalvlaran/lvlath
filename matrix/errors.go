@@ -14,7 +14,7 @@ import "errors"
 // Every message is prefixed with "matrix: ..." for consistency and to allow
 // easy grepping across logs. DO NOT %w wrap these sentinels when returning
 // directly; if context is essential, wrap with fmt.Errorf("ctx: %w", ErrX)
-// at the outer boundary — callers will still use errors.Is to match.
+// at the outer boundary - callers will still use errors.Is to match.
 //
 // ERROR PRIORITY (documented, enforced in tests):
 // shape/index/NaN -> graph nil -> dimension mismatch -> structural violations
@@ -70,10 +70,10 @@ var (
 	// in a non-pivoting scheme (intentional for determinism and simplicity).
 	ErrSingular = errors.New("matrix: singular matrix")
 
-	// ErrNonBinaryIncidence — non-±1 entry detected for unweighted incidence.
+	// ErrNonBinaryIncidence - non-±1 entry detected for unweighted incidence.
 	ErrNonBinaryIncidence = errors.New("matrix: non-binary incidence")
 
-	// ErrInvalidWeight — edge weight is NaN or ±Inf at ingestion stage.
+	// ErrInvalidWeight - edge weight is NaN or ±Inf at ingestion stage.
 	ErrInvalidWeight = errors.New("matrix: invalid edge weight")
 
 	// ErrInvalidDimensions indicates that requested matrix dimensions are non-positive.

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Package matrix — canonical builders for Dense adjacency and incidence matrices.
+// Package matrix - canonical builders for Dense adjacency and incidence matrices.
 // Deterministic, sentinel-accurate, and aligned with contracts.
 //
 // Purpose:
@@ -27,7 +27,7 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// defaultWeight — unit weight for unweighted adjacency/incidence writes.
+// defaultWeight - unit weight for unweighted adjacency/incidence writes.
 const defaultWeight = 1.0
 
 // unreachableWeight is the placeholder for "no edge" before metric-closure.
@@ -365,7 +365,7 @@ func BuildDenseIncidence(
 			// Directed incidence:
 			if su == sv {
 				// Self-loop in directed graphs contributes −1 and +1 in the *same row*.
-				// Since we write into the same cell, the net effect is 0 — i.e., we leave the column zeroed.
+				// Since we write into the same cell, the net effect is 0 - i.e., we leave the column zeroed.
 				// (No write needed; documentation clarifies this.)
 				continue
 			}
@@ -401,7 +401,7 @@ func BuildDenseIncidence(
 	// If callers expect lexicographic vertex order regardless of core order, they should
 	// pass a lex-sorted vertex slice. For completeness, we allow a defensive check here
 	// (off by default). Uncomment to enforce lex order:
-	// if !isLexSorted(vertices) { ... } — we keep current behavior: trust the provided order.
+	// if !isLexSorted(vertices) { ... } - we keep current behavior: trust the provided order.
 
 	// Return the index map, column-aligned edges, and the dense incidence matrix.
 

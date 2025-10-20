@@ -28,15 +28,21 @@ func TestAdjacency_Blueprint(t *testing.T) {
 		[]core.GraphOption{
 			core.WithWeighted(), core.WithMultiEdges(), core.WithLoops(),
 		},
+		[]builder.BuilderOption{},
 		builder.Complete(V),
 	)
+	//g, err := builder.BuildGraph(
+	//	[]core.GraphOption{core.WithDirected(false), core.WithWeighted(), core.WithLoops(), core.WithMultiEdges()},
+	//	[]builder.BuilderOption{builder.WithSymbNumb("v")}, // если доступна; иначе удалить и зафиксировать нейминг helper’ом
+	//	builder.Complete(V),
+	//)
 	require.NoError(t, err)
 
 	// Stage 3 (Execute): construct adjacency matrix with matching options
 	opts := matrix.NewMatrixOptions(
-		matrix.WithWeighted(true),
-		matrix.WithAllowMulti(true),
-		matrix.WithAllowLoops(true),
+		matrix.WithWeighted(),
+		matrix.WithAllowMulti(),
+		matrix.WithAllowLoops(),
 	)
 	am, err = matrix.NewAdjacencyMatrix(g, opts)
 	require.NoError(t, err)
@@ -69,8 +75,8 @@ func TestNeighbors_TableDriven(t *testing.T) {
 			name:      "Directed_Weighted",
 			graphOpts: []core.GraphOption{core.WithDirected(true), core.WithWeighted()},
 			matrixOpts: []matrix.Option{
-				matrix.WithDirected(true),
-				matrix.WithWeighted(true),
+				matrix.WithDirected(),
+				matrix.WithWeighted(),
 			},
 			wantCount: V - 1, // Complete(V) has edge in both directions
 		},
@@ -78,7 +84,7 @@ func TestNeighbors_TableDriven(t *testing.T) {
 			name:      "WithLoops",
 			graphOpts: []core.GraphOption{core.WithLoops()},
 			matrixOpts: []matrix.Option{
-				matrix.WithAllowLoops(true),
+				matrix.WithAllowLoops(),
 			},
 			wantCount: V - 1, // self-loop plus V-1 neighbors
 		},
@@ -90,7 +96,7 @@ func TestNeighbors_TableDriven(t *testing.T) {
 			t.Parallel()
 			// Stage 1 (Validate): nothing to validate here
 			// Stage 2 (Prepare): build graph per scenario
-			g, err := builder.BuildGraph(sc.graphOpts, builder.Complete(V, builder.WithSymbNumb("v")))
+			g, err := builder.BuildGraph(sc.graphOpts, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Complete(V))
 			require.NoError(t, err)
 
 			// Stage 3 (Execute): build adjacency matrix
@@ -117,12 +123,13 @@ func TestToGraph_RoundTrip(t *testing.T) {
 	// Stage 1 (Validate): build original complete, directed, weighted graph
 	orig, err := builder.BuildGraph(
 		[]core.GraphOption{core.WithDirected(true), core.WithWeighted()},
+		[]builder.BuilderOption{},
 		builder.Complete(V),
 	)
 	require.NoError(t, err)
 
 	// Stage 2 (Prepare): build adjacency matrix
-	opts := matrix.NewMatrixOptions(matrix.WithDirected(true), matrix.WithWeighted(true))
+	opts := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
 	am, err := matrix.NewAdjacencyMatrix(orig, opts)
 	require.NoError(t, err)
 
@@ -139,11 +146,11 @@ func TestToGraph_RoundTrip(t *testing.T) {
 func TestAdjacency_Idempotency(t *testing.T) {
 	t.Parallel()
 	// Stage 1 (Validate): build baseline graph
-	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, builder.Complete(V))
+	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{}, builder.Complete(V))
 	require.NoError(t, err)
 
 	// Stage 2 (Prepare): build two adjacency matrices
-	opts := matrix.NewMatrixOptions(matrix.WithWeighted(true))
+	opts := matrix.NewMatrixOptions(matrix.WithWeighted())
 	am1, err1 := matrix.NewAdjacencyMatrix(g, opts)
 	am2, err2 := matrix.NewAdjacencyMatrix(g, opts)
 	require.NoError(t, err1)
@@ -167,7 +174,7 @@ func TestAdjacency_Idempotency(t *testing.T) {
 func TestNeighbors_ErrorCases(t *testing.T) {
 	t.Parallel()
 	// Stage 1 (Prepare): build default graph
-	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, builder.Complete(V))
+	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{}, builder.Complete(V))
 	require.NoError(t, err)
 	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
 	require.NoError(t, err)

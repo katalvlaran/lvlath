@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Package matrix — adjacency builders (dense) and metric-closure transform.
+// Package matrix - adjacency builders (dense) and metric-closure transform.
 //
 // Deliverables:
 //   1) Directed + AllowMulti=false → first-edge-wins (ordered key (u,v)).
@@ -257,7 +257,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 
 	// Guard Metric-Closure: distance matrices are not exportable as simple edges.
 	// NOTE: opts field is part of AdjacencyMatrix; metricClose is set by builders.
-	if am.opts.metricClose { // single, explicit flag — no reflective tricks
+	if am.opts.metricClose { // single, explicit flag - no reflective tricks
 		return nil, fmt.Errorf("ToGraph: metric-closure adjacency cannot be converted: %w", ErrMatrixNotImplemented)
 	}
 

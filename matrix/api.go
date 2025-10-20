@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MIT
-// Package matrix — public API facades.
+// Package matrix - public API facades.
 //
 // Purpose:
 //   - Provide thin, well-documented entry points for common tasks across the package.
-//   - Avoid any logic duplication — each facade delegates to the canonical implementation.
+//   - Avoid any logic duplication - each facade delegates to the canonical implementation.
 //   - Keep function names explicit and intention-revealing to improve discoverability.
 //
 // Determinism & Policy:

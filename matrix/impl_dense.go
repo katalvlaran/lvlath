@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Package matrix — Dense storage (row-major) & safe accessors.
+// Package matrix - Dense storage (row-major) & safe accessors.
 //
 // Purpose:
 //   - Provide a cache-friendly row-major buffer with the explicit index formula i*cols + j.
@@ -346,3 +346,101 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 
 	return nil // success
 }
+
+/*
+
+```
+~/go/src/lvlath/matrix/builder_helper_test.go
+	Warning:(22, 2) Unused constant 'LenM3'
+	Warning:(23, 2) Unused constant 'LenM6'
+	Warning:(24, 2) Unused constant 'LenM8'
+	Warning:(29, 2) Unused variable 'DataM3T1'
+	Warning:(35, 2) Unused variable 'DataM3T2'
+	Warning:(41, 2) Unused variable 'DataM6T1'
+	Warning:(50, 2) Unused variable 'DataM6T2'
+	Warning:(59, 2) Unused variable 'DataM8T1'
+~/go/src/lvlath/matrix/bench_test.go
+	Error:(24, 46) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(31, 24) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(49, 46) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(56, 24) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(57, 29) Too many arguments in call to 'matrix.WithMetricClosure'
+~/go/src/lvlath/matrix/impl_linear_algebra.go
+	Warning:(23, 7) Unused constant 'NormZero'
+	Warning:(26, 7) Unused constant 'ZeroSum'
+	Warning:(29, 7) Unused constant 'ZeroPivot'
+~/go/src/lvlath/matrix/validators.go
+	Warning:(29, 2) Unused constant 'zeroTol'
+	Warning:(186, 6) Unused function 'IsZeroOffDiagonal'
+~/go/src/lvlath/matrix/adjacency_test.go
+	Error:(31, 11) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(37, 22) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(38, 24) Too many arguments in call to 'matrix.WithAllowMulti'
+	Error:(39, 24) Too many arguments in call to 'matrix.WithAllowLoops'
+	Error:(72, 24) Too many arguments in call to 'matrix.WithDirected'
+	Error:(73, 24) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(81, 26) Too many arguments in call to 'matrix.WithAllowLoops'
+	Error:(93, 55) Cannot use 'builder.Complete(V, builder.WithSymbNumb("v"))' (type Constructor) as the type []BuilderOption
+	Error:(93, 63) Too many arguments in call to 'builder.Complete'
+	Error:(120, 11) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(125, 53) Too many arguments in call to 'matrix.WithDirected'
+	Error:(125, 80) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(142, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(146, 53) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(170, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(220, 3) Cannot use the unexported field 'vertexByIndex' in the current package
+	Error:(221, 3) Cannot use the unexported field 'opts' in the current package
+	Error:(222, 4) Cannot use the unexported field 'directed' in the current package
+	Error:(223, 4) Cannot use the unexported field 'weighted' in the current package
+	Error:(224, 4) Cannot use the unexported field 'allowMulti' in the current package
+	Error:(225, 4) Cannot use the unexported field 'allowLoops' in the current package
+~/go/src/lvlath/matrix/incidence_test.go
+	Error:(32, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
+	Error:(70, 51) Too many arguments in call to 'matrix.WithDirected'
+	Error:(83, 54) Cannot use 'builder.Path(V, builder.WithSymbNumb("v"))' (type Constructor) as the type []BuilderOption
+	Error:(83, 58) Too many arguments in call to 'builder.Path'
+	Error:(132, 80) Cannot use 'builder.Path(V)' (type Constructor) as the type []BuilderOption
+	Error:(158, 80) Cannot use 'builder.Path(V)' (type Constructor) as the type []BuilderOption
+~/go/src/lvlath/matrix/impl_builder.go
+	Warning:(36, 7) Unused constant ‘unreachableWeight'
+~/go/src/lvlath/matrix/impl_buider_test.go
+	Error:(43, 53) Too many arguments in call to 'matrix.WithDirected'
+	Error:(53, 52) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(72, 53) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(72, 82) Too many arguments in call to 'matrix.WithAllowMulti'
+	Error:(81, 52) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(81, 81) Too many arguments in call to 'matrix.WithAllowMulti'
+	Error:(101, 54) Too many arguments in call to 'matrix.WithAllowLoops'
+	Error:(101, 81) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(115, 53) Too many arguments in call to 'matrix.WithWeighted'
+	Error:(115, 85) Too many arguments in call to 'matrix.WithMetricClosure'
+	Error:(146, 53) Too many arguments in call to 'matrix.WithDirected'
+	Error:(175, 55) Too many arguments in call to 'matrix.WithAllowMulti'
+	Error:(181, 54) Too many arguments in call to 'matrix.WithAllowMulti'
+	Error:(199, 54) Too many arguments in call to 'matrix.WithAllowLoops'
+~/go/src/lvlath/matrix/impl_incidence.go
+	Warning:(36, 7) Unused constant 'srcMark'
+	Warning:(39, 7) Unused constant 'dstMark'
+	Warning:(42, 7) Unused constant 'undirectedMark'
+	Warning:(46, 7) Unused constant 'loopUndirectedMark'
+	Warning:(185, 6) Unused function 'buildDenseIncidenceFromGraph'
+~/go/src/lvlath/matrix/options.go
+	Warning:(95, 6) Unused function 'WithEpsilon'
+	Warning:(106, 6) Unused function 'WithValidateNaNInf'
+	Warning:(112, 6) Unused function 'WithNoValidateNaNInf'
+	Warning:(124, 6) Unused function 'WithUndirected'
+	Warning:(139, 6) Unused function 'WithDisallowMulti'
+	Warning:(151, 6) Unused function 'WithDisallowLoops'
+	Warning:(165, 6) Unused function 'WithUnweighted'
+	Warning:(180, 6) Unused function 'WithEdgeThreshold'
+	Warning:(189, 6) Unused function 'WithKeepWeights'
+	Warning:(195, 6) Unused function 'WithBinaryWeights'
+~/go/src/lvlath/matrix/impl_dense.go
+	Warning:(90, 6) Unused function 'newDenseWithPolicy'
+~/go/src/lvlath/matrix/impl_adjacency.go
+	Warning:(197, 6) Unused function 'buildDenseAdjacencyFromGraph'
+```
+
+
+
+*/

@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-// Package matrix — incidence builders (dense) with strict invariants.
+// Package matrix - incidence builders (dense) with strict invariants.
 //
 // Deliverables (per TA-MATRIX):
 //   1) Nil-guards for "light" getters (panic on nil receiver/Mat with fixed message).
@@ -13,7 +13,7 @@
 // AI-Hints:
 //   - Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
 //   - Incidence ignores numeric weights by design; it captures topology only (sign/endpoint).
-//   - For undirected graphs, a self-loop appears as +2 in the single row — this is conventional in
+//   - For undirected graphs, a self-loop appears as +2 in the single row - this is conventional in
 //     incidence algebra; downstream tools that expect strictly {−1,0,+1} should normalize if needed.
 //   - Determinism is guaranteed if you pass a deterministic vertex order and core returns edges by ID.
 //
@@ -100,7 +100,7 @@ func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 // Panics on nil receiver/Mat with a fixed message (developer error, not user error).
 // Complexity: O(1).
 func (im *IncidenceMatrix) VertexCount() int {
-	// Guard nil receiver and underlying Mat — consistent panic message (golden expectation).
+	// Guard nil receiver and underlying Mat - consistent panic message (golden expectation).
 	if im == nil || im.Mat == nil {
 		panic("IncidenceMatrix: nil receiver or Mat") // intentional panic for light getters
 	}

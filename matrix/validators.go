@@ -27,11 +27,9 @@ import (
 	"math"
 )
 
-const (
-	// zeroTol is a tiny tolerance used only internally for guards where appropriate.
-	// We keep it explicit to avoid "magic numbers" inline.
-	zeroTol = 0.0
-)
+// zeroTol is a tiny tolerance used only internally for guards where appropriate.
+// We keep it explicit to avoid "magic numbers" inline.
+const zeroTol = 0.0
 
 // validatorErrorf wraps an underlying error with the given validator tag.
 // Used internally to maintain consistent labeling of sentinel violations.
@@ -255,14 +253,6 @@ func IsZeroOffDiagonal(m Matrix, tol float64) (bool, error) {
 	}
 
 	return true, nil
-}
-
-// ValidateHadamard – Wrapper for ValidateBinarySameShape.
-//
-// Complexity: O(1).
-// AI-Hints: Alias for semantic clarity in elementwise multiplication.
-func ValidateHadamard(a, b Matrix) error {
-	return ValidateBinarySameShape(a, b)
 }
 
 // ValidateMulCompatible – Ensures a.Cols == b.Rows, inputs non-nil.

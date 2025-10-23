@@ -43,52 +43,107 @@ const (
 	opMatVec    = "MatVec"
 )
 
-// matrixErrorf wraps an underlying error with the given tag.
+// matrixErrorf wraps err with an operation tag, preserving the original error via %w.
+// The wrapper keeps a stable "Op: underlying" shape for uniform reporting across facades.
+// Use only when err != nil to avoid creating a non-nil wrapper around a nil cause.
+//
+// Implementation:
+//   - Stage 1: Wrap using fmt.Errorf("%s: %w", tag, err) to enable errors.Is/As.
+//
+// Behavior highlights:
+//   - Preserves the underlying sentinel/type for errors.Is/errors.As.
+//   - Keeps human-readable operation prefixes (e.g., "Add|Sub", "Transpose").
+//
+// Inputs:
+//   - tag: operation name/label (use package-level op* constants; no magic strings).
+//   - err: underlying non-nil error to wrap.
+//
+// Returns:
+//   - error: a non-nil error that formats as "<tag>: <underlying>" and still matches Is/As.
+//
+// Errors:
+//   - None produced here; this function assumes err != nil. Caller responsibility.
+//
+// Determinism:
+//   - Fully deterministic formatting; no data-dependent branches.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Wrapping nil with %w yields a non-nil error that wraps a nil cause; do not do this.
+//   - Centralizes formatting so all kernels expose uniform error surfaces.
+//
+// AI-Hints:
+//   - Always gate calls with `if err != nil { return nil, matrixErrorf(tag, err) }`.
+//   - Keep `tag` to the canonical constants to simplify log/search pipelines.
 func matrixErrorf(tag string, err error) error {
 	return fmt.Errorf("%s: %w", tag, err)
 }
 
-// Add returns a new Matrix containing the element-wise sum of a and b.
+// addSub computes elementwise out = a + sign*b for sign ∈ {+1, -1}.
+// Inputs must have identical shapes. A fresh Dense is allocated; operands are not mutated.
+// Internal helper for Add/Sub to share validation, allocation, and fast-path.
 //
-// Contract:
-//   - a, b must be non-nil and have identical shapes.
+// Implementation:
+//   - Stage 1: ValidateBinarySameShape(a, b). Allocate result Dense(rows, cols).
+//   - Stage 2: Fast-path if both are *Dense — single flat loop 0..n-1.
+//     Otherwise, fallback At/Set with fixed i→j order.
 //
-// Determinism & Performance:
-//   - Loop order is fixed (flat 0..n-1 in fast path; i→j in fallback).
-//   - Single allocation for the result; no temps inside loops.
+// Behavior highlights:
+//   - Deterministic loop orders (flat in fast-path; i→j in fallback).
+//   - Single result allocation; no inner-loop temps beyond scalars.
+//   - Inputs remain immutable.
 //
-// Complexity: Time O(r*c), Space O(r*c).
+// Inputs:
+//   - a, b: conformable matrices (non-nil; same rows/cols).
+//   - sign: +1 for Add, −1 for Sub (callers must enforce).
+//   - opTag: opAdd for Add, opSub for Sub (for error wrapping).
+//
+// Returns:
+//   - Matrix: newly allocated Dense with the result.
+//   - error : validation/allocation failures wrapped with opAdd/opSub.
+//
+// Errors:
+//   - ErrNilMatrix          (from ValidateBinarySameShape when a or b is nil).
+//   - ErrDimensionMismatch  (from ValidateBinarySameShape when shapes differ).
+//   - Allocation errors     (from NewDense).
+//
+// Determinism:
+//   - Fast-path: single flat slice walk 0..(r*c−1).
+//   - Fallback: fixed nested loops i=0..r−1, j=0..c−1.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c) for the new result.
+//
+// Notes:
+//   - Keeping `sign` as a float avoids an extra branch inside the hot loop.
+//   - The function is unexported by design; invariants are enforced by Add/Sub.
 //
 // AI-Hints:
-//   - If both operands are *Dense, pass them directly to avoid interface dispatch.
-//   - ValidateSameShape catches shape bugs early and keeps inner loops branchless.
-func Add(a, b Matrix) (Matrix, error) {
-	// Validate inputs non-nil
-	if err := ValidateNotNil(a); err != nil {
-		return nil, matrixErrorf(opAdd, err)
-	}
-	if err := ValidateNotNil(b); err != nil {
-		return nil, matrixErrorf(opAdd, err)
-	}
+//   - To trigger fast-path, pass concrete *Dense operands (avoid interface wrappers).
+//   - If you need in-place add/sub, implement a dedicated kernel; do not modify inputs here.
+//   - Prefer batching several add/sub calls at a higher level to amortize allocations.
+func addSub(a, b Matrix, sign float64, opTag string) (Matrix, error) {
 	// Validate shapes match
-	if err := ValidateSameShape(a, b); err != nil {
-		return nil, matrixErrorf(opAdd, err)
+	if err := ValidateBinarySameShape(a, b); err != nil {
+		return nil, matrixErrorf(opTag, err)
 	}
 
 	// Allocate result Dense
 	rows, cols := a.Rows(), a.Cols()
 	res, err := NewDense(rows, cols)
 	if err != nil {
-		return nil, matrixErrorf(opAdd, err)
+		return nil, matrixErrorf(opTag, err)
 	}
 
-	// Fast path: *Dense × *Dense → single flat loop.
+	// Fast path: *Dense with *Dense → single flat loop.
 	if da, okA := a.(*Dense); okA {
 		if db, okB := b.(*Dense); okB {
 			// direct element-wise addition on backing slices
 			length := rows * cols
 			for idx := 0; idx < length; idx++ { // deterministic 0..n-1
-				res.data[idx] = da.data[idx] + db.data[idx]
+				res.data[idx] = da.data[idx] + sign*db.data[idx]
 			}
 
 			return res, nil
@@ -96,13 +151,13 @@ func Add(a, b Matrix) (Matrix, error) {
 	}
 
 	// Fallback: interface path with fixed i→j order.
-	var i, j int
+	var i, j int // loop iterators
 	var av, bv float64
 	for i = 0; i < rows; i++ {
 		for j = 0; j < cols; j++ {
-			av, _ = a.At(i, j)       // safe: bounds ensured
-			bv, _ = b.At(i, j)       // safe: same shape
-			_ = res.Set(i, j, av+bv) // safe: within bounds
+			av, _ = a.At(i, j)            // safe: bounds ensured
+			bv, _ = b.At(i, j)            // safe: same shape
+			_ = res.Set(i, j, av+sign*bv) // safe: within bounds
 		}
 	}
 
@@ -110,79 +165,100 @@ func Add(a, b Matrix) (Matrix, error) {
 	return res, nil
 }
 
-// Sub returns a new Matrix with the element-wise difference a - b.
+// Add computes the element-wise sum C = A + B and returns a fresh Dense result.
+// Implementation:
+//   - Stage 1: Validate both operands are non-nil and have identical shapes.
+//   - Stage 2: If both are *Dense, run a single flat loop; otherwise fall back to i→j.
 //
-// Contract: non-nil inputs, identical shapes.
-// Determinism: fixed loop order (fast: flat; fallback: i→j).
-// Complexity: Time O(r*c), Space O(r*c).
+// Behavior highlights:
+//   - Deterministic loop order; no hidden aliasing; one allocation for the result.
 //
-// AI-Hints:
-//   - Use *Dense fast path for heavy workloads.
-//   - Keep inputs immutable; this routine allocates a fresh result.
-func Sub(a, b Matrix) (Matrix, error) {
-	// Validate inputs non-nil
-	if err := ValidateNotNil(a); err != nil {
-		return nil, matrixErrorf(opSub, err)
-	}
-	if err := ValidateNotNil(b); err != nil {
-		return nil, matrixErrorf(opSub, err)
-	}
-	// Validate shapes match
-	if err := ValidateSameShape(a, b); err != nil {
-		return nil, matrixErrorf(opSub, err)
-	}
-
-	// Allocate result Dense
-	rows, cols := a.Rows(), a.Cols()
-	res, err := NewDense(rows, cols)
-	if err != nil {
-		return nil, matrixErrorf(opSub, err)
-	}
-
-	// Fast-path for two Dense matrices
-	if da, okA := a.(*Dense); okA {
-		if db, okB := b.(*Dense); okB {
-			// direct element-wise addition on backing slices
-			length := rows * cols
-			for idx := 0; idx < length; idx++ {
-				res.data[idx] = da.data[idx] - db.data[idx]
-			}
-
-			return res, nil
-		}
-	}
-
-	// Fallback: generic interface loop
-	var (
-		i, j   int // loop iterators
-		av, bv float64
-	)
-	for i = 0; i < rows; i++ {
-		for j = 0; j < cols; j++ {
-			av, _ = a.At(i, j)       // safe: bounds ensured
-			bv, _ = b.At(i, j)       // safe: same shape
-			_ = res.Set(i, j, av-bv) // safe: within bounds
-		}
-	}
-
-	// Return result
-	return res, nil
-}
-
-// Mul performs standard matrix multiplication c = a × b.
+// Inputs:
+//   - A: left matrix operand (any Matrix).
+//   - B: right matrix operand (any Matrix) with the same shape as A.
 //
-// Contract:
-//   - a, b non-nil; a.Cols() == b.Rows().
+// Returns:
+//   - Matrix: a new Dense with C[i,j] = A[i,j] + B[i,j].
 //
-// Determinism & Performance:
-//   - Fast path (*Dense×*Dense) uses fixed i→k→j with row-major strides.
-//   - Fallback uses fixed i→j→k; both orders are stable across runs.
+// Errors:
+//   - ErrNilMatrix (nil input), ErrDimensionMismatch (shape mismatch).
 //
-// Complexity: Time O(r*n*c), Space O(r*c).
+// Determinism:
+//   - Flat 0..n-1 for *Dense; i→j for the generic path.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c). The fast path is bandwidth-bound.
+//
+// Notes:
+//   - Inputs are never mutated; result is always a freshly allocated Dense.
 //
 // AI-Hints:
-//   - Skip zeros in the inner loop to reduce multiplications on sparse-like rows.
-//   - Favor *Dense inputs to unlock cache-friendly flat loops.
+//   - Prefer *Dense inputs for tight loops and contiguous data; hide concrete types
+//     (e.g., via wrappers) to force the fallback path in tests or when needed.
+func Add(a, b Matrix) (Matrix, error) { return addSub(a, b, +1, opAdd) }
+
+// Sub computes the element-wise difference C = A - B and returns a fresh Dense result.
+// Implementation:
+//   - Stage 1: Validate both operands are non-nil and have identical shapes.
+//   - Stage 2: If both are *Dense, run a single flat loop; otherwise fall back to i→j.
+//
+// Behavior highlights:
+//   - Deterministic loop order; no hidden aliasing; one allocation for the result.
+//
+// Inputs:
+//   - A: left matrix operand (any Matrix).
+//   - B: right matrix operand (any Matrix) with the same shape as A.
+//
+// Returns:
+//   - Matrix: a new Dense with C[i,j] = A[i,j] - B[i,j].
+//
+// Errors:
+//   - ErrNilMatrix (nil input), ErrDimensionMismatch (shape mismatch).
+//
+// Determinism:
+//   - Flat 0..n-1 for *Dense; i→j for the generic path.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c). The fast path is bandwidth-bound.
+//
+// Notes:
+//   - Inputs are never mutated; result is always a freshly allocated Dense.
+//
+// AI-Hints:
+//   - Prefer *Dense inputs for tight loops and contiguous data; hide concrete types
+//     (e.g., via wrappers) to force the fallback path in tests or when needed.
+func Sub(a, b Matrix) (Matrix, error) { return addSub(a, b, -1, opSub) }
+
+// Mul performs standard matrix multiplication C = A × B (no aliasing).
+// Implementation:
+//   - Stage 1: Validate A,B (not nil) and inner dimensions (A.Cols == B.Rows).
+//   - Stage 2: If A and B are *Dense, use i→k→j with row-major strides and skip zeros;
+//     otherwise use i→j→k with a fixed order and zero-skip on A[i,k].
+//
+// Behavior highlights:
+//   - Deterministic triple loops; no temporary tiles; one allocation for C.
+//
+// Inputs:
+//   - A: left matrix with shape (r × n).
+//   - B: right matrix with shape (n × c).
+//
+// Returns:
+//   - Matrix: new Dense C with shape (r × c).
+//
+// Errors:
+//   - ErrNilMatrix (nil input), ErrDimensionMismatch (inner mismatch).
+//
+// Determinism:
+//   - Fixed loop orders (i→k→j for fast path, i→j→k for fallback).
+//
+// Complexity:
+//   - Time O(r*n*c), Space O(r*c). Skipping zero A[i,k] avoids useless multiplies.
+//
+// Notes:
+//   - For extremely sparse workloads consider dedicated sparse kernels outside this package.
+//
+// AI-Hints:
+//   - If you can keep A as *Dense and cache-friendly by rows, you unlock the best path here.
 func Mul(a, b Matrix) (Matrix, error) {
 	// Validate inputs
 	if err := ValidateNotNil(a); err != nil {
@@ -233,7 +309,7 @@ func Mul(a, b Matrix) (Matrix, error) {
 	// Fallback: generic interface triple-loop (i-j-k)
 	for i = 0; i < aRows; i++ {
 		for j = 0; j < bCols; j++ {
-			current = 0.0
+			current = ZeroSum
 			for k = 0; k < aCols; k++ {
 				av, _ = a.At(i, k)
 				if av == 0 {
@@ -250,15 +326,43 @@ func Mul(a, b Matrix) (Matrix, error) {
 	return res, nil
 }
 
-// Transpose returns a new Matrix with rows and columns swapped.
+// Transpose returns a new matrix with rows and columns swapped (mᵀ).
+// Input is validated non-nil; the original matrix is never mutated.
+// Fast-path copies *Dense data via flat indexing; fallback uses At/Set.
 //
-// Contract: m non-nil.
-// Determinism: fixed i→j; fast path copies via flat indices.
-// Complexity: Time O(r*c), Space O(r*c).
+// Implementation:
+//   - Stage 1: ValidateNotNil(m). Allocate Dense(cols, rows).
+//   - Stage 2: If m is *Dense, use contiguous slice mapping; else generic i→j loop.
+//
+// Behavior highlights:
+//   - Deterministic copy order (dense: row blocks; generic: i→j).
+//   - One allocation for the result; no temporaries proportional to size.
+//
+// Inputs:
+//   - m: non-nil matrix (r×c).
+//
+// Returns:
+//   - Matrix: newly allocated Dense(c×r) with mᵀ.
+//   - error : validation/allocation failures wrapped with opTranspose.
+//
+// Errors:
+//   - ErrNilMatrix      (from ValidateNotNil).
+//   - Allocation errors (from NewDense).
+//
+// Determinism:
+//   - Fixed traversal orders independent of data values.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c) for the returned matrix.
+//
+// Notes:
+//   - For square *Dense matrices, complexity is unchanged; flat indexing still wins cache-wise.
+//   - Transpose is a full materialization; if a lazy/view is needed, add a separate type.
 //
 // AI-Hints:
-//   - Transpose of *Dense is fastest with flat slice copies.
-//   - For small matrices the generic path is fine.
+//   - Keep operands as *Dense to unlock the flat-copy fast-path.
+//   - If you only need Aᵀ·x, prefer MatVec on A with indices swapped instead of forming Aᵀ.
+//   - Avoid transposing repeatedly in tight loops; hoist and reuse the result where possible.
 func Transpose(m Matrix) (Matrix, error) {
 	// Validate input non-nil
 	if err := ValidateNotNil(m); err != nil {
@@ -299,15 +403,45 @@ func Transpose(m Matrix) (Matrix, error) {
 	return res, nil
 }
 
-// Scale returns a new Matrix with each element of m multiplied by alpha.
+// Scale returns a new matrix whose elements are alpha * m[i,j].
+// Input is validated non-nil; the original matrix is never mutated.
+// Fast-path multiplies a *Dense backing slice in a single flat loop.
 //
-// Contract: m non-nil.
-// Determinism: flat loop (fast) or i→j (fallback).
-// Complexity: Time O(r*c), Space O(r*c).
+// Implementation:
+//   - Stage 1: ValidateNotNil(m). Allocate Dense(rows, cols).
+//   - Stage 2: If *Dense, flat multiply; else generic i→j At/Set scaling.
+//
+// Behavior highlights:
+//   - Deterministic traversal order (flat or i→j).
+//   - Exactly one allocation for the result, no extra buffers.
+//
+// Inputs:
+//   - m     : non-nil matrix (r×c).
+//   - alpha : scalar multiplier (any finite float64; NaN/Inf propagate).
+//
+// Returns:
+//   - Matrix: Dense with elements alpha*m[i,j].
+//   - error : validation/allocation failures wrapped with opScale.
+//
+// Errors:
+//   - ErrNilMatrix      (from ValidateNotNil).
+//   - Allocation errors (from NewDense).
+//
+// Determinism:
+//   - Fixed loop orders independent of values.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c).
+//
+// Notes:
+//   - This is an eager materialization; for pipelines, consider fusing scaling into
+//     the next kernel (e.g., scale inputs right before Mul) to reduce allocations.
+//   - alpha = 0 yields an explicit zero matrix with the same shape.
 //
 // AI-Hints:
-//   - If you only need a view-like behavior, consider deferring scaling
-//     to the next kernel to avoid an extra allocation.
+//   - Use *Dense to hit the flat-slice path; keep data contiguous.
+//   - Prefer composing `Scale(M, a)` then `Add/ Mul` only if reuse justifies the copy;
+//     otherwise fold `alpha` into the consumer kernel to save work.
 func Scale(m Matrix, alpha float64) (Matrix, error) {
 	// Validate input non-nil
 	if err := ValidateNotNil(m); err != nil {
@@ -344,27 +478,46 @@ func Scale(m Matrix, alpha float64) (Matrix, error) {
 	return res, nil
 }
 
-// Hadamard returns element-wise product a ⊙ b as a new Matrix (Dense).
+// Hadamard computes the elementwise product (a ⊙ b) with a fresh Dense result.
+// Both inputs must be non-nil and have identical shapes; operands are not mutated.
+// Uses a single flat loop for *Dense×*Dense and a fixed-order generic fallback.
 //
-// Contract: a,b non-nil; identical shapes.
-// Fast-path: *Dense×*Dense runs a single flat loop 0..n-1 (deterministic).
-// Determinism: flat loop (fast) or i→j (fallback).
-// Complexity: Time O(r*c), Space O(r*c).
+// Implementation:
+//   - Stage 1: ValidateBinarySameShape(a, b). Allocate Dense(rows, cols).
+//   - Stage 2: Fast-path if both *Dense (flat 0..n-1). Else At/Set with i→j loops.
+//
+// Behavior highlights:
+//   - Bandwidth-bound kernel; contiguous data and flat traversal maximize throughput.
+//   - Deterministic loop orders; no data-dependent branches in the hot path.
+//
+// Inputs:
+//   - a, b: conformable matrices (same r×c).
+//
+// Returns:
+//   - Matrix: Dense with a[i,j]*b[i,j].
+//   - error : validation/allocation failures wrapped with opHadamard.
+//
+// Errors:
+//   - ErrNilMatrix          (from ValidateBinarySameShape when a or b is nil).
+//   - ErrDimensionMismatch  (from ValidateBinarySameShape when shapes differ).
+//   - Allocation errors     (from NewDense).
+//
+// Determinism:
+//   - Flat 0..(r*c−1) in fast-path; i→j in fallback; results stable across runs.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c).
+//
+// Notes:
+//   - Hadamard ≠ matrix multiplication; it is elementwise. Use Mul for A×B.
+//   - Keep shapes small but contiguous to stay cache-friendly.
 //
 // AI-Hints:
-//   - Prefer *Dense operands to exploit flat-slice throughput.
-//   - This is bandwidth-bound; keep data contiguous and avoid tiny tiles.
+//   - Favor *Dense inputs to avoid interface dispatch and enable tight loops.
+//   - If chaining multiple elementwise ops, consider fusing into one pass to reduce memory traffic.
 func Hadamard(a, b Matrix) (Matrix, error) {
-	// Validate 'a' is not nil.
-	if err := ValidateNotNil(a); err != nil {
-		return nil, matrixErrorf(opHadamard, err)
-	}
-	// Validate 'b' is not nil.
-	if err := ValidateNotNil(b); err != nil {
-		return nil, matrixErrorf(opHadamard, err)
-	}
-	// Validate shapes match exactly.
-	if err := ValidateSameShape(a, b); err != nil {
+	// Validate both operands are non-nil and have identical shapes.
+	if err := ValidateBinarySameShape(a, b); err != nil {
 		return nil, matrixErrorf(opHadamard, err)
 	}
 
@@ -431,7 +584,7 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 		var i, j, base int // indices and row base offset
 		var acc, xv float64
 		for i = 0; i < d.r; i++ { // iterate rows deterministically
-			acc = 0                   // reset accumulator per row
+			acc = ZeroSum             // reset accumulator per row
 			base = i * d.c            // compute flat base offset for row i
 			for j = 0; j < d.c; j++ { // iterate columns
 				xv = x[j]    // read x(j) once per iteration
@@ -449,7 +602,7 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 	var i, j int               // loop indices
 	var mv float64             // temporary to hold m(i,j)
 	for i = 0; i < rows; i++ { // iterate rows
-		y[i] = 0                   // initialize y(i) to zero
+		y[i] = ZeroSum             // initialize y(i) to zero
 		for j = 0; j < cols; j++ { // iterate columns
 			mv, _ = m.At(i, j) // read m(i,j)
 			y[i] += mv * x[j]  // accumulate
@@ -459,21 +612,38 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 	return y, nil // return computed vector
 }
 
-// Eigen performs Jacobi eigen-decomposition on a symmetric matrix m.
-// It returns eigenvalues and eigenvectors Q (columns of Q).
+// Eigen computes eigenvalues and eigenvectors of a symmetric matrix via Jacobi sweeps.
+// Implementation:
+//   - Stage 1: Validate symmetric square input within tol (not nil, square, |A[i,j]-A[j,i]| ≤ tol).
+//   - Stage 2: Repeatedly pick (p,q) with the largest |A[p,q]| in i→j order and apply a Jacobi rotation.
 //
-// Contract:
-//   - m non-nil and square; symmetry within tol (|A[i,j]-A[j,i]| ≤ tol).
+// Behavior highlights:
+//   - Stable, deterministic pivot scan; fast path for *Dense updates.
 //
-// Determinism & Performance:
-//   - Pivot selection scans upper triangle in fixed i→j order.
-//   - Rotations are applied in fixed order; tie-breaking is stable.
-//   - Fast path uses *Dense for data-parallel updates.
+// Inputs:
+//   - m: symmetric Matrix (within tol); n := m.Rows().
+//   - tol: convergence threshold (typ. 1e-9..1e-12 for float64).
+//   - maxIter: safety cap on iterations.
 //
-// Complexity: Time O(maxIter * n^3), Space O(n^2).
+// Returns:
+//   - []float64: eigenvalues (diagonal of the rotated matrix).
+//   - Matrix: Q whose columns are eigenvectors.
+//
+// Errors:
+//   - ErrDimensionMismatch (non-square), ErrAsymmetry (not symmetric within tol),
+//     ErrMatrixEigenFailed (max off-diagonal ≥ tol after maxIter).
+//
+// Determinism:
+//   - Fixed i→j pivot search and fixed update order produce stable results.
+//
+// Complexity:
+//   - Time O(maxIter * n^3), Space O(n^2).
+//
+// Notes:
+//   - If |A[p,q]| ≤ tol, the rotation is skipped via (c=1,s=0) to avoid numerical blow-ups.
 //
 // AI-Hints:
-//   - Choose tol ~ 1e-9..1e-12 for double; cap maxIter to avoid stalls.
+//   - Good defaults: tol≈1e-10, maxIter≈100..300 for n≤128;
 //   - Precondition by symmetrizing if input comes from numerically noisy ops.
 func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	// Validate: notNil; Square; Symmetric;
@@ -512,7 +682,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	)
 	for iter = 0; iter < maxIter; iter++ {
 		// J.1: Find pivot (p,q) maximizing |A[p,q]|
-		maxOff = 0.0
+		maxOff = NormZero
 		if useFast {
 			// fast-path: operate directly on data []float64
 			for i = 0; i < n; i++ {
@@ -553,10 +723,18 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 			aqq, _ = aRaw.At(q, q)
 			apq, _ = aRaw.At(p, q)
 		}
+		// Guard: avoid division by ~zero off-diagonal
+		if math.Abs(apq) <= tol {
+			// No-op rotation (c=1,s=0) keeps determinism and prevents blow-ups.
+			// Continue to next sweep; the pivot search will progress.
+			continue
+		}
 		// θ = (aqq−app)/(2*apq)
 		theta = (aqq - app) / (2 * apq)
 		// t = sign(θ) / (|θ|+√(θ²+1))
-		t = math.Copysign(1.0/(math.Abs(theta)+math.Sqrt(theta*theta+1)), theta)
+		// t = math.Copysign(1.0/(math.Abs(theta)+math.Sqrt(theta*theta+1)), theta)
+		t = math.Copysign(1.0/(math.Abs(theta)+math.Hypot(theta, 1)), theta)
+
 		// c = 1/√(1+t²), s = t*c
 		c = 1.0 / math.Sqrt(t*t+1)
 		s = t * c
@@ -620,14 +798,26 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 		}
 	}
 
-	// Check convergence
-	// after exiting the loop, recompute maxOff to ensure convergence
-	maxOff = 0
-	for i = 0; i < n; i++ {
-		for j = i + 1; j < n; j++ {
-			off, _ = aRaw.At(i, j)
-			if m := math.Abs(off); m > maxOff {
-				maxOff = m
+	// Final convergence check: recompute max off-diagonal using the fastest path available.
+	maxOff = NormZero
+	if useFast {
+		for i = 0; i < n; i++ {
+			base = i * n
+			for j = i + 1; j < n; j++ {
+				off = math.Abs(Adense.data[base+j])
+				if off > maxOff {
+					maxOff = off
+				}
+			}
+		}
+	} else {
+		for i = 0; i < n; i++ {
+			for j = i + 1; j < n; j++ {
+				off, _ = aRaw.At(i, j)
+				off = math.Abs(off)
+				if off > maxOff {
+					maxOff = off
+				}
 			}
 		}
 	}
@@ -653,19 +843,55 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	return eigs, qRaw, nil
 }
 
-// Inverse computes A^{-1} via Doolittle LU without pivoting (deterministic).
+// Inverse computes A^{-1} using Doolittle LU factorization without pivoting (deterministic).
+// The input must be non-nil and square. Returns ErrSingular if a zero pivot is detected.
+// Produces new Dense matrices; does not mutate the input.
 //
-// Contract: m non-nil and square; ErrSingular on zero pivot.
+// Implementation:
+//   - Stage 1: ValidateNotNil(m) and ValidateSquare(m). Factorize via LU(m) → L (unit lower), U (upper).
+//     Allocate invDense(n×n) and workspace vectors y, x of length n.
+//   - Stage 2: For each canonical basis column e_col:
+//   - Forward solve L·y = e_col (top-down).
+//   - Backward solve U·x = y    (bottom-up; check nonzero pivots).
+//   - Write x into column `col` of invDense.
+//     Dense fast-path uses flat indexing; generic fallback uses At/Set.
 //
-// Determinism & Performance:
-//   - Fixed loop orders for forward/backward substitution.
-//   - Fast path for *Dense avoids interface dispatch.
+// Behavior highlights:
+//   - Fully deterministic loop orders (col↑, forward i↑, backward i↓).
+//   - No pivoting by design (stable determinism and reproducibility).
+//   - Input m is read-only; factors L and U are freshly allocated by LU.
 //
-// Complexity: Time O(n^3), Space O(n^2).
+// Inputs:
+//   - m: non-nil square matrix (n×n).
+//
+// Returns:
+//   - Matrix: Dense(n×n) containing A^{-1}.
+//   - error : validation/factorization/solve failures wrapped with opInverse.
+//
+// Errors:
+//   - ErrNilMatrix         (ValidateNotNil).
+//   - ErrDimensionMismatch (ValidateSquare).
+//   - ErrSingular          (detected during backward substitution when U[i,i] == 0).
+//   - Propagated LU errors (from LU validation/allocation).
+//   - Allocation errors    (from NewDense).
+//
+// Determinism:
+//   - Fixed traversal and no pivoting → identical results for identical inputs.
+//
+// Complexity:
+//   - Time O(n^3): Doolittle LU is O(n^3); solving n RHS via triangular solves is O(n^3).
+//   - Space O(n^2): L, U, and invDense are O(n^2); y, x are O(n).
+//
+// Notes:
+//   - Numerical stability: no partial/complete pivoting. Upstream callers should avoid
+//     ill-conditioned matrices or apply scaling/preconditioning if stability matters.
+//   - For SPD matrices, prefer Cholesky-based inversion outside this package.
+//   - If you only need A^{-1}·b, solve via LU once and apply triangular solves (cheaper than forming A^{-1}).
 //
 // AI-Hints:
-//   - Upstream pivoting changes numeric stability; we intentionally keep none
-//     for determinism. Detect near-zero pivots before calling if needed.
+//   - Reuse LU(m) if multiple solves are needed; forming A^{-1} is typically a last resort.
+//   - Avoid near-singular inputs (tiny U[i,i]); detect upstream and skip inversion when possible.
+//   - Keep inputs as *Dense to hit the fast-path inside LU and the triangular solves.
 func Inverse(m Matrix) (Matrix, error) {
 	// Validate input non‐nil and square
 	if err := ValidateNotNil(m); err != nil {
@@ -689,22 +915,21 @@ func Inverse(m Matrix) (Matrix, error) {
 	}
 
 	var (
-		col, i, k int                  // loop iterators
-		sum       float64              // ?
-		pivot     float64              // ?
-		y         = make([]float64, n) // forward substitution workspace
-		x         = make([]float64, n) // backward substitution workspace
+		col, i, k  int // loop iterators
+		sum, pivot float64
+		y          = make([]float64, n) // forward substitution workspace
+		x          = make([]float64, n) // backward substitution workspace
 	)
 	// Fast‐path: detect *Dense for L, U, and inv
 	Ld, okL := Lmat.(*Dense)
 	Ud, okU := Umat.(*Dense)
 	if okL && okU {
 		// row‐major stride
-		var baseUi, baseLi int // ??
+		var baseUi, baseLi int
 		for col = 0; col < n; col++ {
 			// 4.1 Forward substitution: L*y = e_col
 			for i = 0; i < n; i++ {
-				sum = 0.0
+				sum = ZeroSum
 				baseLi = i * n
 				for k = 0; k < i; k++ {
 					sum += Ld.data[baseLi+k] * y[k]
@@ -717,13 +942,13 @@ func Inverse(m Matrix) (Matrix, error) {
 			}
 			// 4.2 Backward substitution: U*x = y
 			for i = n - 1; i >= 0; i-- {
-				sum = 0.0
+				sum = ZeroSum
 				baseUi = i * n
 				for k = i + 1; k < n; k++ {
 					sum += Ud.data[baseUi+k] * x[k]
 				}
 				pivot = Ud.data[baseUi+i]
-				if pivot == 0 {
+				if pivot == ZeroPivot {
 					return nil, matrixErrorf(opInverse, ErrSingular)
 				}
 				x[i] = (y[i] - sum) / pivot
@@ -738,11 +963,11 @@ func Inverse(m Matrix) (Matrix, error) {
 	}
 
 	// Fallback: generic interface version
-	var v float64 // ?
+	var v float64
 	for col = 0; col < n; col++ {
 		// Forward substitution: L*y = e_col
 		for i = 0; i < n; i++ {
-			sum = 0.0
+			sum = ZeroSum
 			for k = 0; k < i; k++ {
 				v, _ = Lmat.At(i, k)
 				sum += v * y[k]
@@ -755,13 +980,13 @@ func Inverse(m Matrix) (Matrix, error) {
 		}
 		// Backward substitution: U*x = y
 		for i = n - 1; i >= 0; i-- {
-			sum = 0.0
+			sum = ZeroSum
 			for k = i + 1; k < n; k++ {
 				v, _ = Umat.At(i, k)
 				sum += v * x[k]
 			}
 			pivot, _ = Umat.At(i, i)
-			if pivot == 0 {
+			if pivot == ZeroPivot {
 				return nil, matrixErrorf(opInverse, ErrSingular)
 			}
 			x[i] = (y[i] - sum) / pivot
@@ -775,19 +1000,36 @@ func Inverse(m Matrix) (Matrix, error) {
 	return invDense, nil
 }
 
-// LU performs Doolittle decomposition A = L*U with unit diagonal on L (no pivoting).
+// LU computes the Doolittle factorization A = L*U with unit diagonal on L (no pivoting).
+// Implementation:
+//   - Stage 1: Validate m (not nil, square); allocate Dense L,U; set diag(L)=1.
+//   - Stage 2: For i=0..n-1, build row i of U and column i of L in fixed order.
 //
-// Contract: m non-nil and square.
+// Behavior highlights:
+//   - Deterministic loops; fast path uses direct flat indexing; zero-pivot guard enforced.
 //
-// Determinism & Performance:
-//   - Fixed i→{j≥i} for U then {j>i}→i for L.
-//   - Fast path for *Dense uses row-major offsets.
+// Inputs:
+//   - m: square Matrix (n×n).
 //
-// Complexity: Time O(n^3), Space O(n^2).
+// Returns:
+//   - Matrix: L (unit lower triangular).
+//   - Matrix: U (upper triangular).
+//
+// Errors:
+//   - ErrNilMatrix, ErrDimensionMismatch, ErrSingular (if U[i,i]==0 during factorization).
+//
+// Determinism:
+//   - Fixed i→{j≥i} for U, then {j>i}→i for L.
+//
+// Complexity:
+//   - Time O(n^3), Space O(n^2).
+//
+// Notes:
+//   - Numerical stability requires pivoting upstream; this kernel is deterministic by design.
 //
 // AI-Hints:
-//   - For stability-sensitive workflows consider pivoting upstream;
-//     here we trade stability for determinism.
+//   - Use this when you need bit-for-bit reproducibility and your inputs guarantee non-zero pivots.
+//   - For stability-sensitive workflows consider pivoting upstream; here we trade stability for determinism.
 func LU(m Matrix) (Matrix, Matrix, error) {
 	// Validate input non‐nil and square
 	if err := ValidateNotNil(m); err != nil {
@@ -816,11 +1058,8 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 	// Detect fast‐path on *Dense
 	// mRaw holds the input data if m is *Dense
 	mRaw, useFast := m.(*Dense)
-	var (
-		i, j, k int     // loop iterators
-		sum     float64 // ?
-		pivot   float64 // ?
-	)
+	var i, j, k int // loop iterators
+	var sum, pivot float64
 	// Execute Doolittle decomposition
 	if useFast {
 		// Fast‐path: operate directly on flat slices
@@ -828,16 +1067,22 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 		for i = 0; i < n; i++ {
 			// Compute U[i][j] for j >= i
 			for j = i; j < n; j++ {
-				sum = 0.0
+				sum = ZeroSum
 				baseI = i * n
 				for k = 0; k < i; k++ {
 					sum += Lraw.data[baseI+k] * Uraw.data[k*n+j]
 				}
 				Uraw.data[baseI+j] = mRaw.data[baseI+j] - sum
 			}
+
+			// Zero-pivot guard (deterministic singularity detection)
+			if Uraw.data[i*n+i] == ZeroPivot {
+				return nil, nil, matrixErrorf(opLU, ErrSingular)
+			}
+
 			// Compute L[j][i] for j > i
 			for j = i + 1; j < n; j++ {
-				sum = 0.0
+				sum = ZeroSum
 				baseJ = j * n
 				for k = 0; k < i; k++ {
 					sum += Lraw.data[baseJ+k] * Uraw.data[k*n+i]
@@ -848,11 +1093,11 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 		}
 	} else {
 		// Fallback: generic interface version
-		var a, l, u float64 // ?
+		var a, l, u float64
 		for i = 0; i < n; i++ {
 			// Compute U[i][j] for j >= i
 			for j = i; j < n; j++ {
-				sum = 0.0
+				sum = ZeroSum
 				for k = 0; k < i; k++ {
 					l, _ = Lraw.At(i, k)
 					u, _ = Uraw.At(k, j)
@@ -861,9 +1106,16 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 				a, _ = m.At(i, j)
 				_ = Uraw.Set(i, j, a-sum)
 			}
+
+			// Zero-pivot guard (generic path)
+			pivot, _ = Uraw.At(i, i)
+			if pivot == ZeroPivot {
+				return nil, nil, matrixErrorf(opLU, ErrSingular)
+			}
+
 			// Compute L[j][i] for j > i
 			for j = i + 1; j < n; j++ {
-				sum = 0.0
+				sum = ZeroSum
 				for k = 0; k < i; k++ {
 					l, _ = Lraw.At(j, k)
 					u, _ = Uraw.At(k, i)
@@ -880,19 +1132,35 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 	return Lraw, Uraw, nil
 }
 
-// QR computes Q,R for A = Q*R via Householder reflections.
+// QR computes a Householder-based factorization such that A ≈ Qᵀ * R.
+// Implementation:
+//   - Stage 1: Validate m (not nil, square); clone A; init Q to identity.
+//   - Stage 2: For k=0..n-1, build a column reflector and apply it to A (forming R) and to Q.
 //
-// Contract: m non-nil and square.
+// Behavior highlights:
+//   - Deterministic column order; fast path uses raw data access; no sign canonicalization inside.
 //
-// Determinism & Performance:
-//   - Householder steps are applied in fixed column order.
-//   - Fast path for *Dense reduces accessor overhead.
+// Inputs:
+//   - m: square Matrix (n×n).
 //
-// Complexity: Time O(n^3), Space O(n^2).
+// Returns:
+//   - Matrix: Q (accumulated reflectors; note that A ≈ Qᵀ * R, not Q*R).
+//   - Matrix: R (upper triangular after reflections).
+//
+// Errors:
+//   - ErrNilMatrix, ErrDimensionMismatch.
+//
+// Determinism:
+//   - Fixed k→{i,j} visitation; stable column-wise accumulation.
+//
+// Complexity:
+//   - Time O(n^3), Space O(n^2).
+//
+// Notes:
+//   - If you need A≈Q*R with diag(R)≥0, post-process via S=diag(sign(R[ii,ii])): use (SQ, SR) with SR≥0.
 //
 // AI-Hints:
-//   - For tall-skinny matrices consider blocked/TSQR variants outside this package
-//     if you need better cache behavior or parallelism.
+//   - For tall-skinny, prefer blocked/TSQR variants outside this package when cache behavior matters more.
 func QR(m Matrix) (Matrix, Matrix, error) {
 	// Validate input non‐nil and square
 	if err := ValidateNotNil(m); err != nil {
@@ -930,7 +1198,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 	)
 	for k = 0; k < n; k++ {
 		// 4.1: Compute norm of A[k:n][k]
-		norm = 0.0
+		norm = NormZero
 		if useFast {
 			for i = k; i < n; i++ {
 				aij = Ad.data[i*n+k]
@@ -943,7 +1211,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 			}
 		}
 		norm = math.Sqrt(norm)
-		if norm == 0.0 {
+		if norm == NormZero {
 			continue // skip zero column
 		}
 
@@ -971,7 +1239,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 		v[k] -= alpha
 
 		// 4.4: Compute β = vᵀv and τ = 2/β
-		beta = 0.0
+		beta = NormZero
 		for i = k; i < n; i++ {
 			beta += v[i] * v[i]
 		}
@@ -979,7 +1247,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 
 		// 4.5: Apply reflection to A (update R)
 		for j = k; j < n; j++ {
-			sum = 0.0
+			sum = ZeroSum
 			if useFast {
 				for i = k; i < n; i++ {
 					sum += v[i] * Ad.data[i*n+j]
@@ -1001,7 +1269,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 
 		// 4.6: Apply reflection to Q
 		for j = 0; j < n; j++ {
-			sum = 0.0
+			sum = ZeroSum
 			if useFast {
 				for i = k; i < n; i++ {
 					sum += v[i] * Qraw.data[i*n+j]

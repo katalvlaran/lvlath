@@ -43,12 +43,38 @@ type AdjacencyMatrix struct {
 	opts          Options        // original construction options
 }
 
-// NewAdjacencyMatrix constructs an AdjacencyMatrix from g.
-// Stage 1 (Validate): ensure g is non‐nil.
-// Stage 2 (Prepare): extract vertex list and edge list.
-// Stage 3 (Execute): call BuildDenseAdjacency.
-// Stage 4 (Finalize): build reverse lookup and return.
-// Returns ErrNilGraph or any BuildDenseAdjacency error.
+// NewAdjacencyMatrix BUILD adjacency container from core.Graph.
+// Implementation:
+//   - Stage 1: validate input graph (ErrGraphNil).
+//   - Stage 2: materialize vertex/edge lists (stable order from core).
+//   - Stage 3: delegate to BuildDenseAdjacency (deterministic).
+//   - Stage 4: construct reverse index and return.
+//
+// Behavior highlights:
+//   - No panics for user errors; strict sentinels only.
+//   - Stored opts snapshot preserves round-trip/export policy.
+//
+// Inputs:
+//   - g: source graph (non-nil).
+//   - opts: effective options (build/export policy snapshot).
+//
+// Returns:
+//   - *AdjacencyMatrix with Dense backend.
+//
+// Errors:
+//   - ErrGraphNil; plus any BuildDenseAdjacency errors.
+//
+// Determinism:
+//   - Stable vertex order (core contract) and stable edge iteration.
+//
+// Complexity:
+//   - Time O(n + m) for extraction + builder; Space O(n + m).
+//
+// Notes:
+//   - The actual dense builder lives elsewhere; this wrapper just orchestrates.
+//
+// AI-Hints:
+//   - Prefer passing Options via NewMatrixOptions(...) to keep defaults in sync.
 func NewAdjacencyMatrix(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 	// Validate input graph
 	if g == nil {
@@ -86,6 +112,7 @@ func NewAdjacencyMatrix(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 }
 
 // buildGraphOptions prepares core.GraphOption slice from stored opts.
+// Complexity O(1).
 func (am *AdjacencyMatrix) buildGraphOptions() []core.GraphOption {
 	var goOpts []core.GraphOption
 	if am.opts.directed {
@@ -104,32 +131,86 @@ func (am *AdjacencyMatrix) buildGraphOptions() []core.GraphOption {
 	return goOpts
 }
 
-// VertexCount returns the number of vertices in the graph (matrix dimension).
-// Validate: receiver non‐nil, matrix shape vs index consistency.
-func (am *AdjacencyMatrix) VertexCount() int {
+// VertexCount RETURN the number of vertices (matrix dimension) with invariant checks, no panics.
+// Implementation:
+//   - Stage 1: validate receiver and underlying Mat presence.
+//   - Stage 2: ensure matrix dimension equals index table length.
+//
+// Behavior highlights:
+//   - No panics: developer-misuse is reported as sentinel errors.
+//
+// Inputs:
+//   - (receiver) *AdjacencyMatrix: container with Mat and index tables.
+//
+// Returns:
+//   - (int, error): vertex count or error.
+//
+// Errors:
+//   - ErrNilMatrix (nil receiver or underlying Mat),
+//   - ErrDimensionMismatch (Mat.Rows() != len(vertexByIndex)).
+//
+// Determinism:
+//   - Stable, pure read-only check.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Prefer using this method in user-facing surfaces; do not assume invariants silently.
+//
+// AI-Hints:
+//   - If you need a panic-on-bug assertion in internal code, assert the error upstream once.
+func (am *AdjacencyMatrix) VertexCount() (int, error) {
 	if am == nil || am.Mat == nil {
-		panic("VertexCount: nil AdjacencyMatrix or underlying Mat")
+		return 0, fmt.Errorf("AdjacencyMatrix.VertexCount: nil receiver or underlying Mat: %w", ErrNilMatrix)
 	}
-	// deep structural check
 	if am.Mat.Rows() != len(am.vertexByIndex) {
-		panic(fmt.Sprintf(
-			"VertexCount: inconsistent dimensions %d vs %d",
-			am.Mat.Rows(), len(am.vertexByIndex),
-		))
+		return 0, fmt.Errorf(
+			"AdjacencyMatrix.VertexCount: inconsistent dimensions %d vs %d: %w",
+			am.Mat.Rows(), len(am.vertexByIndex), ErrDimensionMismatch,
+		)
 	}
 
-	return am.Mat.Rows()
+	return am.Mat.Rows(), nil
 }
 
-// Neighbors returns all adjacent vertex IDs reachable from u.
-// Stage 1 (Validate): receiver, lookup, shape check.
-// Stage 2 (Prepare): allocate result slice.
-// Stage 3 (Execute): single scan over columns.
-// Stage 4 (Finalize): return.
+// Neighbors LIST adjacent vertex IDs reachable from u (row scan of adjacency row).
+// Implementation:
+//   - Stage 1: validate receiver and matrix presence.
+//   - Stage 2: resolve source index via VertexIndex[u].
+//   - Stage 3: scan row i over columns j and collect non-zero, finite entries.
+//
+// Behavior highlights:
+//   - Deterministic: fixed vertex order (vertexByIndex), no map iteration order; skips 0 and +Inf.
+//
+// Inputs:
+//   - u: vertex ID (string) present in VertexIndex.
+//
+// Returns:
+//   - []string: list of neighbor vertex IDs in stable column order.
+//
+// Errors:
+//   - ErrNilMatrix (nil receiver or Mat),
+//   - ErrUnknownVertex (u not in VertexIndex),
+//   - ErrDimensionMismatch (Mat.Cols() != len(vertexByIndex)),
+//   - bubbled matrix read errors (e.g., ErrOutOfRange) wrapped with coordinates.
+//
+// Determinism:
+//   - Fixed col loop [0..n).
+//
+// Complexity:
+//   - Time O(n), Space O(k) for k neighbors.
+//
+// Notes:
+//   - We treat +Inf as “no edge”; NaN is not expected in adjacency.
+//
+// AI-Hints:
+//   - Use WithWeighted/WithBinary builders to control adjacency semantics before calling.
+//   - For dense traversals prefer *Dense Mat to avoid interface overhead in hot paths.
 func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 	// Validate receiver
 	if am == nil || am.Mat == nil {
-		return nil, fmt.Errorf("Neighbors: nil AdjacencyMatrix or Mat: %w", ErrGraphNil)
+		return nil, fmt.Errorf("Neighbors: nil AdjacencyMatrix or Mat: %w", ErrNilMatrix)
 	}
 
 	// Validate index exists
@@ -186,14 +267,30 @@ func (am *AdjacencyMatrix) indexToVertex(idx int) (string, error) {
 }
 
 // buildDenseAdjacencyFromGraph is a convenience wrapper used by tests
-// and potential internal callers that have only *core.Graph*.
-// It extracts the stable vertex-id list and edge list in a deterministic order
-// and delegates to BuildDenseAdjacency.
+//
+//	and potential internal callers that have only *core.Graph*.
+//
+// Implementation:
+//   - Stage 1: validate graph presence.
+//   - Stage 2: obtain vertex IDs (defensively ensure lexicographic order).
+//   - Stage 3: obtain edges in core-defined deterministic order.
+//   - Stage 4: call BuildDenseAdjacency.
+//
+// Behavior highlights:
+//   - Guarantees canonical vertex order for callers that rely on wrapper determinism.
+//
+// Errors:
+//   - ErrGraphNil and any BuildDenseAdjacency error bubbled.
+//
+// Determinism:
+//   - Stable order by design.
+//
+// Complexity:
+//   - Time O(V log V + E) worst-case (only if defensive sort triggers).
 //
 // NOTE: we sort vertex IDs lexicographically here to be absolutely explicit,
 // even if core.Vertices() is already sorted. This guarantees that callers that
 // rely on this wrapper receive the canonical order.
-// func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, *Matrix, error) {
 func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, *Dense, error) {
 	// Validate graph (public contract sentinel).
 	if g == nil {
@@ -217,20 +314,37 @@ func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, 
 	return BuildDenseAdjacency(ids, edges, opts)
 }
 
-// ToGraph deterministic* export surface from an already
-// built AdjacencyMatrix back to core.Graph, honoring the unified options
-// contract:
+// ToGraph CONVERT the stored adjacency to core.Graph with threshold/weight policy.
+// Implementation:
+//   - Stage 1: validate receiver and square shape against index table.
+//   - Stage 2: guard metric-closure case (unsupported export).
+//   - Stage 3: gather export options (threshold, (keep|binary) weights).
+//   - Stage 4: add vertices in stable order, then emit edges deterministically.
 //
-//   - Guard: if the source adjacency was built with MetricClosure=true,
-//     ToGraph MUST be unsupported and return ErrMatrixNotImplemented.
-//   - Threshold: add edge iff a[i,j] > edgeThreshold (strict).
-//   - Weight policy: KeepWeights ⇒ weight = a[i,j]; Binary ⇒ weight = 1.
-//   - Undirected export: emit each unordered pair {i,j} ONCE (upper triangle),
-//     loops (i==j) are emitted once as well; no mirroring on export.
-//   - Directed export: emit every ordered pair (i,j).
-//   - Determinism: iterate vertices in the stored stable order (vertexByIndex);
-//     nested loops are fixed; no map iteration ordering.
-//   - Errors: ErrNilMatrix, ErrDimensionMismatch, ErrMatrixNotImplemented, plus bubbled core errors.
+// Behavior highlights:
+//   - Threshold is strict (a[i,j] > threshold).
+//   - keepWeights casts a[i,j] to int64 (truncate toward zero); binary emits weight=1.
+//   - Orientation is inherited from the original build options (am.opts.directed).
+//
+// Inputs:
+//   - optFns ...Option: optional export overrides (edge threshold, weight policy).
+//
+// Returns:
+//   - *core.Graph: newly constructed graph; error on contract violations.
+//
+// Errors:
+//   - ErrNilMatrix, ErrDimensionMismatch, ErrMatrixNotImplemented (metric-closure),
+//   - bubbled matrix/core errors wrapped with precise context.
+//
+// Determinism:
+//   - Fixed i→j traversal with stable vertex order; no map iteration order.
+//
+// Complexity:
+//   - Time O(n^2 + m), Space O(n) for transient slices.
+//
+// Notes:
+//   - Export does not generate parallel edges by itself; it respects orientation and loop policy.
+//   - No hidden allocations beyond necessary slices for vertex IDs.
 //
 // AI-Hints:
 //   - Set a low EdgeThreshold (e.g., 0 or 0.5) to export all non-zero edges reliably.
@@ -238,10 +352,6 @@ func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, 
 //   - KeepWeights only makes sense if the adjacency was built as weighted.
 //   - Export direction always mirrors the source adjacency’s Directed policy, ensuring
 //     round-trip fidelity. Override via adapters before building if you need to flip.
-//
-// Complexity:
-//   - O(n^2) reads of the matrix + O(n + m) vertex/edge insertions into core.
-//   - No hidden allocations beyond necessary slices for vertex IDs.
 func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	// Validate receiver: both the wrapper and the underlying matrix must be non-nil.
 	if am == nil || am.Mat == nil {
@@ -337,9 +447,26 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	return g, nil
 }
 
-// returnEdge is egde emission helper (non-anonymous, no captures) to keep loop body minimal.
-// Applies threshold/weight policy and inserts a single edge when eligible.
-// Returns a wrapped error with context or nil.
+// returnEdge EMIT a single edge when aij passes threshold under the chosen weight policy.
+// Implementation:
+//   - Stage 1: skip +Inf and sub-threshold entries.
+//   - Stage 2: derive integer weight: keep ⇒ int64(aij) (truncate toward zero), binary ⇒ 1.
+//   - Stage 3: call core.AddEdge(fromID, toID, w).
+//
+// Behavior highlights:
+//   - No captures; small non-allocating helper used in tight loops.
+//
+// Inputs:
+//   - g: target graph; fromID,toID: vertex IDs; aij: matrix entry; threshold; keep: weight policy.
+//
+// Returns:
+//   - error: wrapped with precise context; nil on success.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Provide integer-native adjacency if you want exact equality without truncation semantics.
 func returnEdge(g *core.Graph, fromID, toID string, aij float64, threshold float64, keep bool) error {
 	// Skip distances/+Inf (metric-closure never reaches here) and sub-threshold values.
 	if math.IsInf(aij, +1) || !(aij > threshold) {
@@ -360,19 +487,34 @@ func returnEdge(g *core.Graph, fromID, toID string, aij float64, threshold float
 	return nil
 }
 
-// DegreeVector computes per-vertex "degree" according to adjacency semantics:
+// DegreeVector COMPUTE per-vertex degree/strength from adjacency semantics.
 //
-//	– Directed: out-degree as row sum of outgoing entries.
-//	– Undirected: degree as row sum; symmetric A implies sum equals degree
-//	  for unweighted/binary adjacency.
+//	– Directed: out-degree is row sum of outgoing entries.
+//	– Undirected: degree equals row sum for binary symmetric adjacency.
 //	– Loops: counted as exactly 1 (if present), regardless of stored weight.
 //
-// Determinism & Policy:
+// Implementation:
+//   - Stage 1: validate container and square shape.
+//   - Stage 2: fast-path on *Dense with direct flat access; else fallback via At.
+//
+// Behavior highlights:
+//   - +Inf denotes “no edge” and is ignored; NaN is ignored for robustness.
+//   - Deterministic i→j traversal.
+//
+// Returns:
+//   - []float64 of length n.
+//
+// Errors:
+//   - ErrNilMatrix, ErrNotSquare (via ValidateSquare), bubbled At errors.
+//
+// Determinism:
+//   - Fixed loops; no map iteration.
 //   - +Inf denotes “no edge” and must NOT contribute to sums.
 //   - NaN is ignored (treated as no edge) for robustness.
 //   - Loop order is fixed (i → j) for stable accumulation.
 //
-// Complexity: O(n^2) time, O(n) extra space for the output.
+// Complexity:
+//   - Time O(n^2), Space O(n).
 //
 // AI-Hints:
 //   - For unweighted graphs, build a binary adjacency (1 for edges) to get pure degrees.

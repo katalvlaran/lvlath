@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: MIT
+
 // Package matrix - Dense storage (row-major) & safe accessors.
 //
 // Purpose:
@@ -9,10 +10,10 @@
 //   - Enforce a numeric policy (optional rejection of NaN/Inf) from a single source of truth.
 //
 // AI-Hints:
-//   - Prefer fast-paths on *Dense in hot algebra (see methods.go): operate on the flat data slice directly.
-//   - Use View(r0,c0,h,w) to avoid copies when you only need a window; mutations reflect in the base matrix.
-//   - Use Induced(rows, cols) to materialize a submatrix (copy) for independent lifetime or shape transforms.
-//   - Toggle DefaultValidateNaNInf in options to catch numeric issues early during development/testing.
+//   - Prefer fast-paths on *Dense in hot algebra (see impl_linear_algebra.go): operate on the flat data slice directly.
+//   - Use View(r0,c0,h,w) to avoid copies for windows; mutations reflect in the base matrix.
+//   - Use Induced(rows, cols) to materialize a submatrix (copy) for independent lifetime/shape.
+//   - DefaultValidateNaNInf is on; insert only finite values unless you explicitly disable upstream.
 //
 // Complexity quicksheet:
 //   - NewDense: O(r*c) zero-init; At/Set: O(1); Clone: O(r*c); View: O(1); Induced: O(r'*c').
@@ -22,10 +23,53 @@ package matrix
 import (
 	"fmt"
 	"math"
+	"strings"
+)
+
+// ---------- error context tags ----------
+
+const (
+	ctxAt     = "At"      // method tag used in error wrappers
+	ctxSet    = "Set"     // method tag used in error wrappers
+	ctxApply  = "Apply"   // method tag used in error wrappers
+	ctxView   = "View"    // ctor tag for Dense.View
+	ctxInduce = "Induced" // ctor/tag for Dense.Induced
+)
+
+// ---------- Formatting literals  ----------
+const (
+	_fmtRowOpen  = "["
+	_fmtRowClose = "]\n"
+	_fmtSep      = ", "
 )
 
 // denseErrorf wraps an error with a uniform Dense context and callsite indices.
-// Example: "Dense.Set(3,7): matrix: out of range".
+// MAIN DESCRIPTION:
+//   - Attach method context and coordinates to a sentinel error for diagnostics.
+//
+// Implementation:
+//   - Stage 1: format "Dense.<method>(row,col): %w".
+//   - Stage 2: return wrapped error.
+//
+// Behavior highlights:
+//   - Stable, human-friendly messages; preserves sentinel via %w.
+//
+// Inputs:
+//   - method: context tag (ctxAt/ctxSet/ctxApply/...)
+//   - row, col: coordinates
+//   - err: sentinel (e.g., ErrOutOfRange, ErrNaNInf)
+//
+// Returns:
+//   - error: wrapped with context
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Keep tags in constants for grep-ability and consistency.
+//
+// AI-Hints:
+//   - Prefer to wrap at the nearest detection site for precise coordinates.
 func denseErrorf(method string, row, col int, err error) error {
 	return fmt.Errorf("Dense.%s(%d,%d): %w", method, row, col, err)
 }
@@ -42,22 +86,53 @@ type Dense struct {
 
 // Compile-time assertions for interface & fmt.Stringer conformance.
 var (
-	_ Matrix       = (*Dense)(nil) // implements our public Matrix interface
+	_ Matrix       = (*Dense)(nil) // *Dense implements our public Matrix interface
 	_ fmt.Stringer = (*Dense)(nil)
 )
 
 // NewDense creates an r×c zero matrix using row-major storage.
-// Contract: rows>0 && cols>0. Returns ErrInvalidDimensions otherwise.
-// Note: internal callers that need zero-sized dimensions should use newDenseZeroOK (below).
+// MAIN DESCRIPTION:
+//   - Public constructor for Dense with strict shape validation and default numeric policy.
+//
+// Implementation:
+//   - Stage 1: validate rows>0 && cols>0; else ErrInvalidDimensions.
+//   - Stage 2: allocate zero-filled buffer and initialize policy.
+//   - Stage 3: set numeric policy from defaults.
+//
+// Behavior highlights:
+//   - No panics on user errors; returns sentinel errors.
+//   - Public constructor forbids empty dimensions to avoid accidental 0×0 matrices.
+//
+// Inputs:
+//   - rows: positive number of rows
+//   - cols: positive number of columns
+//
+// Returns:
+//   - *Dense: newly allocated matrix.
+//
+// Errors:
+//   - ErrInvalidDimensions (shape contract violation).
+//
+// Determinism:
+//   - Always allocates the same layout for given (rows, cols).
+//   - Fixed zero initialization; no randomness.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c).
+//
+// Notes:
+//   - Internal zero-sized cases use newDenseZeroOK.
+//
+// AI-Hints:
+//   - Prefer this ctor for public creation. For subviews, use View().
 func NewDense(rows, cols int) (*Dense, error) {
-	// Validate shape (public API does not allow empty dimensions to avoid accidental 0×0).
+	// Validate shape.
 	if rows <= 0 || cols <= 0 {
-		return nil, ErrInvalidDimensions // unified sentinel
+		return nil, ErrInvalidDimensions
 	}
 	// Allocate a contiguous flat buffer; make() zero-fills it deterministically.
 	buf := make([]float64, rows*cols)
 
-	// Initialize with the package-level default numeric policy.
 	return &Dense{
 		r:              rows,
 		c:              cols,
@@ -67,8 +142,34 @@ func NewDense(rows, cols int) (*Dense, error) {
 }
 
 // newDenseZeroOK is an internal constructor that allows rows==0 or cols==0.
-// Rationale: incidence builder may need V×0 matrices. We still set policy & invariants.
-// Not exported to keep the public surface strict.
+// MAIN DESCRIPTION:
+//   - Internal factory for legal 0×N or N×0 shapes used by builders.
+//
+// Implementation:
+//   - Stage 1: validate rows>=0 && cols>=0.
+//   - Stage 2: allocate len(rows*cols) buffer (possibly zero).
+//
+// Behavior highlights:
+//   - Same numeric policy as public constructor.
+//   - Used by builders to produce legal 0×k or k×0 matrices when needed.
+//
+// Inputs:
+//   - rows, cols: non-negative dimensions.
+//
+// Returns:
+//   - *Dense or ErrInvalidDimensions.
+//
+// Complexity:
+//   - Time O(r*c).
+//
+// Inputs:
+//   - rows, cols: non-negative dimensions.
+//
+// Returns:
+//   - *Dense or ErrInvalidDimensions on negatives.
+//
+// Complexity:
+//   - Time O(rows*cols), Space O(rows*cols).
 func newDenseZeroOK(rows, cols int) (*Dense, error) {
 	if rows < 0 || cols < 0 {
 		return nil, ErrInvalidDimensions
@@ -76,7 +177,6 @@ func newDenseZeroOK(rows, cols int) (*Dense, error) {
 	// Zero-length buffer is legal when rows==0 or cols==0 (len == rows*cols).
 	buf := make([]float64, rows*cols)
 
-	// Initialize with default numeric policy from options.go.
 	return &Dense{
 		r:              rows,
 		c:              cols,
@@ -85,8 +185,26 @@ func newDenseZeroOK(rows, cols int) (*Dense, error) {
 	}, nil
 }
 
-// newDenseWithPolicy is a test/helper constructor to override the numeric policy.
-// It preserves the same validation semantics as NewDense.
+// newDenseWithPolicy is a helper for tests/builders to override numeric policy.
+// MAIN DESCRIPTION:
+//   - Construct Dense with strict shape validation, then set validateNaNInf explicitly.
+//
+// Implementation:
+//   - Stage 1: call NewDense(rows, cols).
+//   - Stage 2: set policy flag.
+//
+// Behavior highlights:
+//   - Centralized creation semantics.
+//   - Intended for package internals and tests.
+//
+// Inputs:
+//   - rows, cols; validateNaNInf.
+//
+// Returns:
+//   - *Dense or error from NewDense.
+//
+// Complexity:
+//   - Time O(rows*cols), Space O(rows*cols).
 func newDenseWithPolicy(rows, cols int, validateNaNInf bool) (*Dense, error) {
 	m, err := NewDense(rows, cols)
 	if err != nil {
@@ -110,16 +228,42 @@ func (m *Dense) Cols() int { return m.c }
 func (m *Dense) Shape() (rows, cols int) { return m.r, m.c }
 
 // indexOf computes the row-major offset or returns ErrOutOfRange.
-// We keep this unexported and free of panics so public At() / Set() remain safe.
-// Complexity: O(1).
+// MAIN DESCRIPTION:
+//   - Bounds-check (row,col) and compute flat offset for row-major storage.
+//
+// Implementation:
+//   - Stage 1: validate 0 ≤ row < m.r and 0 ≤ col < m.c.
+//   - Stage 2: compute row*m.c + col.
+//
+// Behavior highlights:
+//   - Error is wrapped with the caller's method context.
+//   - Returns a sentinel (ErrOutOfRange) without adding context; public
+//     methods (At/Set) will wrap with coordinates and method name.
+//
+// Inputs:
+//   - method: caller identifier (ctxAt/ctxSet/...)
+//   - row, col: coordinates.
+//
+// Returns:
+//   - (offset, nil) on success; (0, ErrOutOfRange) otherwise.
+//
+// Errors:
+//   - ErrOutOfRange when indices are invalid
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Keep unexported to avoid accidental panics at public surface.
+//
+// AI-Hints:
+//   - Reuse in At/Set to keep identical bound semantics.
 func (m *Dense) indexOf(row, col int) (int, error) {
-	// Validate row index: 0 ≤ row < r.
 	if row < 0 || row >= m.r {
-		return 0, denseErrorf("At", row, col, ErrOutOfRange)
+		return 0, ErrOutOfRange
 	}
-	// Validate column index: 0 ≤ col < c.
 	if col < 0 || col >= m.c {
-		return 0, denseErrorf("At", row, col, ErrOutOfRange)
+		return 0, ErrOutOfRange
 	}
 
 	// Row-major offset: i*c + j.
@@ -127,28 +271,90 @@ func (m *Dense) indexOf(row, col int) (int, error) {
 }
 
 // At returns the value at (row, col) or ErrOutOfRange.
-// Public surface never panics.
-// Complexity: O(1).
+// MAIN DESCRIPTION:
+//   - Safe element read at coordinates.
+//
+// Implementation:
+//   - Stage 1: compute offset via indexOf (bounds check).
+//   - Stage 2: load from flat buffer.
+//
+// Behavior highlights:
+//   - Never panics on out-of-range; returns sentinel error.
+//
+// Inputs:
+//   - row, col: zero-based indices.
+//
+// Returns:
+//   - (value, nil) on success; (0, ErrOutOfRange) on invalid indices.
+//
+// Errors:
+//   - ErrOutOfRange when out of bounds
+//
+// Determinism:
+//   - Stable access cost; no allocations.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Uses direct data[] to avoid double checking.
+//
+// AI-Hints:
+//   - Prefer At in external code; internal hot paths may index directly.
 func (m *Dense) At(row, col int) (float64, error) {
-	off, err := m.indexOf(row, col) // bounds check + offset calc
+	off, err := m.indexOf(row, col)
 	if err != nil {
-		return 0, err // propagate sentinel
+		return 0, denseErrorf(ctxAt, row, col, err) // wrap with context
 	}
 
-	return m.data[off], nil // direct flat read
+	return m.data[off], nil
 }
 
 // Set stores v at (row, col) or returns an error (bounds or numeric policy).
-// If validateNaNInf is true, NaN and ±Inf are rejected with ErrNaNInf.
-// Complexity: O(1).
+// MAIN DESCRIPTION:
+//   - Safe element write with optional finite-only policy.
+//
+// Implementation:
+//   - Stage 1: compute offset via indexOf (bounds check).
+//   - Stage 2: enforce numeric policy (reject NaN/±Inf when enabled).
+//   - Stage 3: write into flat buffer.
+//
+// Behavior highlights:
+//   - Never panics; returns sentinel errors.
+//   - Numeric policy is a per-instance flag preserved by Clone.
+//
+// Inputs:
+//   - row, col: element coordinates.
+//   - v      : value to store.
+//
+// Returns:
+//   - nil on success; errors on invalid indices.
+//
+// Errors:
+//   - ErrOutOfRange for bounds; ErrNaNInf for invalid numbers
+//
+// Determinism:
+//   - Direct flat write; fixed order irrelevant here.
+//
+// Determinism:
+//   - Stable, no side-effects beyond the cell.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Policy flag is carried by Clone/Induced/View (single source of truth).
+//
+// AI-Hints:
+//   - Keep policy ON in production data flows; disable only in controlled ingestion.
 func (m *Dense) Set(row, col int, v float64) error {
-	off, err := m.indexOf(row, col) // bounds check + offset calc
+	off, err := m.indexOf(row, col)
 	if err != nil {
-		return err // propagate sentinel
+		return denseErrorf(ctxSet, row, col, err) // wrap with context
 	}
 	// Numeric policy: optional finite-only enforcement.
 	if m.validateNaNInf && (math.IsNaN(v) || math.IsInf(v, 0)) {
-		return denseErrorf("Set", row, col, ErrNaNInf)
+		return denseErrorf(ctxSet, row, col, ErrNaNInf)
 	}
 	m.data[off] = v // direct flat write
 
@@ -156,7 +362,30 @@ func (m *Dense) Set(row, col int, v float64) error {
 }
 
 // Clone returns a deep copy (new buffer, same numeric policy).
-// Complexity: O(r*c) copy time and memory.
+// MAIN DESCRIPTION:
+//   - Produce an independent Dense with identical shape/data/policy.
+//
+// Implementation:
+//   - Stage 1: allocate new buffer len==r*c.
+//   - Stage 2: copy data and flags.
+//
+// Behavior highlights:
+//   - Independence: mutations do not affect the original.
+//
+// Returns:
+//   - Matrix: *Dense implementing Matrix.
+//
+// Determinism:
+//   - Stable double loop cost reduced to single copy.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c).
+//
+// Notes:
+//   - Returned dynamic type is *Dense.
+//
+// AI-Hints:
+//   - For structural copy with transform, consider Apply on clone.
 func (m *Dense) Clone() Matrix {
 	cp := make([]float64, len(m.data)) // allocate same length
 	copy(cp, m.data)                   // deep copy bytes
@@ -170,34 +399,88 @@ func (m *Dense) Clone() Matrix {
 }
 
 // String provides a readable row-wise dump for diagnostics.
-// It is not intended for hot paths; complexity  with formatting overhead.
-// Complexity: O(r*c)
+// MAIN DESCRIPTION:
+//   - Render matrix rows as lines with comma-separated values.
+//
+// Implementation:
+//   - Stage 1: iterate rows/cols deterministically.
+//   - Stage 2: append values formatted with %g.
+//
+// Behavior highlights:
+//   - Intended for debugging; not for hot paths.
+//
+
+// String HUMAN-READABLE dump of rows for diagnostics.
+// Implementation:
+//   - Stage 1: iterate rows/cols deterministically.
+//   - Stage 2: write values into strings.Builder with standard delimiters.
+//
+// Behavior highlights:
+//   - Not for hot paths; intended for logs and debugging.
+//
+// Returns:
+//   - string: multi-line representation of matrix.
+//
+// Determinism:
+//   - Fixed traversal order.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c) for formatting.
+//
+// AI-Hints:
+//   - For large matrices prefer printing a few rows/cols or summarize.
 func (m *Dense) String() string {
-	out := "" // simple builder; sufficient for diagnostics
-	var i, j int
+	var b strings.Builder
+	var i, j, base int
 	for i = 0; i < m.r; i++ { // iterate rows deterministically
-		out += "["                // open row
+		b.WriteString(_fmtRowOpen) // open row
+		base = i * m.c
 		for j = 0; j < m.c; j++ { // iterate cols
-			// Direct offset (no At) avoids redundant bound checks.
-			out += fmt.Sprintf("%g", m.data[i*m.c+j])
+			b.WriteString(fmt.Sprintf("%g", m.data[base+j]))
 			if j+1 < m.c {
-				out += ", " //separate values with comma + space
+				b.WriteString(_fmtSep) //separate values with comma + space
 			}
 		}
-		out += "]\n" // close row
+		b.WriteString(_fmtRowClose) // close row
 	}
 
-	return out
+	return b.String()
 }
 
 // View creates a no-copy window [r0:r0+rows, c0:c0+cols) over the same storage.
-// Mutations via the view are reflected in the base matrix (shared buffer).
-// Bounds: 0 ≤ r0 ≤ r0+rows ≤ m.r and 0 ≤ c0 ≤ c0+cols ≤ m.c. Otherwise ErrBadShape.
-// Complexity to create: O(1); subsequent At/Set: O(1).
+// MAIN DESCRIPTION:
+//   - Lightweight submatrix referencing the base buffer (shared storage).
+//
+// Implementation:
+//   - Stage 1: validate window bounds; allow zero-area.
+//   - Stage 2: return MatrixView with offsets.
+//
+// Behavior highlights:
+//   - Writes via view reflect in base; policy is inherited.
+//
+// Inputs:
+//   - r0,c0: top-left offsets; rows, cols: window size (≥0).
+//
+// Returns:
+//   - *MatrixView or error.
+//
+// Errors:
+//   - ErrBadShape when the window is invalid.
+//
+// Determinism:
+//   - Constant-time creation; fixed access order in methods.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - View does not implement Matrix on purpose to avoid accidental copies in ops.
+//
+// AI-Hints:
+//   - Use for sliding-window ops; copy only when lifetime must be independent.
 func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
-	// Validate proposed window; allow zero-area views.
 	if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
-		return nil, fmt.Errorf("Dense.View(%d,%d,%d,%d): %w", r0, c0, rows, cols, ErrBadShape)
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
 	}
 
 	return &MatrixView{
@@ -210,19 +493,43 @@ func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
 }
 
 // Induced materializes a copy submatrix using explicit index sets.
-// Duplicates are allowed; each index must satisfy 0 ≤ idx < dim.
-// Zero-sized results (0×k or k×0) are allowed and return a legal Dense.
-// Complexity: O(len(rowsIdx) * len(colsIdx)).
+// MAIN DESCRIPTION:
+//   - Copy rows/cols at the given index lists (duplicates allowed).
+//
+// Implementation:
+//   - Stage 1: handle zero-sized result (legal).
+//   - Stage 2: allocate result via NewDense.
+//   - Stage 3: nested loops with direct offset math; bounds-check each index.
+//
+// Behavior highlights:
+//   - Policy is preserved from the base (validateNaNInf).
+//   - Duplicates in index sets are allowed (repeated rows/cols in the result).
+//
+// Inputs:
+//   - rowsIdx: indices into [0..m.r).
+//   - colsIdx: indices into [0..m.c).
+//
+// Returns:
+//   - *Dense: independent copy with size len(rowsIdx)×len(colsIdx).
+//
+// Errors:
+//   - ErrOutOfRange (index outside bounds).
+//
+// Determinism:
+//   - Fixed nested loops i→j.
+//
+// Complexity:
+//   - Time O(rp*cp), Space O(rp*cp).
+//
+// Notes:
+//   - Zero-area returns legal Dense with zero-length buffer.
+//
+// AI-Hints:
+//   - Use when the result must be independent (e.g., transform downstream).
 func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 	rp := len(rowsIdx) // result rows
 	cp := len(colsIdx) // result cols
-
-	// Negative sizes make no sense (guard anyway for API consistency).
-	if rp < 0 || cp < 0 {
-		return nil, ErrBadShape
-	}
-
-	// Allow zero-sized outputs; allocate a consistent zero-length buffer.
+	// Zero-area: legal Dense, shared policy
 	if rp == 0 || cp == 0 {
 		return &Dense{
 			r:              rp,
@@ -237,6 +544,8 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Preserve numeric policy from the base (critical for consistency).
+	res.validateNaNInf = m.validateNaNInf
 
 	// Deterministic double loop; direct offset math in both matrices.
 	var i, j int
@@ -245,12 +554,12 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 	for i = 0; i < rp; i++ {
 		ri = rowsIdx[i]
 		if ri < 0 || ri >= m.r {
-			return nil, fmt.Errorf("Dense.Induced: row index %d: %w", ri, ErrOutOfRange)
+			return nil, fmt.Errorf("Dense.%s: row index %d: %w", ctxInduce, ri, ErrOutOfRange)
 		}
 		for j = 0; j < cp; j++ {
 			cj = colsIdx[j]
 			if cj < 0 || cj >= m.c {
-				return nil, fmt.Errorf("Dense.Induced: col index %d: %w", cj, ErrOutOfRange)
+				return nil, fmt.Errorf("Dense.%s: col index %d: %w", ctxInduce, cj, ErrOutOfRange)
 			}
 			// Direct linear index in source and destination.
 			src = ri*m.c + cj // source offset in base
@@ -281,7 +590,18 @@ func (v *MatrixView) Rows() int { return v.r }
 func (v *MatrixView) Cols() int { return v.c }
 
 // At reads element (i,j) in the view or returns ErrOutOfRange.
-// Complexity: O(1).
+// MAIN DESCRIPTION:
+//   - Safe read within the view bounds; translates to base coordinates.
+//
+// Implementation:
+//   - Stage 1: check 0≤i<r and 0≤j<c.
+//   - Stage 2: return base.data[(r0+i)*base.c + (c0+j)].
+//
+// Behavior highlights:
+//   - Never panics; returns sentinel on violation.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (v *MatrixView) At(i, j int) (float64, error) {
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
 		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrOutOfRange)
@@ -292,12 +612,23 @@ func (v *MatrixView) At(i, j int) (float64, error) {
 }
 
 // Set writes element (i,j) in the view, honoring the base numeric policy.
-// Complexity: O(1).
+// MAIN DESCRIPTION:
+//   - Safe write-through into the base buffer with policy enforcement.
+//
+// Implementation:
+//   - Stage 1: check bounds.
+//   - Stage 2: validate finite when base policy is enabled.
+//   - Stage 3: write-through into base.data.
+//
+// Behavior highlights:
+//   - Shares the base Dense policy; no separate flags in the view.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (v *MatrixView) Set(i, j int, val float64) error {
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
 		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrOutOfRange)
 	}
-	// Reuse base policy (single source of truth).
 	if v.base.validateNaNInf && (math.IsNaN(val) || math.IsInf(val, 0)) {
 		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNaNInf)
 	}
@@ -307,8 +638,27 @@ func (v *MatrixView) Set(i, j int, val float64) error {
 }
 
 // Do visits each element (i,j) in row-major order and calls f(i,j,v).
-// If f returns false, the iteration stops early.
-// No allocations; deterministic order; read-only with respect to the callback.
+// MAIN DESCRIPTION:
+//   - Read-only visitor; stops early when f returns false.
+//
+// Implementation:
+//   - Stage 1: nested loops - double for-loop over rows then cols; compute base offset per row.
+//   - Stage 2: call f on each element; stop when f returns false.
+//
+// Behavior highlights:
+//   - Read-only with respect to the callback; no allocations; deterministic order.
+//
+// Inputs:
+//   - f: callback returning continue/stop flag (false to stop early).
+//
+// Determinism:
+//   - Fixed i→j order.
+//
+// Complexity:
+//   - Time O(r*c), Space O(1).
+//
+// AI-Hints:
+//   - Use to accumulate stats without temporary allocations.
 func (m *Dense) Do(f func(i, j int, v float64) bool) {
 	var i, j, base int // predeclare loop counters and base offset
 	var v float64      // temporary for current value
@@ -325,8 +675,36 @@ func (m *Dense) Do(f func(i, j int, v float64) bool) {
 }
 
 // Apply replaces each element with f(i,j,v) in-place.
-// Respects numeric policy: when validateNaNInf is true, rejects NaN/Inf via ErrNaNInf.
-// Deterministic row-major order; no extra allocations.
+// MAIN DESCRIPTION:
+//   - In-place map with policy enforcement and deterministic order.
+//
+// Implementation:
+//   - Stage 1: nested loops - double for-loop over rows then cols; compute new value via f.
+//   - Stage 2: compute new value; reject NaN/Inf if policy enabled.
+//   - Stage 3: write back.
+//
+// Behavior highlights:
+//   - Deterministic row-major order; no extra allocations.
+//   - Respects validateNaNInf (rejects NaN/±Inf when enabled).
+//   - Early error aborts; elements written before the error remain updated.
+//
+// Inputs:
+//   - f: transformer from (i,j,v) to new value.
+//
+// Returns:
+//   - error: ErrNaNInf when transformer produced non-finite (if policy ON).
+//
+// Determinism:
+//   - Fixed i→j order; side effects are predictable.
+//
+// Complexity:
+//   - Time O(r*c), Space O(1).
+//
+// Notes:
+//   - For all-or-nothing semantics, transform into a clone and swap on success.
+//
+// AI-Hints:
+//   - Keep transforms pure; avoid capturing external mutable state.
 func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 	var i, j, base int // predeclare loop counters and base offset
 	var v, nv float64  // old and new values
@@ -338,7 +716,7 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 			nv = f(i, j, v)          // compute new value
 			if m.validateNaNInf && ( // enforce numeric policy if enabled
 			math.IsNaN(nv) || math.IsInf(nv, 0)) {
-				return denseErrorf("Apply", i, j, ErrNaNInf) // wrap with coordinates
+				return denseErrorf(ctxApply, i, j, ErrNaNInf) // wrap with coordinates
 			}
 			m.data[base+j] = nv // write back new value
 		}
@@ -346,101 +724,3 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 
 	return nil // success
 }
-
-/*
-
-```
-~/go/src/lvlath/matrix/builder_helper_test.go
-	Warning:(22, 2) Unused constant 'LenM3'
-	Warning:(23, 2) Unused constant 'LenM6'
-	Warning:(24, 2) Unused constant 'LenM8'
-	Warning:(29, 2) Unused variable 'DataM3T1'
-	Warning:(35, 2) Unused variable 'DataM3T2'
-	Warning:(41, 2) Unused variable 'DataM6T1'
-	Warning:(50, 2) Unused variable 'DataM6T2'
-	Warning:(59, 2) Unused variable 'DataM8T1'
-~/go/src/lvlath/matrix/bench_test.go
-	Error:(24, 46) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(31, 24) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(49, 46) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(56, 24) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(57, 29) Too many arguments in call to 'matrix.WithMetricClosure'
-~/go/src/lvlath/matrix/impl_linear_algebra.go
-	Warning:(23, 7) Unused constant 'NormZero'
-	Warning:(26, 7) Unused constant 'ZeroSum'
-	Warning:(29, 7) Unused constant 'ZeroPivot'
-~/go/src/lvlath/matrix/validators.go
-	Warning:(29, 2) Unused constant 'zeroTol'
-	Warning:(186, 6) Unused function 'IsZeroOffDiagonal'
-~/go/src/lvlath/matrix/adjacency_test.go
-	Error:(31, 11) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(37, 22) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(38, 24) Too many arguments in call to 'matrix.WithAllowMulti'
-	Error:(39, 24) Too many arguments in call to 'matrix.WithAllowLoops'
-	Error:(72, 24) Too many arguments in call to 'matrix.WithDirected'
-	Error:(73, 24) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(81, 26) Too many arguments in call to 'matrix.WithAllowLoops'
-	Error:(93, 55) Cannot use 'builder.Complete(V, builder.WithSymbNumb("v"))' (type Constructor) as the type []BuilderOption
-	Error:(93, 63) Too many arguments in call to 'builder.Complete'
-	Error:(120, 11) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(125, 53) Too many arguments in call to 'matrix.WithDirected'
-	Error:(125, 80) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(142, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(146, 53) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(170, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(220, 3) Cannot use the unexported field 'vertexByIndex' in the current package
-	Error:(221, 3) Cannot use the unexported field 'opts' in the current package
-	Error:(222, 4) Cannot use the unexported field 'directed' in the current package
-	Error:(223, 4) Cannot use the unexported field 'weighted' in the current package
-	Error:(224, 4) Cannot use the unexported field 'allowMulti' in the current package
-	Error:(225, 4) Cannot use the unexported field 'allowLoops' in the current package
-~/go/src/lvlath/matrix/incidence_test.go
-	Error:(32, 80) Cannot use 'builder.Complete(V)' (type Constructor) as the type []BuilderOption
-	Error:(70, 51) Too many arguments in call to 'matrix.WithDirected'
-	Error:(83, 54) Cannot use 'builder.Path(V, builder.WithSymbNumb("v"))' (type Constructor) as the type []BuilderOption
-	Error:(83, 58) Too many arguments in call to 'builder.Path'
-	Error:(132, 80) Cannot use 'builder.Path(V)' (type Constructor) as the type []BuilderOption
-	Error:(158, 80) Cannot use 'builder.Path(V)' (type Constructor) as the type []BuilderOption
-~/go/src/lvlath/matrix/impl_builder.go
-	Warning:(36, 7) Unused constant ‘unreachableWeight'
-~/go/src/lvlath/matrix/impl_buider_test.go
-	Error:(43, 53) Too many arguments in call to 'matrix.WithDirected'
-	Error:(53, 52) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(72, 53) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(72, 82) Too many arguments in call to 'matrix.WithAllowMulti'
-	Error:(81, 52) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(81, 81) Too many arguments in call to 'matrix.WithAllowMulti'
-	Error:(101, 54) Too many arguments in call to 'matrix.WithAllowLoops'
-	Error:(101, 81) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(115, 53) Too many arguments in call to 'matrix.WithWeighted'
-	Error:(115, 85) Too many arguments in call to 'matrix.WithMetricClosure'
-	Error:(146, 53) Too many arguments in call to 'matrix.WithDirected'
-	Error:(175, 55) Too many arguments in call to 'matrix.WithAllowMulti'
-	Error:(181, 54) Too many arguments in call to 'matrix.WithAllowMulti'
-	Error:(199, 54) Too many arguments in call to 'matrix.WithAllowLoops'
-~/go/src/lvlath/matrix/impl_incidence.go
-	Warning:(36, 7) Unused constant 'srcMark'
-	Warning:(39, 7) Unused constant 'dstMark'
-	Warning:(42, 7) Unused constant 'undirectedMark'
-	Warning:(46, 7) Unused constant 'loopUndirectedMark'
-	Warning:(185, 6) Unused function 'buildDenseIncidenceFromGraph'
-~/go/src/lvlath/matrix/options.go
-	Warning:(95, 6) Unused function 'WithEpsilon'
-	Warning:(106, 6) Unused function 'WithValidateNaNInf'
-	Warning:(112, 6) Unused function 'WithNoValidateNaNInf'
-	Warning:(124, 6) Unused function 'WithUndirected'
-	Warning:(139, 6) Unused function 'WithDisallowMulti'
-	Warning:(151, 6) Unused function 'WithDisallowLoops'
-	Warning:(165, 6) Unused function 'WithUnweighted'
-	Warning:(180, 6) Unused function 'WithEdgeThreshold'
-	Warning:(189, 6) Unused function 'WithKeepWeights'
-	Warning:(195, 6) Unused function 'WithBinaryWeights'
-~/go/src/lvlath/matrix/impl_dense.go
-	Warning:(90, 6) Unused function 'newDenseWithPolicy'
-~/go/src/lvlath/matrix/impl_adjacency.go
-	Warning:(197, 6) Unused function 'buildDenseAdjacencyFromGraph'
-```
-
-
-
-*/

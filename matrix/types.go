@@ -12,7 +12,9 @@ package matrix
 type VertexID string // string-based ID (stable lex order)
 
 // Weight represents an edge weight for adapters/numeric ingestion.
-// All weights must be finite under the numeric policy; NaN/Inf is rejected.
+// Numeric policy: values MUST be finite. NaN/Inf are rejected by builders
+// and dense storage (see ErrNaNInf). No sign or range restriction is
+// imposed here beyond finiteness.
 type Weight float64 // enforced via ValidateNaNInf policy
 
 // pairKey is an ordered pair (u,v) used to de-duplicate parallel edges under
@@ -43,12 +45,15 @@ type Matrix interface {
 	Cols() int
 
 	// At retrieves the element at position (i, j).
-	// Returns ErrIndexOutOfBounds if i<0, i>=Rows(), j<0 or j>=Cols().
-	// Complexity: O(1).
+	// Returns ErrOutOfRange if i<0, i>=Rows(), j<0 or j>=Cols().
+	// Concrete implementations may return additional sentinel errors per
+	// numeric policy.
+	//Complexity: O(1).
 	At(i, j int) (float64, error)
 
 	// Set assigns the value v at position (i, j).
-	// Returns ErrIndexOutOfBounds if indices are invalid.
+	// Returns ErrOutOfRange if indices are invalid. Implementations may also
+	// return ErrNaNInf when v is not finite, depending on numeric policy.
 	// Complexity: O(1).
 	Set(i, j int, v float64) error
 

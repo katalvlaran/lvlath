@@ -3,51 +3,53 @@
 // Package matrix provides deterministic, allocation-aware linear algebra
 // and graph-by-matrix utilities used across lvlath.
 //
-// The matrix package enables efficient construction, manipulation, and analysis of
-// graph representations in matrix form, supporting both adjacency and incidence
-// matrices, along with spectral (eigen-) analysis of graphs.
+// The package enables efficient construction, manipulation, and analysis of
+// graph representations in matrix form (adjacency, incidence), plus spectral
+// analysis (eigen) and statistics commonly used in graph/ML workflows.
 //
 // # Philosophy
 //
-// - Determinism first: all loops have fixed orders; results are bit-stable across runs.
-// - Clear contracts: +Inf denotes “no edge” in adjacency/distances; diag must be 0 for APSP.
-// - Zero surprises: fast-paths on *Dense are single-source-of-truth kernels; fallbacks behave identically.
-// - No silent policy drift: errors are explicit (dimension/shape/nil/singularity).
+// - Determinism first: loops use fixed orders; outputs are bit-stable across runs.
+// - Clear contracts: +Inf means “no edge” in adjacency/distances; diagonal must be 0 for APSP.
+// - Single source of truth: fast-paths on *Dense live in canonical kernels; fallbacks match behavior.
+// - No silent policy drift: validation is explicit (dimension/shape/nil/singularity).
 //
-// What
+// # What (major building blocks)
 //
-//		(core kernels)
-//	  - Add / Sub / Hadamard / Scale / Transpose - element-wise ops and transforms.
-//	  - Mul / MatVec - matrix×matrix and matrix×vector.
-//	  - Eigen (Jacobi) - symmetric eigen decomposition (values + eigenvectors).
-//	  - LU / Inverse / QR - basic factorizations without pivoting (deterministic).
-//	  - FloydWarshall - APSP in-place (k→i→j); +Inf=no edge; diag=0.
-//	    (graph-related)
-//	  - AdjacencyMatrix - dense adjacency with stable vertex order and policies (directed/weighted/loops/multi).
-//	  - NewAdjacencyMatrix / ToGraph - round-trip between Core Graph and adjacency (metric-closure guarded).
-//	  - MetricClosure - APSP over adjacency (distances); marks matrix as non-exportable to edges.
-//	  - DegreeVector - row-sum per vertex; loops count as 1; +Inf/NaN ignored.
-//	  - Neighbors - adjacency scan with deterministic order.
-//	    (facades & convenience)
-//	  - T / Sum / Diff / Product / HadamardProd / ScaleBy / MatVecMul - thin aliases to kernels.
-//	  - RowSums/ColSums - reductions via MatVec, useful for stochastic normalization and features.
-//	  - ZerosLike / IdentityLike / NewZeros / NewIdentity - intention-revealing constructors.
-//	  - Symmetrize - (A + Aᵀ)/2 to repair asymmetry for spectral methods.
-//	  - BuildMetricClosure - adjacency build + APSP + policy flag.
-//	  - CenterColumns / CenterRows - mean-centering by columns/rows (PCA/DTW/Regression).
-//	  - NormalizeRowsL1 / NormalizeRowsL2 - row stochasticization / L2-normalization.
-//	  - Covariance / Correlation - sample covariance and Pearson correlation (columns).
-//	  - AllClose - PR-friendly equality with tolerance.
-//	  - Clip / ReplaceInfNaN - pipeline protection for stochastic simulations.
+//	Core kernels
+//	- Add / Sub / Hadamard / Scale / Transpose — element-wise ops and transforms.
+//	- Mul / MatVec — matrix×matrix and matrix×vector.
+//	- Eigen (Jacobi) — symmetric eigen-decomposition (values + eigenvectors).
+//	- LU / Inverse / QR — basic factorizations without pivoting (deterministic).
+//	- FloydWarshall — APSP in-place (k→i→j); +Inf=no edge; diag=0.
 //
-// Why
+//	Graph-related
+//	- AdjacencyMatrix — dense adjacency with stable vertex order and options (directed/weighted/loops/multi).
+//	- NewAdjacencyMatrix / ToGraph — round-trip between core.Graph and adjacency (metric-closure guarded).
+//	- MetricClosure / APSP over adjacency — computes all-pairs shortest-path distances in-place.
+//	- DegreeVector — per-vertex row-sum; loops count as 1; +Inf/NaN ignored.
+//	- Neighbors — stable-order adjacency scan.
 //
-//	Dense adjacency allows O(1) edge lookup and predictable throughput;
-//	spectral and optimization methods benefit from deterministic kernels.
-//	Graph workflows (BFS / DFS / Dijkstra / Prim / Kruskal / Flows / DTW / TSP) lean on these matrices,
-//	while analytics (PCA / Regression / HMM / Monte-Carlo / SAX) rely on centering, scaling, and reductions.
+//	Facades & convenience
+//	- T / Sum / Diff / Product / HadamardProd / ScaleBy / MatVecMul — thin aliases to kernels.
+//	- RowSums / ColSums — reductions via MatVec (useful for stochastic normalization and features).
+//	- NewZeros / NewIdentity / ZerosLike / IdentityLike — intention-revealing constructors.
+//	- Symmetrize — (A + Aᵀ)/2 to repair asymmetry for spectral methods.
+//	- BuildMetricClosure — adjacency build + APSP + policy flag to refuse edge export.
+//	- CenterColumns / CenterRows — mean-centering by columns/rows (PCA/DTW/Regression).
+//	- NormalizeRowsL1 / NormalizeRowsL2 — row-stochastic / L2-normalization.
+//	- Covariance / Correlation — sample covariance and Pearson correlation (by columns).
+//	- AllClose — PR-friendly equality with tolerances.
+//	- Clip / ReplaceInfNaN — numeric sanitizers for robust pipelines.
 //
-// Complexity (typical)
+// # Why
+//
+// Dense adjacency provides O(1) edge queries and predictable throughput.
+// Deterministic kernels benefit spectral and optimization methods.
+// Graph workflows (BFS/DFS/Dijkstra/Prim/Kruskal/Flows/DTW/TSP) rely on matrices,
+// while analytics (PCA/Regression/HMM/Monte-Carlo/SAX) use centering, scaling, and reductions.
+//
+// # Complexity (typical)
 //
 // - Add / Sub / Hadamard / Scale / Transpose: O(rc) time, O(rc) space
 // - Mul:                                      O(rnc) time, O(rc) space
@@ -58,26 +60,41 @@
 // - DegreeVector / RowSums / ColSums:         O(n²) time, O(n) space
 // - Covariance / Correlation:                 O(rc + c²) time, O(rc + c²) space
 //
-// Options (adjacency build)
+// # Options (adjacency/incidence builders)
 //
-//	Directed:    orient edges; Undirected: mirror without duplicating loops.
-//	Weighted:    keep edge weights; otherwise degrade to binary (1).
-//	AllowMulti:  preserve first edge (deterministic) when false; allow parallels when true.
-//	AllowLoops:  admit self-loops; DegreeVector counts a loop as 1 if present.
-//	MetricClosure: distance matrices are marked non-exportable via ToGraph.
+// - Directed:     orient edges; Undirected: mirror (loops preserved as configured).
+// - Weighted:     keep weights; otherwise degrade to binary (1).
+// - AllowMulti:   preserve parallel edges when true; else take first (deterministic).
+// - AllowLoops:   admit self-loops; DegreeVector counts a loop as 1 if present.
+// - MetricClosure: if a matrix encodes APSP distances, mark as non-exportable to edges.
 //
-// Sentinel Errors
+// # Sentinel errors
 //
-//	ErrNilMatrix, ErrDimensionMismatch, ErrNotSymmetric, ErrSingular,
-//	ErrUnknownVertex, ErrGraphNil, ErrMatrixNotImplemented, ErrEigenFailed (or policy name).
+//   - ErrNilMatrix, ErrDimensionMismatch, ErrNotSymmetric, ErrSingular,
+//     ErrUnknownVertex, ErrGraphNil, ErrMatrixNotImplemented, ErrEigenFailed,
+//     ErrBadShape (invalid shapes like empty adjacency/incidence),
+//     and policy-specific sentinels defined in this package.
 //
-// Best practices
-// - Prefer *Dense to unlock fast-paths and minimize interface dispatch.
-// - Use +Inf for missing edges and keep diagonal 0 for APSP/MetricClosure.
-// - Pin determinism in tests: repeat runs, AllClose with agreed ε.
-// - ReplaceInfNaN / Clip before statistics to harden pipelines.
+// # Best practices
 //
-// See
-//   - package-level docs and tests for usage patterns and guarantees
+// - Prefer *Dense to unlock flat-slice fast paths and minimize interface dispatch.
+// - Use +Inf for “no edge”; keep diagonal 0 for APSP/MetricClosure semantics.
+// - Stabilize tests: repeat runs and compare with AllClose at agreed ε.
+// - Sanitize before stats: ReplaceInfNaN / Clip harden pipelines against NaNs/Inf/outliers.
+//
+// # Determinism & Reproducibility
+//
+// - Loops are ordered i→j (or k→i→j for APSP) and never rely on map iteration.
+// - Constructors have single allocation where possible; empty slices are zero-initialized.
+// - Facades never change numeric policy of kernels and never reorder loops.
+//
+// # Performance & AI-Hints
+//
+// - Reuse buffers (ZerosLike) for hot paths; avoid per-call allocations in MatVec/Mul when shapes repeat.
+// - For APSP on *Dense, Floyd–Warshall fast path uses a single in-slice triple loop.
+// - IdentityLike/ZerosLike help preallocate deterministic staging matrices.
+//
+// See also:
+//   - package-level docs and tests for usage patterns and guarantees,
 //   - docs/matrix.md for a full tutorial and best practices.
 package matrix

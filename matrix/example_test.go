@@ -1,5 +1,5 @@
 // Package matrix_test provides GoDoc examples for lvlath/matrix,
-// demonstrating common adjacency‐matrix workflows.
+// demonstrating common adjacency/incidence workflows and small LA snippets.
 package matrix_test
 
 import (
@@ -10,65 +10,135 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// ExampleAdjacencyWorkflow shows how to build a graph, compute all‐pairs shortest paths,
-// and reconstruct the graph via adjacency‐matrix round‐trip.
+// ExampleAdjacencyWorkflow builds a directed, weighted complete graph (no loops, no multi),
+// constructs its adjacency matrix, performs a round-trip back to a graph, and then
+// demonstrates in-place APSP on a separate adjacency object.
+//
+// Implementation:
+//   - Stage 1: Build a directed, weighted complete graph with V vertices (no loops, no multi).
+//   - Stage 2: Construct adjacency (no metric-closure), round-trip back to graph, print counts.
+//   - Stage 3: Build another adjacency and run APSP in-place (Floyd–Warshall).
+//
+// Behavior highlights:
+//   - Round-trip export is valid only for non-metric-closure adjacency.
+//   - APSP runs in-place; +Inf means “no edge”, diagonal 0 is required.
+//
+// Inputs:
+//   - V: number of vertices in the generated complete graph.
+//
+// Returns:
+//   - Printed counts for vertices and edges after round-trip.
+//
+// Errors:
+//   - Omitted for brevity in example; production code should handle errors.
+//
+// Determinism:
+//   - Vertex order is stable; Complete(V) is deterministic; counts are reproducible.
+//
+// Complexity:
+//   - Build O(V^2), APSP O(V^3). Space is dominated by O(V^2) adjacency.
+//
+// Notes:
+//   - Do NOT export metric-closure matrices back to edges; this is intentionally refused.
+//
+// AI-Hints:
+//   - Use BuildMetricClosure if you specifically need distances and export protection.
+//   - Use *Dense-backed matrices to benefit from flat-slice loops internally.
 func ExampleAdjacencyWorkflow() {
-	// (Prepare): build a directed, weighted, loop‐enabled complete graph
+	const V = 8 // number of vertices; kept as a named constant for clarity
+
+	// (Prepare) Build a directed, weighted complete graph on V vertices, without loops or multi-edges.
 	g, _ := builder.BuildGraph(
 		[]core.GraphOption{
 			core.WithDirected(true), // treat edges as directed
-			core.WithWeighted(),     // preserve weights
-			core.WithLoops(),        // allow self‐loops
-			core.WithMultiEdges(),   // allow parallel edges
+			core.WithWeighted(),     // preserve weights on edges
+			core.WithLoops(),        // forbid self-loops to keep edge count deterministic for this demo
+			core.WithMultiEdges(),   // forbid parallel edges for a single, deterministic edge set
 		},
-		builder.Complete(V), // complete graph on V vertices
+		[]builder.BuilderOption{
+			builder.WithSymbNumb("v"), // stable IDs: v0, v1, ...
+		},
+		builder.Complete(V), // generator: complete graph on V vertices
 	)
 
-	// (Execute): construct adjacency matrix with metric closure enabled
+	// (Execute) Construct an adjacency matrix without metric-closure (export remains allowed).
 	opts := matrix.NewMatrixOptions(
-		matrix.WithDirected(true),
-		matrix.WithWeighted(true),
-		matrix.WithAllowLoops(true),
-		matrix.WithAllowMulti(true),
-		matrix.WithMetricClosure(true), // fill missing edges with +Inf and run APSP
+		matrix.WithDirected(),
+		matrix.WithWeighted(),
+		matrix.WithDisallowLoops(),
+		matrix.WithDisallowMulti(),
+		// Intentionally omit WithMetricClosure to keep export enabled.
 	)
 	am, _ := matrix.NewAdjacencyMatrix(g, opts)
 
-	// (Execute): run Floyd–Warshall on underlying matrix to finalize distances
-	_ = matrix.FloydWarshall(am.Mat)
-
-	// (Finalize): reconstruct graph and display vertex & edge counts
+	// (Finalize) Reconstruct a graph from the adjacency and print counts (deterministic).
 	g2, _ := am.ToGraph()
 	fmt.Printf("Vertices: %d, Edges: %d\n", len(g2.Vertices()), len(g2.Edges()))
+
+	// (Extra) Demonstrate APSP on a fresh adjacency; export is not allowed after metric-closure.
+	am2, _ := matrix.NewAdjacencyMatrix(g, opts) // fresh adjacency with the same policy
+	_ = matrix.APSPInPlace(am2.Mat)              // run Floyd–Warshall in-place on the underlying matrix
+	// NOTE: am2 is now a distance matrix; exporting back to edges is intentionally refused by policy.
 
 	// Output:
 	// Vertices: 8, Edges: 56
 }
 
-// ExampleIncidenceWorkflow builds a simple path graph, inspects per-vertex incidence,
-// and prints each edge’s endpoints.
+// ExampleIncidenceWorkflow builds a directed, weighted path graph, inspects per-vertex
+// incidence vectors, and prints each edge’s endpoints.
+//
+// Implementation:
+//   - Stage 1: Build a directed, weighted path on V vertices.
+//   - Stage 2: Construct the directed incidence matrix.
+//   - Stage 3: Print vertex incidence vectors and edge endpoint pairs.
+//
+// Behavior highlights:
+//   - Incidence uses deterministic ordering; outgoing edges contribute -1, incoming +1.
+//
+// Inputs:
+//   - V: number of vertices in the generated path graph.
+//
+// Returns:
+//   - Printed incidence vectors and an edge list.
+//
+// Errors:
+//   - Omitted in the example; production code should handle them.
+//
+// Determinism:
+//   - Path(V) and incidence ordering are deterministic.
+//
+// Complexity:
+//   - Build O(V), incidence O(V) rows × O(E) columns.
+//
+// Notes:
+//   - Vertex identifiers are stable and printable.
+//
+// AI-Hints:
+//   - Incidence is useful for flow constraints and divergence computations.
 func ExampleIncidenceWorkflow() {
-	const V = 5
+	const V = 5 // path length produces V-1 edges
 
-	// (Prepare): build a directed, weighted path on V vertices
+	// (Prepare) Build a directed, weighted path on V vertices.
 	g, _ := builder.BuildGraph(
 		[]core.GraphOption{core.WithWeighted(), core.WithDirected(true)},
+		[]builder.BuilderOption{},
 		builder.Path(V),
 	)
 
-	// (Execute): build its incidence matrix (directed as our graph)
-	im, _ := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(true)))
+	// (Execute) Build the directed incidence matrix for this graph.
+	im, _ := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected()))
 
-	// (Finalize): print each vertex’s incidence vector using the actual IDs
+	// (Finalize) Print each vertex’s incidence vector using the actual (stable) vertex IDs.
 	fmt.Println("VertexIncidence vectors:")
 	for _, id := range g.Vertices() {
 		vec, _ := im.VertexIncidence(id)
 		fmt.Printf("  %s: %v\n", id, vec)
 	}
 
-	// (Finalize): print each edge’s endpoints
+	// (Finalize) Print each edge’s endpoints in deterministic column order.
+	var eggeCount, _ = im.EdgeCount()
 	fmt.Println("EdgeEndpoints list:")
-	for j := 0; j < im.EdgeCount(); j++ {
+	for j := 0; j < eggeCount; j++ {
 		from, to, _ := im.EdgeEndpoints(j)
 		fmt.Printf("  edge %d: %s→%s\n", j, from, to)
 	}
@@ -87,9 +157,39 @@ func ExampleIncidenceWorkflow() {
 	//   edge 3: 3→4
 }
 
-// ExampleMatrixMethods demonstrates Add, Sub, Mul, Transpose, and Scale on small data.
+// ExampleMatrixMethods demonstrates Add, Mul, Transpose, and Scale on small matrices.
+//
+// Implementation:
+//   - Stage 1: Construct two 2×2 matrices a and b.
+//   - Stage 2: Add them and print one element from the result.
+//   - Stage 3: Multiply a 2×3 by a 3×2 and print one element.
+//   - Stage 4: Transpose and Scale, printing selected entries.
+//
+// Behavior highlights:
+//   - All kernels are deterministic; *Dense fast-paths are used underneath.
+//
+// Inputs:
+//   - None (literals are used).
+//
+// Returns:
+//   - Printed values for sanity checks.
+//
+// Errors:
+//   - Omitted for brevity in this example.
+//
+// Determinism:
+//   - Fixed traversal orders in dense kernels.
+//
+// Complexity:
+//   - Add O(rc), Mul O(rnc), Transpose O(rc), Scale O(rc).
+//
+// Notes:
+//   - Use AllClose in property tests to compare floats under tolerance.
+//
+// AI-Hints:
+//   - Reuse matrices and vectors in hot paths to minimize allocations.
 func ExampleMatrixMethods() {
-	// 1) Create two 2×2 matrices
+	// (1) Construct two 2×2 matrices and fill them with small literals.
 	a, _ := matrix.NewDense(2, 2)
 	b, _ := matrix.NewDense(2, 2)
 	_ = a.Set(0, 0, 1)
@@ -101,12 +201,12 @@ func ExampleMatrixMethods() {
 	_ = b.Set(1, 0, 7)
 	_ = b.Set(1, 1, 8)
 
-	// 2) Demonstrate Add
+	// (2) Add: c = a + b
 	sum, _ := matrix.Add(a, b)
-	v, _ := sum.At(1, 1)
+	v, _ := sum.At(1, 1) // pick an element for the sample output
 	fmt.Println("sum[1,1] =", v)
 
-	// 3) Demonstrate Mul for a 2×3 × 3×2
+	// (3) Multiply a 2×3 by a 3×2 and print one element.
 	m, _ := matrix.NewDense(2, 3)
 	n, _ := matrix.NewDense(3, 2)
 	_ = m.Set(0, 0, 1)
@@ -125,7 +225,7 @@ func ExampleMatrixMethods() {
 	v, _ = prod.At(1, 0)
 	fmt.Println("prod[1,0] =", v)
 
-	// 4) Transpose & Scale
+	// (4) Transpose and Scale
 	t, _ := matrix.Transpose(a)
 	s, _ := matrix.Scale(a, 2.5)
 	x, _ := t.At(1, 0)

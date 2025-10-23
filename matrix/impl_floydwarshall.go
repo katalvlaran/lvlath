@@ -7,6 +7,12 @@
 //
 // Contract:
 //   - Square matrix; +Inf means “no path”; diagonal must be 0 before calling.
+//
+// Performance note:
+//   - This is a dense, in-place O(n³) routine chosen for simplicity and determinism
+//     on moderate n (e.g., TSP metric-closure). For very large, sparse graphs consider
+//     alternatives (Johnson’s algorithm, repeated Dijkstra on sparse structures, or
+//     min-plus semiring over sparse matrices).
 
 package matrix
 
@@ -18,12 +24,34 @@ import (
 // Operation name constants for unified error wrapping and reducing magic strings.
 const opFloydWarshall = "FloydWarshall"
 
-// initDistancesInPlace converts adjacency (0 / w) -> distance matrix in-place:
+// initDistancesInPlace CONVERTS adjacency (0 / w) to a distance matrix in-place.
+// Implementation:
+//   - Stage 1: validate square shape (rows==cols), otherwise ErrDimensionMismatch.
+//   - Stage 2: row-major rewrite: diag=0; off-diagonal 0 → +Inf; non-zero stays unchanged.
 //
-//	diag = 0; off-diagonal 0 -> +Inf; non-zero -> unchanged.
+// Behavior highlights:
+//   - No extra allocations; deterministic nested loops over rows then cols.
 //
-// Requires square matrix. Returns ErrDimensionMismatch otherwise.
-// Complexity: O(n^2).
+// Inputs:
+//   - mat: *Dense adjacency matrix (square).
+//
+// Returns:
+//   - error: ErrDimensionMismatch for non-square; Set errors wrapped with coordinates.
+//
+// Errors:
+//   - ErrDimensionMismatch (non-square), plus any Set error from Dense.
+//
+// Determinism:
+//   - Fixed i/j loop order; stable rewrites.
+//
+// Complexity:
+//   - Time O(n^2), Space O(1).
+//
+// Notes:
+//   - Used by adjacency metric-closure before Floyd–Warshall.
+//
+// AI-Hints:
+//   - Use when starting from 0/weight adjacency; then run FloydWarshall.
 func initDistancesInPlace(mat *Dense) error {
 	r, c := mat.Rows(), mat.Cols()
 	if r != c {
@@ -56,14 +84,28 @@ func initDistancesInPlace(mat *Dense) error {
 	return nil
 }
 
-// floydWarshallInPlace runs APSP closure on a square *Dense in-place.
+// floydWarshallInPlace RUNS dense APSP closure on a square *Dense in place.
+// Implementation:
+//   - Stage 1: read order n once; alias row-major buffer for tight loops.
+//   - Stage 2: triple loop k→i→j with early-continue if i→k or k→j is +Inf.
 //
-// Policy (assumed by callers):
-//   - +Inf (math.Inf(1)) denotes "no path" off-diagonal.
-//   - The diagonal MUST be 0 before calling (distance to self).
+// Behavior highlights:
+//   - Strict improvement only (cand < current), providing deterministic tie behavior.
 //
-// Loop order is fixed (k → i → j) for deterministic accumulation.
-// Time: O(n^3); Extra space: O(1). No allocations inside the hot loops.
+// Inputs:
+//   - d: *Dense square distance matrix (+Inf marks unreachable, diagonal 0).
+//
+// Determinism:
+//   - Fixed loop order (k, then i, then j).
+//
+// Complexity:
+//   - Time O(n^3), Space O(1). No allocations in hot loops.
+//
+// Notes:
+//   - Negative cycles propagate to negative diagonals for nodes on reachable cycles.
+//
+// AI-Hints:
+//   - Prefer calling through FloydWarshall so the fast path is selected automatically.
 func floydWarshallInPlace(d *Dense) {
 	// Read matrix order once; upstream guarantees square shape.
 	n := d.r // direct field access avoids a virtual call
@@ -106,16 +148,31 @@ func floydWarshallInPlace(d *Dense) {
 	}
 }
 
-// FloydWarshall computes all-pairs shortest paths in-place on m.
+// FloydWarshall COMPUTES all-pairs shortest paths in-place over a Matrix.
+// Implementation:
+//   - Stage 1: validate non-nil and square shape (ValidateSquare).
+//   - Stage 2: if *Dense, use fast path; otherwise run generic interface triple loop.
 //
-// Contract:
-//   - m must be square (n×n).
-//   - +Inf denotes “no edge” off-diagonal; the diagonal MUST be 0.
+// Behavior highlights:
+//   - +Inf denotes “no path”; diagonal must be 0 on entry.
+//
+// Inputs:
+//   - m: Matrix (square). Use +Inf for no-edge and 0 on the diagonal.
+//
+// Returns:
+//   - error: ErrNilMatrix, ErrDimensionMismatch, or Matrix.At/Set errors (interface path).
+//
+// Errors:
+//   - ErrNilMatrix (nil m), ErrDimensionMismatch (non-square), wrapped Matrix access errors.
 //
 // Determinism:
-//   - Loop order is fixed (k → i → j), ensuring stable accumulation order.
+//   - Fixed (k,i,j) loop order in both fast and generic paths.
 //
-// Complexity: Time O(n^3), Extra space O(1) (fully in-place).
+// Complexity:
+//   - Time O(n^3); Extra space O(1).
+//
+// Notes:
+//   - Running FW again on its output is idempotent (no further relaxations).
 //
 // AI-Hints:
 //   - Prefer passing *Dense to trigger the zero-overhead fast path.
@@ -123,14 +180,13 @@ func floydWarshallInPlace(d *Dense) {
 //   - For very sparse graphs consider a sparse APSP instead; this routine is dense.
 func FloydWarshall(m Matrix) error {
 	// Validate: non-nil; square (shape n×n).
-	if err := ValidateSquare(m); err != nil {
+	if err := ValidateSquareNonNil(m); err != nil {
 		return matrixErrorf(opFloydWarshall, err)
 	}
 
 	// Fast-path: direct dense traversal via a single source of truth.
 	if d, ok := m.(*Dense); ok {
 		floydWarshallInPlace(d) // single source of truth for Dense
-
 		return nil
 	}
 

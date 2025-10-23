@@ -19,7 +19,22 @@
 
 package matrix
 
-import "github.com/katalvlaran/lvlath/core"
+import (
+	"math"
+
+	"github.com/katalvlaran/lvlath/core"
+)
+
+const (
+	opNewZeros      = "NewZeros"
+	opNewIdentity   = "NewIdentity"
+	opIdentityLike  = "IdentityLike"
+	opZerosLike     = "ZerosLike"
+	opRowSums       = "RowSums"
+	opColSums       = "ColSums"
+	opSymmetrize    = "Symmetrize"
+	opMetricClosure = "MetricClosure"
+)
 
 // ---------- Constructors & Utilities (O(1) alloc + O(rc) zeroing by runtime) ----------
 
@@ -31,7 +46,12 @@ import "github.com/katalvlaran/lvlath/core"
 // Note: Returns (*Dense, error) to surface ErrInvalidDimensions.
 func NewZeros(rows, cols int) (*Dense, error) {
 	// Delegate directly to the strict constructor (single allocation).
-	return NewDense(rows, cols)
+	d, err := NewDense(rows, cols)
+	if err != nil {
+		return nil, matrixErrorf(opNewZeros, err)
+	}
+
+	return d, nil
 }
 
 // NewIdentity returns I_n (n×n identity; ones on the diagonal, zeros elsewhere).
@@ -43,7 +63,7 @@ func NewIdentity(n int) (*Dense, error) {
 	// Allocate an n×n zero matrix via the constructor.
 	I, err := NewDense(n, n) // O(1) alloc + O(n^2) zeroing
 	if err != nil {
-		return nil, err // propagate constructor error unchanged
+		return nil, matrixErrorf(opNewIdentity, err) // propagate constructor error unchanged
 	}
 	// Set the diagonal deterministically in a single loop.
 	for i := 0; i < n; i++ { // fixed i order guarantees reproducibility
@@ -67,8 +87,17 @@ func CloneMatrix(m Matrix) Matrix {
 //
 // AI-Hints: Useful for staging buffers or accumulating into fresh containers.
 func ZerosLike(m Matrix) (*Dense, error) {
+	// Validate early: we read dimensions directly.
+	if err := ValidateNotNil(m); err != nil {
+		return nil, matrixErrorf(opZerosLike, err)
+	}
 	// Read shape once and call NewDense with the same dimensions.
-	return NewDense(m.Rows(), m.Cols()) // errors (if any) bubble up
+	d, err := NewDense(m.Rows(), m.Cols())
+	if err != nil { // errors (if any) bubble up
+		return nil, matrixErrorf(opZerosLike, err)
+	}
+
+	return d, nil
 }
 
 // IdentityLike returns I with dimension = Rows(m); requires square shape.
@@ -78,7 +107,7 @@ func ZerosLike(m Matrix) (*Dense, error) {
 func IdentityLike(m Matrix) (*Dense, error) {
 	// Ensure the input is square using the centralized validator.
 	if err := ValidateSquare(m); err != nil {
-		return nil, matrixErrorf("IdentityLike", err) // wrap with call-site tag
+		return nil, matrixErrorf(opIdentityLike, err) // wrap with call-site tag
 	}
 	// Construct the identity of matching dimension.
 	return NewIdentity(m.Rows()) // returns (*Dense, error)
@@ -156,7 +185,7 @@ func APSPInPlace(m Matrix) error { return FloydWarshall(m) }
 func MetricClosure(am *AdjacencyMatrix) error {
 	// Guard nil pointer early with the package sentinel via centralized validation.
 	if err := ValidateGraph(am); err != nil {
-		return matrixErrorf("MetricClosure", err) // wrap with context
+		return matrixErrorf(opMetricClosure, err) // wrap with context
 	}
 
 	// Delegate to APSP kernel on the underlying matrix.
@@ -222,15 +251,19 @@ func DegreeVector(am *AdjacencyMatrix) ([]float64, error) {
 //
 // AI-Hints: Useful in spectral methods (PCA, Laplacians) to repair asymmetry drift.
 func Symmetrize(m Matrix) (Matrix, error) {
+	// Validate early to avoid nil-deref when reading sizes in downstream kernels
+	if err := ValidateNotNil(m); err != nil {
+		return nil, matrixErrorf(opSymmetrize, err)
+	}
 	// Transpose first; kernel validates non-nil input.
 	mt, err := Transpose(m) // O(rc)
 	if err != nil {
-		return nil, matrixErrorf("Symmetrize", err) // wrap with context
+		return nil, matrixErrorf(opSymmetrize, err) // wrap with context
 	}
 	// Add original and transpose; shapes are guaranteed identical.
 	sum, err := Add(m, mt) // O(rc)
 	if err != nil {
-		return nil, matrixErrorf("Symmetrize", err) // wrap
+		return nil, matrixErrorf(opSymmetrize, err) // wrap
 	}
 
 	// Scale by 0.5 to complete the symmetrization.
@@ -243,6 +276,10 @@ func Symmetrize(m Matrix) (Matrix, error) {
 //
 // AI-Hints: Used by Markov/stochastic normalization, degree-like features, DTW bands, etc.
 func RowSums(m Matrix) ([]float64, error) {
+	// Validate early: we read m.Cols() below.
+	if err := ValidateNotNil(m); err != nil {
+		return nil, matrixErrorf(opRowSums, err)
+	}
 	// Build an all-ones vector of length equal to the number of columns.
 	cols := m.Cols()              // O(1) read of dimension
 	ones := make([]float64, cols) // allocate the vector once
@@ -251,7 +288,12 @@ func RowSums(m Matrix) ([]float64, error) {
 	}
 
 	// Multiply m by the ones vector to get per-row sums.
-	return MatVec(m, ones) // O(rc), kernel validates lengths
+	y, err := MatVec(m, ones) // O(rc)
+	if err != nil {
+		return nil, matrixErrorf(opRowSums, err)
+	}
+
+	return y, nil
 }
 
 // ColSums returns vector c where c[j] = sum_i m[i,j].
@@ -263,7 +305,7 @@ func ColSums(m Matrix) ([]float64, error) {
 	// Transpose m first.
 	mt, err := Transpose(m) // O(rc)
 	if err != nil {
-		return nil, matrixErrorf("ColSums", err) // wrap with context
+		return nil, matrixErrorf(opColSums, err) // wrap with context
 	}
 	// Build an all-ones vector of length equal to the (transposed) number of columns,
 	// which equals the original number of rows.
@@ -272,8 +314,14 @@ func ColSums(m Matrix) ([]float64, error) {
 	for i := 0; i < rows; i++ {   // deterministic fill
 		ones[i] = 1.0 // neutral element for summation
 	}
+
 	// Multiply to get per-column sums of the original matrix.
-	return MatVec(mt, ones) // O(rc)
+	y, err := MatVec(mt, ones) // O(rc)
+	if err != nil {
+		return nil, matrixErrorf(opColSums, err)
+	}
+
+	return y, nil
 }
 
 // ---------- Sanitization & numeric compare (thin wrappers → ew*) ----------
@@ -318,7 +366,10 @@ func ReplaceInfNaN(m Matrix, val float64) (Matrix, error) {
 // AI-Hints:
 //   - AllClose with small atol/rtol is ideal for invariance tests in unit tests.
 func AllClose(a, b Matrix, rtol, atol float64) (bool, error) {
-	// ??
+	// Normalize tolerances at API boundary for explicit, stable policy.
+	rtol = math.Abs(rtol)
+	atol = math.Abs(atol)
+
 	return ewAllClose(a, b, rtol, atol)
 }
 

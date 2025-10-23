@@ -8,7 +8,8 @@
 //
 // Policy & Contracts:
 //   - Adjacency: 0/weight; metric-closure toggles to distances (+Inf as “no edge”, diag=0) then APSP.
-//   - Incidence: directed (−1 on source, +1 on target; self-loop → zero column), undirected (+1/+1; self-loop → +2).
+//   - Incidence: directed (−1 on source, +1 on target; directed self-loop ⇒ skipped column),
+//                undirected (+1/+1; self-loop ⇒ +2 in the single incident row).
 //
 // Determinism:
 //   - First-edge-wins when AllowMulti=false (ordered or unordered key by directedness).
@@ -84,29 +85,39 @@ func isLexSorted(s []string) bool {
 	return true
 }
 
-// BuildDenseAdjacency constructs a dense adjacency matrix from an explicit
-// vertex-id list and an edge list, applying Options policy.
-// Behavior highlights:
-//   - Directed + DisallowMulti ⇒ first-edge-wins on ordered (u,v).
-//   - Undirected + DisallowMulti ⇒ first-edge-wins on unordered {min,max}.
-//   - No mirroring for loops (u==v) in undirected case.
-//   - Weighted=true but effectively-unweighted input ⇒ degrade to binary (1).
-//   - MetricClosure: convert to distances (off-diag 0 ⇒ +Inf; diag=0), then APSP.
+// BuildDenseAdjacency CONSTRUCTS a dense adjacency matrix from explicit vertices/edges
+// with Options policy (directed/weighted/loops/multi, optional metric-closure).
+// Implementation:
+//   - Stage 1: validate vertex list and build VertexID→index map.
+//   - Stage 2: allocate V×V dense and decide weight policy (degrade to binary if all-zero).
+//   - Stage 3: populate entries deterministically; mirror when undirected (except loops).
+//   - Stage 4: optional metric-closure (distances via Floyd–Warshall).
 //
-// Contract:
-//   - vertices: the caller provides the canonical vertex order (must be stable).
-//   - edges:    returned by core (stable by Edge.ID asc per core contract).
-//   - opts:     behavior documented in options.go and doc.go.
+// Behavior highlights:
+//   - First-edge-wins when AllowMulti=false (ordered for directed, unordered for undirected).
+//   - Stable order equals provided vertex order; edges are scanned in stable core order.
+//
+// Inputs:
+//   - vertices: canonical vertex order (stable; caller decides lex order if needed).
+//   - edges: stable edge list (core contract: by Edge.ID asc).
+//   - opts: Options defining Directed/Weighted/AllowLoops/AllowMulti/MetricClosure.
 //
 // Returns:
-//   - vidx: map VertexID → index (row==col index).
-//   - mat:  allocated dense matrix (n×n).
-//   - err:  ErrBadShape, ErrUnknownVertex, ErrInvalidWeight, ErrDimensionMismatch (closure), etc.
+//   - vidx: VertexID→index map (row==col index).
+//   - mat: V×V dense adjacency.
+//   - err: ErrInvalidDimensions (empty vertices), ErrUnknownVertex, ErrInvalidWeight, shape/set errors.
 //
-// NOTE: This function intentionally does *not* sort vertices; it trusts the
-// supplied order (usually core.Vertices()). If you need lex order, pass it in.
+// Determinism:
+//   - Fixed loops and write order; deterministic output for same inputs/options.
 //
-// Complexity: O(V^2 + E) time (dense alloc + edge pass), O(V^2) space.
+// Complexity:
+//   - Time O(V^2 + E), Space O(V^2).
+//
+// Notes:
+//   - Unweighted mode writes 1 for present edges; weighted mode uses edge weights.
+//
+// AI-Hints:
+//   - Use MetricClosure to turn adjacency into distances (+Inf as unreachable), diag forced to 0.
 func BuildDenseAdjacency(
 	vertices []string,
 	edges []*core.Edge,
@@ -118,16 +129,16 @@ func BuildDenseAdjacency(
 	// but we adopt a strict policy here: empty vertex set is considered bad shape to
 	// avoid accidental empty allocations downstream. Adjust if you need 0×0 matrices.
 	if len(vertices) == 0 {
-		return nil, nil, fmt.Errorf("BuildDenseAdjacency: empty vertex set: %w", ErrBadShape)
+		return nil, nil, fmt.Errorf("BuildDenseAdjacency: empty vertex set: %w", ErrInvalidDimensions)
 	}
 	V := len(vertices)
+
 	// Build stable vertex→index mapping with linear scan in provided order.
-	// Complexity: O(|V|). Deterministic by index assignment order.
-	idx := make(map[string]int, V) // VertexID->index
+	idx := make(map[string]int, V)
 	var i int
 	var id string
 	for i, id = range vertices {
-		// Guard against duplicates in provided vertex list (should not happen).
+		// Defensive duplicate check.
 		if _, dup := idx[id]; dup {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: duplicate vertex id %q: %w", id, ErrUnknownVertex)
 		}
@@ -135,8 +146,6 @@ func BuildDenseAdjacency(
 	}
 
 	// --- Stage 2: Allocate dense V×V and decide weight policy ---
-
-	// Allocate an n×n dense matrix initialized with zeros (no edges yet).
 	mat, err := NewDense(V, V)
 	if err != nil {
 		return nil, nil, fmt.Errorf("BuildDenseAdjacency: NewDense(%d,%d): %w", V, V, err)
@@ -149,7 +158,7 @@ func BuildDenseAdjacency(
 	if useWeight && allZeroWeights(edges) {
 		// If the edge slice is present, scan it for a non-zero weight.
 		// Early exit on the first non-zero to keep it O(E) best-case.
-		useWeight = false // avoid all-zero adjacency
+		useWeight = false // degrade to binary if effectively unweighted
 	}
 
 	// --- Stage 3: Populate adjacency entries (deterministic) ---
@@ -157,9 +166,10 @@ func BuildDenseAdjacency(
 	allowMulti := opts.allowMulti
 	allowLoops := opts.allowLoops
 
-	// seen implements first-edge-wins when AllowMulti=false.
+	// First-edge-wins set when AllowMulti=false.
 	// For directed graphs key=(src,dst). For undirected, we normalize to {min,max}.
-	seen := make(map[pairKey]struct{}, 64) // small initial cap; grows as needed
+	seen := make(map[pairKey]struct{}, 64)
+
 	var (
 		e        *core.Edge
 		ej       int
@@ -170,18 +180,18 @@ func BuildDenseAdjacency(
 
 	for ej = 0; ej < len(edges); ej++ {
 		e = edges[ej]
-		// resolve endpoints
+		// Resolve endpoints
 		if src, err = lookupIndex(idx, e.From); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
 		if dst, err = lookupIndex(idx, e.To); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
-		// loops policy
+		// Loops policy
 		if src == dst && !allowLoops {
 			continue
 		}
-		// multi-edge policy
+		// Multi-edge policy
 		if !allowMulti {
 			if directed {
 				key = orderedPair(src, dst)
@@ -209,12 +219,12 @@ func BuildDenseAdjacency(
 		} else {
 			w = defaultWeight
 		}
-		// Write [src,dst] cell with bounds-checked Set.
-		// Complexity: O(1). Public Set returns error, so we propagate it.
+
+		// Write adjacency cell [src,dst]
 		if err = mat.Set(src, dst, w); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: Set(%d,%d): %w", src, dst, err)
 		}
-		// If undirected, mirror into [dst,src] *except* when it's a loop (u==v).
+		// Mirror for undirected (not for loops)
 		if !directed && src != dst {
 			if err = mat.Set(dst, src, w); err != nil {
 				return nil, nil, fmt.Errorf("BuildDenseAdjacency: Set(%d,%d): %w", dst, src, err)
@@ -245,27 +255,42 @@ func BuildDenseAdjacency(
 	return idx, mat, nil
 }
 
-// BuildDenseIncidence constructs a dense incidence matrix from a vertex-id list and an edge list,
-// applying MatrixOptions policy deterministically.
+// BuildDenseIncidence CONSTRUCTS a dense incidence matrix from a vertex-id list and an edge list,
+// applying Options policy deterministically.
+// Implementation:
+//   - Stage 1: validate vertex list and build VertexID→row index.
+//   - Stage 2: compute effective column list (filter loops/multi deterministically).
+//   - Stage 3: allocate V×E' dense (allow zero columns).
+//   - Stage 4: populate columns with signed/undirected marks.
 //
 // Behavior highlights:
-//   - Directed: −1 at source row, +1 at target row; directed self-loop ⇒ column of zeros.
+//   - Directed: −1 at source row, +1 at target row; directed self-loop ⇒ skipped column (not materialized).
 //   - Undirected: +1 at both endpoints; undirected self-loop ⇒ +2 in the single row.
 //   - DisallowMulti: first-edge-wins (ordered for directed; unordered for undirected).
-//   - Columns order equals stable edge input order post filtering/dedup.
+//   - Columns preserve stable input order post filtering/dedup.
 //
 // Inputs:
-//   - vertices: canonical vertex order (must be stable; caller is responsible for sorting if needed).
-//   - edges:    stable edge sequence (core is assumed to return edges ordered by Edge.ID ascending).
-//   - opts:     behavior documented in options.go / doc.go (Directed, AllowMulti, AllowLoops).
+//   - vertices: canonical vertex order (stable; caller decides lex order).
+//   - edges: stable edge sequence (core contract: by Edge.ID asc).
+//   - opts: Directed/AllowMulti/AllowLoops (Weighted is irrelevant for incidence).
 //
 // Returns:
-//   - vidx: VertexID → row index map.
-//   - cols: column-aligned edge slice (*core.Edge) after filtering/deduplication per options.
-//   - mat:  allocated dense matrix of shape |V|×|cols| with entries in {−1,0,+1} (and +2 for undirected loops).
-//   - err:  ErrBadShape, ErrUnknownVertex, plus dense Set/shape sentinels.
+//   - vidx: VertexID→row index.
+//   - cols: effective column-aligned edges after filtering/dedup.
+//   - mat: V×E' dense with entries in {−1,0,+1} (and +2 for undirected loops).
+//   - err: ErrInvalidDimensions (empty vertices), ErrUnknownVertex, dense Set/shape errors.
 //
-// Complexity: O(V + E) to prepare + O(E) writes, space O(V*E').
+// Determinism:
+//   - Stable rows/columns given stable inputs/options.
+//
+// Complexity:
+//   - Time O(V + E), Space O(V + E) plus V×E' for dense data.
+//
+// Notes:
+//   - Directed self-loop is algebraically zero; the column is skipped for a minimal basis.
+//
+// AI-Hints:
+//   - Use AllowMulti=false to get a canonical set of columns without duplicates.
 func BuildDenseIncidence(
 	vertices []string,
 	edges []*core.Edge,
@@ -275,7 +300,7 @@ func BuildDenseIncidence(
 
 	// Empty vertex set is considered invalid shape for incidence (no rows).
 	if len(vertices) == 0 {
-		return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: empty vertex set: %w", ErrBadShape)
+		return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: empty vertex set: %w", ErrInvalidDimensions)
 	}
 	V := len(vertices)
 	// Build a stable vertex→row index map in the provided order; check duplicates defensively.
@@ -317,11 +342,20 @@ func BuildDenseIncidence(
 		if v, ok = idx[e.To]; !ok {
 			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: unknown target %q: %w", e.To, ErrUnknownVertex)
 		}
-		// Skip loops entirely if loops are disallowed.
-		if !allowLoops && u == v {
-			continue // policy: ignore self-loops when AllowLoops=false
+
+		// Loops policy:
+		// - If loops are disallowed: skip.
+		// - If directed and u==v: skip zero column entirely (not materialized).
+		if u == v {
+			if !allowLoops {
+				continue // policy: ignore self-loops when AllowLoops=false
+			}
+			if directed {
+				continue // skip directed self-loop column
+			}
 		}
-		// Enforce "first-edge-wins" when multi-edges are disallowed.
+
+		// Multi-edge policy (first-edge-wins when disallowed)
 		if !allowMulti {
 			if directed {
 				// Directed: ordered pair (u,v).
@@ -361,49 +395,34 @@ func BuildDenseIncidence(
 		e = eff[j]
 		su, _ = idx[e.From]
 		sv, _ = idx[e.To]
+
 		if directed {
-			// Directed incidence:
-			if su == sv {
-				// Self-loop in directed graphs contributes −1 and +1 in the *same row*.
-				// Since we write into the same cell, the net effect is 0 - i.e., we leave the column zeroed.
-				// (No write needed; documentation clarifies this.)
-				continue
-			}
-			// Mark source with −1.
-			if err = mat.Set(su, j, -1.0); err != nil {
+			// Directed incidence: su!=sv (directed loops already skipped).
+			if err = mat.Set(su, j, -1.0); err != nil { // mark source with −1.
 				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,-1): %w", su, j, err)
 			}
-			// Mark target with +1.
-			if err = mat.Set(sv, j, +1.0); err != nil {
+			if err = mat.Set(sv, j, +1.0); err != nil { // mark target with +1.
 				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", sv, j, err)
 			}
-		} else {
-			// Undirected incidence:
-			if su == sv {
-				// Self-loop in undirected graphs contributes +2 in the single row (two half-edges).
-				if err = mat.Set(su, j, 2.0); err != nil {
-					return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+2): %w", su, j, err)
-				}
-			} else {
-				// Non-loop undirected edge: +1 at each endpoint row.
-				if err = mat.Set(su, j, 1.0); err != nil {
-					return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", su, j, err)
-				}
-				if err = mat.Set(sv, j, 1.0); err != nil {
-					return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", sv, j, err)
-				}
+			continue
+		}
+
+		// Undirected incidence:
+		if su == sv {
+			// Self-loop contributes +2 in the single incident row.
+			if err = mat.Set(su, j, 2.0); err != nil {
+				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+2): %w", su, j, err)
 			}
+			continue
+		}
+		// Non-loop undirected: +1 at each endpoint.
+		if err = mat.Set(su, j, 1.0); err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", su, j, err)
+		}
+		if err = mat.Set(sv, j, 1.0); err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", sv, j, err)
 		}
 	}
-
-	// ---- Determinism note: optional re-ordering (defensive) ---------------------------------------
-
-	// If callers expect lexicographic vertex order regardless of core order, they should
-	// pass a lex-sorted vertex slice. For completeness, we allow a defensive check here
-	// (off by default). Uncomment to enforce lex order:
-	// if !isLexSorted(vertices) { ... } - we keep current behavior: trust the provided order.
-
-	// Return the index map, column-aligned edges, and the dense incidence matrix.
 
 	return idx, eff, mat, nil
 }

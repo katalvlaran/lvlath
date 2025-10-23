@@ -2,10 +2,12 @@
 // Package matrix - incidence builders (dense) with strict invariants.
 //
 // Deliverables (per TA-MATRIX):
-//   1) Nil-guards for "light" getters (panic on nil receiver/Mat with fixed message).
+//   1) Error-first lightweight getters (no panics): VertexCount/EdgeCount validate receiver and shape
+//      and return sentinel errors (ErrNilMatrix, ErrDimensionMismatch) instead of panicking.
 //   2) Clarified signs: directed uses −1 at source and +1 at target; undirected uses +1/+1;
-//      self-loop in directed sums (−1 + +1) in the *same row* ⇒ 0 column; in undirected a loop
-//      contributes +2 in the single incident row (both half-edges touch the same vertex).
+//      self-loop in directed sums (−1 + +1) in the *same row* ⇒ algebraic zero; the builder MUST
+//      skip such zero columns; in undirected a loop contributes +2 in the single incident row
+//      (both half-edges touch the same vertex).
 //   3) AllowMulti=false ⇒ first-edge-wins policy (directed: ordered (u,v); undirected: unordered {min,max}).
 //   4) Deterministic order: vertices follow provided order; edge columns follow stable core edge order.
 //   5) Sentinel errors unified (ErrGraphNil, ErrUnknownVertex, ErrDimensionMismatch, ErrNilMatrix).
@@ -13,18 +15,20 @@
 // AI-Hints:
 //   - Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
 //   - Incidence ignores numeric weights by design; it captures topology only (sign/endpoint).
-//   - For undirected graphs, a self-loop appears as +2 in the single row - this is conventional in
+//   - For undirected graphs, a self-loop appears as +2 in the single row — this is conventional in
 //     incidence algebra; downstream tools that expect strictly {−1,0,+1} should normalize if needed.
 //   - Determinism is guaranteed if you pass a deterministic vertex order and core returns edges by ID.
 //
-// Complexity:
-//   - BuildDenseIncidence: O(|V| + |E|) time, O(|V| + |E|) space (index map + column list + dense matrix).
-//   - Accessors: O(1) except VertexIncidence (O(#edges) to copy the row).
+// Notes:
+//   - Incidence matrices are purely structural: numeric edge weights are ignored by design.
+//     Options.Weighted may be present for API symmetry but does not affect entries (only -1/0/+1, and +2 for undirected loops).
+//   - Directed self-loops algebraically sum (-1 + +1) in the same row to a zero column. We do not materialize zero columns:
+//     the builder MUST skip such columns to keep the incidence basis minimal and deterministic.
 
 package matrix
 
 import (
-	"fmt" // build contextual error messages with sentinel wrapping
+	"fmt"
 	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
@@ -53,24 +57,51 @@ const loopUndirectedMark = 2.0
 // Mat holds −1/0/+1 (and +2 for undirected loops) entries indicating incidence.
 // opts preserves original construction options for round-trip fidelity.
 type IncidenceMatrix struct {
-	Mat         Matrix         // underlying incidence matrix (square? no: rows=|V|, cols=|E_eff|)
+	Mat         Matrix         // underlying incidence matrix (rows=|V|, cols=|E_eff|)
 	VertexIndex map[string]int // mapping of VertexID to row index
 	Edges       []*core.Edge   // ordered edges aligned to columns [0..cols)
-	opts        Options        // original build options snapshot (public, per your current API)
+	opts        Options        // original build options snapshot
 }
 
 // --- Constructor (public) --------------------------------------------------------------------------
 
-// NewIncidenceMatrix constructs an IncidenceMatrix from g using MatrixOptions.
-// Stage 1 (Validate): ensure g is non-nil.
-// Stage 2 (Prepare): extract stable vertex and edge lists.
-// Stage 3 (Execute): BuildDenseIncidence (deterministic, policy-aware).
-// Stage 4 (Finalize): wrap and return.
-// Errors: ErrGraphNil, plus any BuildDenseIncidence sentinel.
+// NewIncidenceMatrix CONSTRUCT a dense incidence matrix wrapper from core.Graph.
+// Implementation:
+//   - Stage 1: validate graph is non-nil (ErrGraphNil).
+//   - Stage 2: extract stable vertex/edge lists from core contracts.
+//   - Stage 3: delegate to BuildDenseIncidence (policy-aware, deterministic).
+//   - Stage 4: wrap resulting Matrix with VertexIndex and Edges aligned to columns.
+//
+// Behavior highlights:
+//   - No panics for user errors; only sentinel errors with context.
+//   - Edge weights are ignored by design; the matrix encodes topology only.
+//
+// Inputs:
+//   - g: source graph (must be non-nil).
+//   - opts: incidence build options (directed/allowMulti/allowLoops).
+//
+// Returns:
+//   - *IncidenceMatrix: wrapper with Mat, VertexIndex, Edges, opts snapshot.
+//
+// Errors:
+//   - ErrGraphNil, plus any BuildDenseIncidence sentinel wrapped with context.
+//
+// Determinism:
+//   - Stable vertex order (per core) and column order (per core edge order).
+//
+// Complexity:
+//   - Time O(|V|+|E|), Space O(|V|+|E|) for index and dense storage.
+//
+// Notes:
+//   - For canonical layouts in tests, prefer lexicographic vertex IDs upstream.
+//
+// AI-Hints:
+//   - Use AllowMulti=false to collapse parallel edges into a single column (first-edge-wins).
+//   - For golden tests, prefer lexicographically sorted vertex orders for reproducibility.
 func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 	// Validate input graph (public sentinel for nil graph).
 	if g == nil {
-		return nil, fmt.Errorf("NewIncidenceMatrix: %w", ErrGraphNil) // guard early
+		return nil, fmt.Errorf("NewIncidenceMatrix: %w", ErrGraphNil)
 	}
 
 	// Pull vertices in the order defined by core; callers may already sort lexicographically.
@@ -82,7 +113,7 @@ func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 	// Delegate to deterministic dense builder (validates inputs and options).
 	idx, cols, mat, err := BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
-		return nil, fmt.Errorf("NewIncidenceMatrix: %w", err) // bubble with context
+		return nil, fmt.Errorf("NewIncidenceMatrix: %w", err)
 	}
 
 	// Wrap high-level struct and return (Mat is already dense and bounds-checked).
@@ -94,51 +125,139 @@ func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 	}, nil
 }
 
-// --- Lightweight accessors with nil-guards ----------------------------------------------------------
+// --- Lightweight accessors with error-first invariants ---------------------------------------------
 
-// VertexCount returns the number of vertices (rows) in the incidence matrix.
-// Panics on nil receiver/Mat with a fixed message (developer error, not user error).
-// Complexity: O(1).
-func (im *IncidenceMatrix) VertexCount() int {
-	// Guard nil receiver and underlying Mat - consistent panic message (golden expectation).
+// VertexCount RETURN the number of vertices (matrix dimension) with invariant checks, no panics.
+// Implementation:
+//   - Stage 1: validate receiver and underlying Mat presence.
+//   - Stage 2: ensure matrix dimension equals index table length.
+//
+// Behavior highlights:
+//   - No panics: developer-misuse is reported as sentinel errors.
+//
+// Inputs:
+//   - (receiver) *IncidenceMatrix: container with Mat and index tables.
+//
+// Returns:
+//   - (int, error): vertex count or error.
+//
+// Errors:
+//   - ErrNilMatrix (nil receiver or underlying Mat),
+//   - ErrDimensionMismatch (Mat.Rows() != len(VertexIndex)).
+//
+// Determinism:
+//   - Stable, pure read-only check.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Prefer using this method in user-facing surfaces; do not assume invariants silently.
+//
+// AI-Hints:
+//   - If you need a panic-on-bug assertion in internal code, assert the error upstream once.
+func (im *IncidenceMatrix) VertexCount() (int, error) {
 	if im == nil || im.Mat == nil {
-		panic("IncidenceMatrix: nil receiver or Mat") // intentional panic for light getters
+		return 0, fmt.Errorf("IncidenceMatrix.VertexCount: nil receiver or underlying Mat: %w", ErrNilMatrix)
 	}
-	// Return number of rows (|V|).
-	return im.Mat.Rows()
+	if im.Mat.Rows() != len(im.VertexIndex) {
+		return 0, fmt.Errorf(
+			"IncidenceMatrix.VertexCount: inconsistent dimensions %d vs %d: %w",
+			im.Mat.Rows(), len(im.VertexIndex), ErrDimensionMismatch,
+		)
+	}
+
+	return im.Mat.Rows(), nil
 }
 
-// EdgeCount returns the number of edges (columns) in the incidence matrix.
-// Panics on nil receiver/Mat with a fixed message.
-// Complexity: O(1).
-func (im *IncidenceMatrix) EdgeCount() int {
-	// Same nil-guard semantics as VertexCount for consistency.
+// EdgeCount RETURN the number of edges (column count) with invariant checks, no panics.
+// Implementation:
+//   - Stage 1: validate receiver and underlying Mat presence.
+//   - Stage 2: ensure matrix dimension equals edge columns length.
+//
+// Behavior highlights:
+//   - No panics: developer-misuse is reported as sentinel errors.
+//
+// Inputs:
+//   - (receiver) *IncidenceMatrix: container with Mat and column-aligned Edges.
+//
+// Returns:
+//   - (int, error): edge/column count or error.
+//
+// Errors:
+//   - ErrNilMatrix (nil receiver or underlying Mat),
+//   - ErrDimensionMismatch (Mat.Cols() != len(Edges)).
+//
+// Determinism:
+//   - Stable, pure read-only check.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Values in incidence are limited to {−1, 0, +1, +2} per semantics.
+//
+// AI-Hints:
+//   - Counts are useful for quick capacity planning before row scans.
+func (im *IncidenceMatrix) EdgeCount() (int, error) {
 	if im == nil || im.Mat == nil {
-		panic("IncidenceMatrix: nil receiver or Mat")
+		return 0, fmt.Errorf("IncidenceMatrix.EdgeCount: nil receiver or underlying Mat: %w", ErrNilMatrix)
 	}
-	// Return number of columns (|E_eff|).
-	return im.Mat.Cols()
+	if im.Mat.Cols() != len(im.Edges) {
+		return 0, fmt.Errorf(
+			"IncidenceMatrix.EdgeCount: inconsistent dimensions %d vs %d: %w",
+			im.Mat.Cols(), len(im.Edges), ErrDimensionMismatch,
+		)
+	}
+
+	return im.Mat.Cols(), nil
 }
 
-// VertexIncidence returns the incidence row for vertexID as a newly allocated slice.
-// Errors: ErrNilMatrix (when im or Mat is nil), ErrUnknownVertex (lookup fails), and
-// matrix index errors from Mat.At are wrapped with context.
-// Complexity: O(#edges).
+// VertexIncidence COPY the signed incidence row for a given vertex into a new slice.
+// Implementation:
+//   - Stage 1: validate receiver/Mat (ErrNilMatrix) and resolve vertex row (ErrUnknownVertex).
+//   - Stage 2: iterate columns j in [0..|E|) and copy Mat.At(row,j) into an output slice.
+//
+// Behavior highlights:
+//   - Entries are {-1,0,+1} for non-loop edges; undirected self-loop yields +2 in that row.
+//
+// Inputs:
+//   - vertexID: existing vertex identifier present in VertexIndex.
+//
+// Returns:
+//   - []float64: a fresh slice of length |E| with signed incidence values for the vertex.
+//
+// Errors:
+//   - ErrNilMatrix (nil receiver/Mat),
+//   - ErrUnknownVertex (vertexID not found),
+//   - wrapped Mat.At errors (e.g., out-of-range) with coordinates.
+//
+// Determinism:
+//   - Fixed column order as in Edges; stable output for a fixed graph/options.
+//
+// Complexity:
+//   - Time O(|E|), Space O(|E|) for the returned row.
+//
+// Notes:
+//   - Weights of original graph are ignored; this is a structural view only.
+//
+// AI-Hints:
+//   - Use on-demand when you need the per-vertex signed incidence pattern.
 func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
-	// Soft-fail (error) on nil receiver for external-facing method (prefer error over panic).
+	// Soft-fail (error) on nil receiver.
 	if im == nil || im.Mat == nil {
 		return nil, fmt.Errorf("VertexIncidence: %w", ErrNilMatrix)
 	}
-	// Lookup row index for the given vertex ID.
+	// Resolve row index.
 	row, ok := im.VertexIndex[vertexID]
 	if !ok {
 		return nil, fmt.Errorf("VertexIncidence: unknown vertex %q: %w", vertexID, ErrUnknownVertex)
 	}
-	// Allocate output slice sized to number of columns (|E_eff|).
-	cols := im.Mat.Cols()        // total columns
-	out := make([]float64, cols) // one entry per column
+	// Allocate output row.
+	cols := im.Mat.Cols()
+	out := make([]float64, cols)
 
-	// Copy row entries via safe At; bubble any index error.
+	// Copy via safe At; bubble index errors.
 	var val float64
 	var err error
 	for j := 0; j < cols; j++ {
@@ -146,42 +265,83 @@ func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
 		if err != nil {
 			return nil, fmt.Errorf("VertexIncidence: At(%d,%d): %w", row, j, err)
 		}
-		out[j] = val // assign to output
+		out[j] = val
 	}
-
-	// Return the copied row.
 	return out, nil
 }
 
-// EdgeEndpoints returns (fromID, toID) of the edge corresponding to column j.
-// For undirected graphs, the (fromID,toID) ordering matches core.Edge endpoints.
-// Errors: ErrNilMatrix, ErrDimensionMismatch on out-of-range j.
-// Complexity: O(1).
+// EdgeEndpoints RETURN (fromID,toID) for the edge aligned with column j.
+// Implementation:
+//   - Stage 1: validate receiver/Mat (ErrNilMatrix).
+//   - Stage 2: bounds-check column j in [0..Cols) (ErrDimensionMismatch).
+//   - Stage 3: return endpoints from Edges[j] as recorded by core.
+//
+// Behavior highlights:
+//   - For undirected graphs we expose core’s stored ordering of endpoints.
+//
+// Inputs:
+//   - j: zero-based column index.
+//
+// Returns:
+//   - fromID, toID: endpoints as kept in core.Edge for this column.
+//
+// Errors:
+//   - ErrNilMatrix, ErrDimensionMismatch on invalid j.
+//
+// Determinism:
+//   - O(1) lookup; endpoints order matches the deterministic core edge order.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Useful for joining matrix columns back to edge metadata.
+//
+// AI-Hints:
+//   - Validate j exactly once and reuse endpoints to avoid redundant map lookups.
 func (im *IncidenceMatrix) EdgeEndpoints(j int) (fromID, toID string, err error) {
-	// Soft-fail on nil receiver.
+	// Nil-guard.
 	if im == nil || im.Mat == nil {
 		return "", "", fmt.Errorf("EdgeEndpoints: %w", ErrNilMatrix)
 	}
-	// Bounds check on column index; use public sentinel for dimension issues.
+	// Bounds-check.
 	if j < 0 || j >= im.Mat.Cols() {
 		return "", "", fmt.Errorf("EdgeEndpoints: column %d out of range [0,%d): %w",
 			j, im.Mat.Cols(), ErrDimensionMismatch)
 	}
-	// Fetch the aligned *core.Edge and return its endpoints (IDs).
+	// Return aligned endpoints.
 	e := im.Edges[j]
-
 	return e.From, e.To, nil
 }
 
-// --- Dense incidence builder -----------------------------------------------------------------------
+// --- Dense incidence builder convenience -----------------------------------------------------------
 
-// buildDenseIncidenceFromGraph is a convenience wrapper for tests/internal callers that
-// possess only *core.Graph*. It extracts vertex IDs and edges deterministically and
-// delegates to BuildDenseIncidence.
+// buildDenseIncidenceFromGraph CONVENIENCE wrapper for callers that have only *core.Graph*.
+// Implementation:
+//   - Stage 1: validate g (ErrGraphNil).
+//   - Stage 2: pull vertex IDs, enforce lexicographic order if needed (canonical layouts).
+//   - Stage 3: pull edges in stable core order and delegate to BuildDenseIncidence.
 //
-// NOTE: We defensively ensure lexicographic vertex order here to facilitate golden tests,
+// Behavior highlights:
+//   - Guarantees canonical row order independent of upstream vertex insertion order.
 //
-//	while the main constructor trusts the caller’s order.
+// Returns:
+//   - idx (VertexIndex), cols (Edges), mat (*Dense), error.
+//
+// Errors:
+//   - ErrGraphNil, plus BuildDenseIncidence errors wrapped with context.
+//
+// Determinism:
+//   - Stable rows/columns by design.
+//
+// Complexity:
+//   - Time O(|V| log |V| + |E|), Space O(|V| + |E|).
+//
+// Notes:
+//   - The public constructor NewIncidenceMatrix trusts core’s order for performance; tests may use this wrapper.
+//
+// AI-Hints:
+//   - Prefer this helper in golden tests when vertex order must be strictly lexicographic.
 func buildDenseIncidenceFromGraph(g *core.Graph, opts Options) (map[string]int, []*core.Edge, *Dense, error) {
 	// Validate graph argument.
 	if g == nil {

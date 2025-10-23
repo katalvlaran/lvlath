@@ -16,7 +16,7 @@ import "errors"
 // directly; if context is essential, wrap with fmt.Errorf("ctx: %w", ErrX)
 // at the outer boundary - callers will still use errors.Is to match.
 //
-// ERROR PRIORITY (documented, enforced in tests):
+// ERROR PRIORITY:
 // shape/index/NaN -> graph nil -> dimension mismatch -> structural violations
 // -> export limitations (ErrMatrixNotImplemented).
 

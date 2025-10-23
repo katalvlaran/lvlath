@@ -1,0 +1,292 @@
+package matrix_test
+
+import (
+	"math"
+	"testing"
+
+	"github.com/katalvlaran/lvlath/matrix"
+)
+
+// ---------- 5. FloydWarshall ----------
+
+func TestFloydWarshall_Errors(t *testing.T) {
+	t.Parallel()
+
+	var err error
+
+	// nil → ErrNilMatrix
+	err = matrix.FloydWarshall(nil)
+	AssertErrorIs(t, err, matrix.ErrNilMatrix)
+
+	// non-square → ErrDimensionMismatch
+	ns, _ := matrix.NewDense(3, 4)
+	err = matrix.FloydWarshall(ns)
+	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+}
+
+// Classic CLRS example (5×5, directed, with negative edges but no negative cycles).
+// Expected distance matrix:
+// [ [ 0, 1, -3, 2, -4],
+//
+//	[ 3, 0, -4, 1, -1],
+//	[ 7, 4,  0, 5,  3],
+//	[ 2,-1, -5, 0, -2],
+//	[ 8, 5,  1, 6,  0] ]
+func TestFloydWarshall_CLRS_5x5_FastPath_Correctness(t *testing.T) {
+	t.Parallel()
+
+	const n = 5
+	var (
+		i, j int
+		err  error
+	)
+
+	A, _ := matrix.NewDense(n, n)
+	// init ∞ off-diagonal, 0 on diagonal
+	inf := math.Inf(1)
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			if i == j {
+				MustSet(t, A, i, j, 0)
+			} else {
+				MustSet(t, A, i, j, inf)
+			}
+		}
+	}
+	// edges (u→v = w)
+	MustSet(t, A, 0, 1, 3)
+	MustSet(t, A, 0, 2, 8)
+	MustSet(t, A, 0, 4, -4)
+	MustSet(t, A, 1, 3, 1)
+	MustSet(t, A, 1, 4, 7)
+	MustSet(t, A, 2, 1, 4)
+	MustSet(t, A, 3, 0, 2)
+	MustSet(t, A, 3, 2, -5)
+	MustSet(t, A, 4, 3, 6)
+
+	if err = matrix.FloydWarshall(A); err != nil {
+		t.Fatalf("FloydWarshall(%v): %v", A, err)
+	}
+
+	exp := [][]float64{
+		{0, 1, -3, 2, -4},
+		{3, 0, -4, 1, -1},
+		{7, 4, 0, 5, 3},
+		{2, -1, -5, 0, -2},
+		{8, 5, 1, 6, 0},
+	}
+	var got float64
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			got, _ = A.At(i, j)
+			if got != exp[i][j] {
+				t.Fatalf("dist[%d,%d]=%v; want %v", i, j, got, exp[i][j])
+			}
+		}
+	}
+}
+
+// The same CLRS graph, but forced interface fallback via wrapper.
+// Result must match the fast-path one element-by-element.
+func TestFloydWarshall_CLRS_5x5_Fallback_MatchesFast(t *testing.T) {
+	t.Parallel()
+
+	const n = 5
+	var (
+		i, j int
+		err  error
+	)
+
+	makeCLRS := func() matrix.Matrix {
+		M, _ := matrix.NewDense(n, n)
+		inf := math.Inf(1)
+		for i = 0; i < n; i++ {
+			for j = 0; j < n; j++ {
+				if i == j {
+					_ = M.Set(i, j, 0)
+				} else {
+					_ = M.Set(i, j, inf)
+				}
+			}
+		}
+		// edges
+		_ = M.Set(0, 1, 3)
+		_ = M.Set(0, 2, 8)
+		_ = M.Set(0, 4, -4)
+		_ = M.Set(1, 3, 1)
+		_ = M.Set(1, 4, 7)
+		_ = M.Set(2, 1, 4)
+		_ = M.Set(3, 0, 2)
+		_ = M.Set(3, 2, -5)
+		_ = M.Set(4, 3, 6)
+		return M
+	}
+
+	fast := makeCLRS()       // *Dense
+	slow := hide{makeCLRS()} // wrapped → fallback
+	if err = matrix.FloydWarshall(fast); err != nil {
+		t.Fatalf("matrix.FloydWarshall(fast): %v", err)
+	}
+	if err = matrix.FloydWarshall(slow); err != nil {
+		t.Fatalf("matrix.FloydWarshall(slow): %v", err)
+	}
+
+	var a, b float64
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			a, _ = fast.At(i, j)
+			b, _ = slow.At(i, j)
+			if b != a {
+				t.Fatalf("mismatch at dist[%d,%d]=%v; want %v", i, j, b, a)
+			}
+		}
+	}
+}
+
+// Unreachable nodes remain at +Inf; diagonal zeros; triangle inequality holds;
+// and running FW again on the computed distance matrix does not change it (idempotent).
+func TestFloydWarshall_Unreachable_Properties_And_Idempotent(t *testing.T) {
+	t.Parallel()
+
+	const n = 6
+	var i, j, k int
+	var err error
+
+	D, _ := matrix.NewDense(n, n)
+	inf := math.Inf(1)
+
+	// init ∞ off-diagonal, 0 on diagonal
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			if i == j {
+				MustSet(t, D, i, j, 0)
+			} else {
+				MustSet(t, D, i, j, inf)
+			}
+		}
+	}
+
+	// Build an undirected component on {0,1,2} and a directed chain {3 -> 4} ; node 5 isolated.
+	// Undirected edges (symmetric weights):
+	MustSet(t, D, 0, 1, 2)
+	MustSet(t, D, 1, 0, 2)
+	MustSet(t, D, 1, 2, 3)
+	MustSet(t, D, 2, 1, 3)
+	MustSet(t, D, 0, 2, 10)
+	MustSet(t, D, 2, 0, 10)
+	// Directed chain 3→4 (weight 7); 4 has no outgoing edges back.
+	MustSet(t, D, 3, 4, 7)
+
+	if err = matrix.FloydWarshall(D); err != nil {
+		t.Fatalf("matrix.FloydWarshall(D): %v", err)
+	}
+
+	// 1) diagonal zeros
+	var v float64
+	for i = 0; i < n; i++ {
+		v, _ = D.At(i, i)
+		if v != 0.0 {
+			t.Fatalf("diagonal must be zero at [%d,%d]=%v; want %v", i, i, v, 0.0)
+		}
+	}
+
+	// 2) unreachable pairs stay +Inf (from {0,1,2} or {3,4} to 5; and from 5 to others)
+	var v1, v2 float64
+	for i = 0; i < n; i++ {
+		if i == 5 {
+			continue
+		}
+		v1, _ = D.At(i, 5)
+		v2, _ = D.At(5, i)
+		if v1 != inf {
+			t.Fatalf("expect unreachable i→5, i=%d, got=%v; want %v", i, v1, inf)
+		}
+		if v2 != inf {
+			t.Fatalf("expect unreachable 5→i, i=%d, got=%v; want %v", i, v2, inf)
+		}
+	}
+
+	// 3) triangle inequality: d[i,j] ≤ d[i,k] + d[k,j] for all i,j,k with finite paths
+	var ij, ik, kj float64
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			ij, _ = D.At(i, j)
+			for k = 0; k < n; k++ {
+				ik, _ = D.At(i, k)
+				kj, _ = D.At(k, j)
+				if ik == inf || kj == inf {
+					continue
+				}
+
+				if ij > ik+kj {
+					t.Fatalf("triangle inequality violated for (%d,%d,%d)", i, j, k)
+				}
+			}
+		}
+	}
+
+	// 4) idempotent: running FW again on the distance matrix must not change it
+	before := D.Clone()
+	if err = matrix.FloydWarshall(D); err != nil {
+		t.Fatalf("matrix.FloydWarshall(D): %v", err)
+	}
+	var a, b float64
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			a, _ = before.At(i, j)
+			b, _ = D.At(i, j)
+			if a != b {
+				t.Fatalf("idempotency mismatch at [%d,%d]=%v; want %v", i, j, a, b)
+			}
+		}
+	}
+}
+
+// Negative cycle sanity: if a negative cycle exists and is reachable from i,
+// Floyd–Warshall yields d[i,i] < 0. We check that the diagonals of the nodes from the cycle
+// become negative, while those of the isolated node remain zero.
+func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
+	t.Parallel()
+
+	const n = 4 // 0-1-2 - negative cycle; 3 - isolated
+	var i, j int
+	var err error
+
+	G, _ := matrix.NewDense(n, n)
+	inf := math.Inf(1)
+
+	// init: 0 on diagonal, +Inf off diagonal
+	for i = 0; i < n; i++ {
+		for j = 0; j < n; j++ {
+			if i == j {
+				MustSet(t, G, i, j, 0)
+			} else {
+				MustSet(t, G, i, j, inf)
+			}
+		}
+	}
+
+	// Negative cycle: 0→1 (1), 1→2 (-1), 2→0 (-1) => total -1
+	MustSet(t, G, 0, 1, 1)
+	MustSet(t, G, 1, 2, -1)
+	MustSet(t, G, 2, 0, -1)
+
+	if err = matrix.FloydWarshall(G); err != nil {
+		t.Fatalf("matrix.FloydWarshall(G): %v", err)
+	}
+
+	// Nodes 0..2 are in negative cycle: diagonals < 0
+	var d float64
+	for i = 0; i < 3; i++ {
+		d, _ = G.At(i, i)
+		if d >= 0.0 {
+			t.Fatalf("expected negative diagonal at node %d due to negative cycle; got %v", i, d)
+		}
+	}
+
+	// Node 3 is isolated: diagonal should remain 0
+	d, _ = G.At(3, 3)
+	if d != 0.0 {
+		t.Fatalf("isolated node must keep zero on the diagonal [3,3]=%v; want %v", d, 0.0)
+	}
+}

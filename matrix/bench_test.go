@@ -1,95 +1,426 @@
 // Package matrix_test provides benchmarks for core matrix package operations,
-// using builder for graph generation and random fill for Dense matrices.
+// using deterministic random fill for Dense matrices.
 package matrix_test
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"testing"
 
-	"github.com/katalvlaran/lvlath/builder"
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
 // benchSizes are the matrix sizes to benchmark.
 var benchSizes = []int{50, 100, 200}
 
-func BenchmarkBuildDenseAdjacency(b *testing.B) {
-	// Report memory allocations per operation.
-	b.ReportAllocs()
-	for _, V := range benchSizes {
-		V := V // capture for parallel execution
-		b.Run(fmt.Sprintf("V=%d", V), func(b *testing.B) {
-			// Stage 2 (Prepare): build a complete graph of V vertices
-			g, err := builder.BuildGraph(nil, builder.Complete(V))
-			if err != nil {
-				b.Fatalf("failed to build graph: %v", err)
-			}
-			verts := g.Vertices() // vertex ID slice
-			edges := g.Edges()    // edge slice
-			opts := matrix.NewMatrixOptions(
-				matrix.WithWeighted(true), // include weights
-			)
+// sinks to defeat dead-code elimination
+var (
+	sinkM matrix.Matrix
+	sinkV []float64
+	sinkB bool
+	sinkF float64
+)
 
+func BenchmarkAdd(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			B := mustDense(b, n, n)
+			fillDenseRand(b, A, 1337)
+			fillDenseRand(b, B, 4242)
 			b.ResetTimer()
-			// Stage 3 (Execute): build adjacency matrix repeatedly
 			for i := 0; i < b.N; i++ {
-				_, _, _ = matrix.BuildDenseAdjacency(verts, edges, opts)
+				m, err := matrix.Sum(A, B)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = m
 			}
 		})
 	}
 }
 
-func BenchmarkBuildDenseAdjacencyWithClosure(b *testing.B) {
+func BenchmarkSub(b *testing.B) {
 	b.ReportAllocs()
-	for _, V := range benchSizes {
-		V := V
-		b.Run(fmt.Sprintf("V=%d+closure", V), func(b *testing.B) {
-			// Stage 2 (Prepare): build graph and base matrix
-			g, err := builder.BuildGraph(nil, builder.Complete(V))
-			if err != nil {
-				b.Fatalf("failed to build graph: %v", err)
-			}
-			verts := g.Vertices()
-			edges := g.Edges()
-			opts := matrix.NewMatrixOptions(
-				matrix.WithWeighted(true),
-				matrix.WithMetricClosure(true), // enable APSP closure
-			)
-
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			B := mustDense(b, n, n)
+			fillDenseRand(b, A, 11)
+			fillDenseRand(b, B, 22)
 			b.ResetTimer()
-			// Stage 3 (Execute): build with metric closure
 			for i := 0; i < b.N; i++ {
-				_, _, _ = matrix.BuildDenseAdjacency(verts, edges, opts)
+				m, err := matrix.Diff(A, B)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = m
 			}
 		})
 	}
 }
 
-func BenchmarkMulDense(b *testing.B) {
+func BenchmarkHadamard(b *testing.B) {
 	b.ReportAllocs()
-	for _, N := range benchSizes {
-		N := N
-		b.Run(fmt.Sprintf("Mul %dx%d", N, N), func(b *testing.B) {
-			// Stage 2 (Prepare): create two N×N random Dense matrices
-			a, _ := matrix.NewIdentity(N)
-			c := rand.New(rand.NewSource(42))
-			for i := 0; i < N; i++ {
-				for j := 0; j < N; j++ {
-					_ = a.Set(i, j, c.Float64())
-				}
-			}
-			bm, _ := matrix.NewDense(N, N)
-			for i := 0; i < N; i++ {
-				for j := 0; j < N; j++ {
-					_ = bm.Set(i, j, c.Float64())
-				}
-			}
-
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			B := mustDense(b, n, n)
+			fillDenseRand(b, A, 1)
+			fillDenseRand(b, B, 2)
 			b.ResetTimer()
-			// Stage 3 (Execute): multiply matrices
 			for i := 0; i < b.N; i++ {
-				_, _ = matrix.Mul(a, bm)
+				m, err := matrix.HadamardProd(A, B)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = m
+			}
+		})
+	}
+}
+
+func BenchmarkTranspose(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n+8) // rectangular
+			fillDenseRand(b, A, 7)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				m, err := matrix.T(A)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = m
+			}
+		})
+	}
+}
+
+func BenchmarkScale(b *testing.B) {
+	b.ReportAllocs()
+	const alpha = 1.75
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 9)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				m, err := matrix.ScaleBy(A, alpha)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = m
+			}
+		})
+	}
+}
+
+func BenchmarkMatVec(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 99)
+			x := onesVec(n)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				y, err := matrix.MatVecMul(A, x)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkV = y
+			}
+		})
+	}
+}
+
+func BenchmarkMul(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{64, 96, 128} { // limits it so that CI doesn't burn
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			B := mustDense(b, n, n)
+			fillDenseRand(b, A, 101)
+			fillDenseRand(b, B, 202)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				C, err := matrix.Product(A, B)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = C
+			}
+		})
+	}
+}
+
+func BenchmarkRowSums(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 12)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := matrix.RowSums(A); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkColSums(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 13)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := matrix.ColSums(A); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkSymmetrize(b *testing.B) {
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 14)
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				if _, err := matrix.Symmetrize(A); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
+func BenchmarkLU(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{32, 64, 96} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 303)
+			// shift the diagonal to eliminate zero pivots
+			for i := 0; i < n; i++ {
+				aii, _ := A.At(i, i)
+				_ = A.Set(i, i, aii+float64(n)+1)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				L, U, err := matrix.LUDecompose(A)
+				if err != nil {
+					b.Fatal(err)
+				}
+				// keep alive
+				sinkM, _ = L, U
+			}
+		})
+	}
+}
+
+func BenchmarkQR(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{32, 64, 96} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			A := mustDense(b, n, n)
+			fillDenseRand(b, A, 404)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Q, R, err := matrix.QRDecompose(A)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM, _ = Q, R
+			}
+		})
+	}
+}
+
+func BenchmarkInverse(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{16, 32, 64} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			M := mustDense(b, n, n)
+			fillDenseRand(b, M, 505)
+			Mt, _ := matrix.T(M)
+			PD, _ := matrix.Product(Mt, M)
+			for i := 0; i < n; i++ {
+				aii, _ := PD.At(i, i)
+				_ = PD.Set(i, i, aii+float64(n)+2)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Inv, err := matrix.InverseOf(PD)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Inv
+			}
+		})
+	}
+}
+
+func BenchmarkEigenSym(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{16, 32, 64} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			// SPD via A=MᵀM
+			M := mustDense(b, n, n)
+			fillDenseRand(b, M, 606)
+			Mt, _ := matrix.T(M)
+			A, _ := matrix.Product(Mt, M)
+			const tol = 1e-9
+			const maxIter = 200
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				vals, Q, err := matrix.EigenSym(A, tol, maxIter)
+				if err != nil {
+					b.Fatal(err)
+				}
+				if len(vals) == 0 || Q == nil {
+					b.Fatal("empty eigen result")
+				}
+				sinkF = vals[0]
+				sinkM = Q
+			}
+		})
+	}
+}
+
+func BenchmarkAPSP_FloydWarshall_Dense(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range []int{60, 100} {
+		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
+			// Full distance matrix with +Inf off-diagonal and sparse edges
+			D, err := matrix.NewZeros(n, n)
+			if err != nil {
+				b.Fatal(err)
+			}
+			// init: 0 on the diagonal, +Inf outside
+			inf := math.Inf(1)
+			for i := 0; i < n; i++ {
+				for j := 0; j < n; j++ {
+					if i == j {
+						_ = D.Set(i, j, 0)
+					} else {
+						_ = D.Set(i, j, inf)
+					}
+				}
+			}
+			// add random edges of weight [1,5]
+			rng := rand.New(rand.NewSource(777))
+			for e := 0; e < n*3; e++ {
+				u := rng.Intn(n)
+				v := rng.Intn(n)
+				if u == v {
+					continue
+				}
+				w := 1 + rng.Float64()*4
+				_ = D.Set(u, v, w)
+			}
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				// in-place
+				if err := matrix.APSPInPlace(D); err != nil {
+					b.Fatal(err)
+				}
+			}
+			sinkM = D
+		})
+	}
+}
+
+func BenchmarkStatsAndSanitize(b *testing.B) {
+	b.ReportAllocs()
+	for _, n := range benchSizes {
+		b.Run(fmt.Sprintf("CenterColumns_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			fillDenseRand(b, X, 808)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Xc, _, err := matrix.CenterColumns(X)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Xc
+			}
+		})
+		b.Run(fmt.Sprintf("NormalizeRowsL1_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			fillDenseRand(b, X, 909)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Y, _, err := matrix.NormalizeRowsL1(X)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Y
+			}
+		})
+		b.Run(fmt.Sprintf("NormalizeRowsL2_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			fillDenseRand(b, X, 1001)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Y, _, err := matrix.NormalizeRowsL2(X)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Y
+			}
+		})
+		b.Run(fmt.Sprintf("Clip_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			fillDenseRand(b, X, 1111)
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Y, err := matrix.Clip(X, -0.3, 0.7)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Y
+			}
+		})
+		b.Run(fmt.Sprintf("ReplaceInfNaN_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			fillDenseRand(b, X, 1212)
+			// let's add some NaN/Inf
+			_ = X.Set(0, 0, math.NaN())
+			_ = X.Set(0, 1, math.Inf(1))
+			_ = X.Set(1, 0, math.Inf(-1))
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				Y, err := matrix.ReplaceInfNaN(X, 0)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkM = Y
+			}
+		})
+		b.Run(fmt.Sprintf("AllClose_n=%d", n), func(b *testing.B) {
+			X := mustDense(b, n, n)
+			Y := mustDense(b, n, n)
+			fillDenseRand(b, X, 1313)
+			fillDenseRand(b, Y, 1313) // same values ⇒ true
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				ok, err := matrix.AllClose(X, Y, 1e-9, 1e-12)
+				if err != nil {
+					b.Fatal(err)
+				}
+				sinkB = ok
 			}
 		})
 	}

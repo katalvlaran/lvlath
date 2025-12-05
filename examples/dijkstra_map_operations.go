@@ -46,7 +46,7 @@ func main1() {
 		if other == CAPITAL {
 			other = edge.From
 		}
-		fmt.Printf("  %2d: %s (%.1f km)\n", i+1, other, m2km(edge.Weight))
+		fmt.Printf("  %2d: %s (%.1f km)\n", i+1, other, edge.Weight)
 	}
 
 	// 3) Run Dijkstra from Kyiv, requesting full predecessor map.
@@ -69,7 +69,7 @@ func main1() {
 		if d == math.MaxInt64 {
 			fmt.Printf("  %-12s unreachable\n", city)
 		} else {
-			fmt.Printf("  %-12s %6.1f km\n", city, m2km(d))
+			fmt.Printf("  %-12s %6.1f km\n", city, d)
 		}
 	}
 

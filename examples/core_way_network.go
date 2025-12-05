@@ -57,9 +57,6 @@ const (
 
 	// MAX_KM sets the demo threshold for edge filtering.
 	MAX_KM = 300.0
-
-	// M_IN_KM uses to converts weight by km2m() + m2km().
-	M_IN_KM = 1000
 )
 
 // WaySegment describes one weighted link between two cities.
@@ -86,7 +83,7 @@ func _main() {
 		if other == CAPITAL {
 			other = e.From
 		}
-		fmt.Printf("  %s (%.1f km)\n", other, m2km(e.Weight))
+		fmt.Printf("  %s (%.1f km)\n", other, e.Weight)
 	}
 	// 1.3. CloneEmpty: same vertices, zero edges
 	ce := roadG.CloneEmpty()
@@ -95,7 +92,7 @@ func _main() {
 
 	// 1.4. Filter: keep only segments ≤ MAX_KM
 	roadG.FilterEdges(func(e *core.Edge) bool {
-		return m2km(e.Weight) <= MAX_KM
+		return e.Weight <= MAX_KM
 	})
 	fmt.Printf("After filtering ≤%.0f km: edges=%d\n", MAX_KM, roadG.EdgeCount())
 
@@ -112,7 +109,7 @@ func _main() {
 		if other == CAPITAL {
 			other = e.From
 		}
-		fmt.Printf("  %s (%.1f km)\n", other, m2km(e.Weight))
+		fmt.Printf("  %s (%.1f km)\n", other, e.Weight)
 	}
 
 	// 2.3. CloneEmpty demonstration
@@ -121,7 +118,7 @@ func _main() {
 
 	// 2.4. Filter out long links > MAX_KM
 	fullG.FilterEdges(func(e *core.Edge) bool {
-		return m2km(e.Weight) <= MAX_KM
+		return e.Weight <= MAX_KM
 	})
 	fmt.Printf("After filtering ≤%.0f km: edges=%d\n", MAX_KM, fullG.EdgeCount())
 
@@ -141,7 +138,7 @@ func BuildUkraineRoads() *core.Graph {
 	// Undirected by default: edges will be mirrored automatically.
 	for _, seg := range RoadNetwork {
 		// AddEdge stores weight as int64 km, auto-adds vertices.
-		if _, err := g.AddEdge(seg.From, seg.To, km2m(seg.KM)); err != nil {
+		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
 			log.Fatalf("AddEdge %s→%s failed: %v", seg.From, seg.To, err)
 		}
 	}
@@ -156,27 +153,21 @@ func BuildFullUkraineGraph() *core.Graph {
 	var seg WaySegment
 	// add roads as 337 undirected edges
 	for _, seg = range RoadNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, km2m(seg.KM)); err != nil {
+		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
 			log.Fatalf("buildFullGraph roads: %v", err)
 		}
 	}
 	// add rails as 200 parallel edges
 	for _, seg = range RailwayNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, km2m(seg.KM)); err != nil {
+		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
 			log.Fatalf("buildFullGraph rails: %v", err)
 		}
 	}
 	// add air as 37 directed edges
 	for _, seg = range AirNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, km2m(seg.KM), core.WithEdgeDirected(true)); err != nil {
+		if _, err := g.AddEdge(seg.From, seg.To, seg.KM, core.WithEdgeDirected(true)); err != nil {
 			log.Fatalf("buildFullGraph rails: %v", err)
 		}
 	}
 	return g
 }
-
-// Convert km(flat64) into meters(int64)
-func km2m(x float64) int64 { return int64(x * M_IN_KM) }
-
-// Convert meters(int64) into km(flat64)
-func m2km(x int64) float64 { return float64(x) / M_IN_KM }

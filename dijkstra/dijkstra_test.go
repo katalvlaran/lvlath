@@ -89,8 +89,8 @@ func TestDijkstra_SimpleTriangle_NoPath(t *testing.T) {
 	}
 
 	// Distance from A to C should be 3 via A→B→C.
-	if got, want := dist["C"], int64(3); got != want {
-		t.Errorf("dist[C] = %d; want %d", got, want)
+	if got, want := dist["C"], 3.0; got != want {
+		t.Errorf("dist[C] = %g; want %g", got, want)
 	}
 	// prev should be nil when ReturnPath=false.
 	if prev != nil {
@@ -145,18 +145,18 @@ func TestDijkstra_ChainWithPath(t *testing.T) {
 	}
 
 	// Expected distances.
-	expectedDistances := map[string]int64{
-		"A": 0,
-		"B": 1,
-		"C": 2,
-		"D": 3,
-		"E": 4,
-		"F": 4,
-		"G": 5,
+	expectedDistances := map[string]float64{
+		"A": 0.0,
+		"B": 1.0,
+		"C": 2.0,
+		"D": 3.0,
+		"E": 4.0,
+		"F": 4.0,
+		"G": 5.0,
 	}
 	for v, want := range expectedDistances {
 		if got := dist[v]; got != want {
-			t.Errorf("dist[%s] = %d; want %d", v, got, want)
+			t.Errorf("dist[%s] = %g; want %g", v, got, want)
 		}
 	}
 
@@ -186,15 +186,15 @@ func TestDijkstra_MediumDirectedGraph(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Expected: dist[B]=2 (via A→C→B), dist[C]=1, dist[D]=5 (via A→C→B→D).
-	if dist["C"] != 1 {
-		t.Errorf("dist[C] = %d; want %d", dist["C"], 1)
+	// Expected: dist[B]=2.0 (via A→C→B), dist[C]=1.0, dist[D]=5.0 (via A→C→B→D).
+	if dist["C"] != 1.0 {
+		t.Errorf("dist[C] = %g; want %g", dist["C"], 1.0)
 	}
-	if dist["B"] != 2 {
-		t.Errorf("dist[B] = %d; want %d", dist["B"], 2)
+	if dist["B"] != 2.0 {
+		t.Errorf("dist[B] = %g; want %g", dist["B"], 2.0)
 	}
-	if dist["D"] != 5 {
-		t.Errorf("dist[D] = %d; want %d", dist["D"], 5)
+	if dist["D"] != 5.0 {
+		t.Errorf("dist[D] = %g; want %g", dist["D"], 5.0)
 	}
 	// prev should be nil because ReturnPath was not requested.
 	if prev != nil {
@@ -227,17 +227,17 @@ func TestDijkstra_MixedEdges(t *testing.T) {
 
 	// Expected distances:
 	// A:0, B:2, C:5 (via A→B—C), D:6 (via A→B—C→D).
-	if dist["A"] != 0 {
-		t.Errorf("dist[A] = %d; want %d", dist["A"], 0)
+	if dist["A"] != 0.0 {
+		t.Errorf("dist[A] = %g; want %g", dist["A"], 0.0)
 	}
-	if dist["B"] != 2 {
-		t.Errorf("dist[B] = %d; want %d", dist["B"], 2)
+	if dist["B"] != 2.0 {
+		t.Errorf("dist[B] = %g; want %g", dist["B"], 2.0)
 	}
-	if dist["C"] != 5 {
-		t.Errorf("dist[C] = %d; want %d", dist["C"], 5)
+	if dist["C"] != 5.0 {
+		t.Errorf("dist[C] = %g; want %g", dist["C"], 5.0)
 	}
-	if dist["D"] != 6 {
-		t.Errorf("dist[D] = %d; want %d", dist["D"], 6)
+	if dist["D"] != 6.0 {
+		t.Errorf("dist[D] = %g; want %g", dist["D"], 6.0)
 	}
 
 	// Check predecessor chain: B←A, C←B, D←C.
@@ -254,7 +254,7 @@ func TestDijkstra_MixedEdges(t *testing.T) {
 	// Confirm that Dijkstra did not traverse backward along directed edge A←B:
 	// dist[A] stays 0.
 	if dist["A"] != 0 {
-		t.Errorf("dist[A] changed unexpectedly to %d", dist["A"])
+		t.Errorf("dist[A] changed unexpectedly to %g", dist["A"])
 	}
 }
 
@@ -280,17 +280,17 @@ func TestDijkstra_MaxDistanceLimits(t *testing.T) {
 	}
 
 	// dist[A]=0, dist[B]=1, dist[C] and dist[D] remain ∞ (unvisited).
-	if dist["A"] != 0 {
-		t.Errorf("dist[A] = %d; want %d", dist["A"], 0)
+	if dist["A"] != 0.0 {
+		t.Errorf("dist[A] = %g; want %g", dist["A"], 0.0)
 	}
-	if dist["B"] != 1 {
-		t.Errorf("dist[B] = %d; want %d", dist["B"], 1)
+	if dist["B"] != 1.0 {
+		t.Errorf("dist[B] = %g; want %g", dist["B"], 1.0)
 	}
-	if dist["C"] != math.MaxInt64 {
-		t.Errorf("dist[C] = %d; want %d (unreachable)", dist["C"], math.MaxInt64)
+	if !math.IsInf(dist["C"], 1) {
+		t.Errorf("dist[C] = %g; want %g (unreachable)", dist["C"], math.Inf(1))
 	}
-	if dist["D"] != math.MaxInt64 {
-		t.Errorf("dist[D] = %d; want %d (unreachable)", dist["D"], math.MaxInt64)
+	if !math.IsInf(dist["D"], 1) {
+		t.Errorf("dist[D] = %g; want %g (unreachable)", dist["D"], math.Inf(1))
 	}
 }
 
@@ -310,11 +310,11 @@ func TestDijkstra_MaxDistanceZero(t *testing.T) {
 	}
 
 	// dist[A]=0, dist[B] remains ∞.
-	if dist["A"] != 0 {
-		t.Errorf("dist[A] = %d; want %d", dist["A"], 0)
+	if dist["A"] != 0.0 {
+		t.Errorf("dist[A] = %g; want %g", dist["A"], 0.0)
 	}
-	if dist["B"] != math.MaxInt64 {
-		t.Errorf("dist[B] = %d; want %d (unreachable)", dist["B"], math.MaxInt64)
+	if !math.IsInf(dist["B"], 1) {
+		t.Errorf("dist[B] = %g; want %g (unreachable)", dist["B"], math.Inf(1))
 	}
 }
 
@@ -335,8 +335,8 @@ func TestDijkstra_InfThreshold_DefaultBehavior(t *testing.T) {
 	}
 
 	// dist[C] should equal 30.
-	if dist["C"] != 30 {
-		t.Errorf("dist[C] = %d; want %d", dist["C"], 30)
+	if dist["C"] != 30.0 {
+		t.Errorf("dist[C] = %g; want %g", dist["C"], 30.0)
 	}
 }
 
@@ -358,8 +358,8 @@ func TestDijkstra_InfThresholdStopsHeavyEdge(t *testing.T) {
 	}
 
 	// Now the shortest path from A to C is A→B→C with total cost 6.
-	if dist["C"] != 6 {
-		t.Errorf("dist[C] = %d; want %d", dist["C"], 6)
+	if dist["C"] != 6.0 {
+		t.Errorf("dist[C] = %g; want %g", dist["C"], 6.0)
 	}
 }
 
@@ -371,15 +371,15 @@ func TestDijkstra_InfObstacle_3x3GridCorrected(t *testing.T) {
 		_ = g.AddVertex(v)
 	}
 	// Connect horizontally and vertically where applicable with weight=1.
-	_, _ = g.AddEdge("0,0", "0,1", 1)
-	_, _ = g.AddEdge("0,0", "1,0", 1)
-	_, _ = g.AddEdge("0,1", "0,2", 1)
-	_, _ = g.AddEdge("1,0", "2,0", 1)
-	_, _ = g.AddEdge("1,1", "1,2", 1)
-	_, _ = g.AddEdge("2,1", "2,2", 1)
+	_, _ = g.AddEdge("0,0", "0,1", 1.0)
+	_, _ = g.AddEdge("0,0", "1,0", 1.0)
+	_, _ = g.AddEdge("0,1", "0,2", 1.0)
+	_, _ = g.AddEdge("1,0", "2,0", 1.0)
+	_, _ = g.AddEdge("1,1", "1,2", 1.0)
+	_, _ = g.AddEdge("2,1", "2,2", 1.0)
 
 	// Now make row y=1 into an “impassable wall” by adding edges with weight=threshold.
-	threshold := int64(5)
+	threshold := 5.0
 	// Add or replace edges at ("1,0"→"1,1") and ("1,1"→"1,2") with weight=5.
 	_, _ = g.AddEdge("1,0", "1,1", threshold)
 	_, _ = g.AddEdge("1,1", "1,2", threshold)
@@ -395,8 +395,8 @@ func TestDijkstra_InfObstacle_3x3GridCorrected(t *testing.T) {
 	}
 
 	// Now vertex "1,1" is unreachable (it lies behind the “wall”).
-	if dist["1,1"] != math.MaxInt64 {
-		t.Errorf("Expected '1,1' unreachable (MaxInt64), got %d", dist["1,1"])
+	if !math.IsInf(dist["1,1"], 1) {
+		t.Errorf("Expected '1,1' unreachable (+Infinity), got %g", dist["1,1"])
 	}
 }
 
@@ -416,8 +416,8 @@ func TestDijkstra_SingleVertex_ReturnsZero(t *testing.T) {
 	}
 
 	// For the only vertex, distance is 0 and prev["Solo"] == "".
-	if d := dist["Solo"]; d != 0 {
-		t.Errorf("dist[\"Solo\"] = %d; want %d", d, 0)
+	if d := dist["Solo"]; d != 0.0 {
+		t.Errorf("dist[\"Solo\"] = %g; want %g", d, 0.0)
 	}
 	if p := prev["Solo"]; p != "" {
 		t.Errorf("prev[\"Solo\"] = %q; want empty string", p)
@@ -446,8 +446,8 @@ func TestDijkstra_SelfLoopZeroWeight(t *testing.T) {
 	}
 
 	// Distance from X to itself is 0, and prev["X"] == "".
-	if d := dist["X"]; d != 0 {
-		t.Errorf("dist[\"X\"] = %d; want %d", d, 0)
+	if d := dist["X"]; d != 0.0 {
+		t.Errorf("dist[\"X\"] = %g; want %g", d, 0.0)
 	}
 	if p := prev["X"]; p != "" {
 		t.Errorf("prev[\"X\"] = %q; want empty string", p)

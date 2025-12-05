@@ -101,8 +101,8 @@ type Options struct {
 	Source           string     // The ID of the source vertex
 	MemoryMode       MemoryMode // Controls how predecessors are stored (Full or Compact)
 	ReturnPath       bool       // Whether to return the predecessor map
-	MaxDistance      int64      // Maximum distance to explore
-	InfEdgeThreshold int64      // Weight threshold above which edges are non-traversable
+	MaxDistance      float64    // Maximum distance to explore
+	InfEdgeThreshold float64    // Weight threshold above which edges are non-traversable
 }
 
 // Option represents a functional option for configuring Dijkstra.
@@ -137,7 +137,7 @@ func WithReturnPath() Option {
 // Vertices whose shortest distance would exceed this value are not explored.
 // Must pass a non-negative value; negative values cause ErrBadMaxDistance.
 // Default (if not set) is math.MaxInt64 (no cap).
-func WithMaxDistance(max int64) Option {
+func WithMaxDistance(max float64) Option {
 	return func(o *Options) {
 		if max < 0 {
 			// Panic to signal invalid configuration early.
@@ -153,7 +153,7 @@ func WithMaxDistance(max int64) Option {
 // Edges with weight ≥ threshold are skipped entirely.
 // Must pass a positive value; zero or negative cause ErrBadInfThreshold.
 // Default (if not set) is math.MaxInt64 (no edges treated as impassable).
-func WithInfEdgeThreshold(threshold int64) Option {
+func WithInfEdgeThreshold(threshold float64) Option {
 	return func(o *Options) {
 		if threshold <= 0 {
 			panic(ErrBadInfThreshold.Error())
@@ -170,14 +170,14 @@ func WithInfEdgeThreshold(threshold int64) Option {
 //   - Source:           <as passed> (no validation here; validated in Dijkstra).
 //   - MemoryMode:       MemoryModeFull (predecessor map fully stored).
 //   - ReturnPath:       false (predecessor map not returned).
-//   - MaxDistance:      math.MaxInt64 (no distance limit; explore all reachable).
-//   - InfEdgeThreshold: math.MaxInt64 (no edges treated as impassable).
+//   - MaxDistance:      math.Inf(1) (no distance limit; explore all reachable).
+//   - InfEdgeThreshold: math.Inf(1) (no edges treated as impassable).
 func DefaultOptions(source string) Options {
 	return Options{
 		Source:           source,
 		MemoryMode:       MemoryModeFull,
 		ReturnPath:       false,
-		MaxDistance:      math.MaxInt64,
-		InfEdgeThreshold: math.MaxInt64,
+		MaxDistance:      math.Inf(1),
+		InfEdgeThreshold: math.Inf(1),
 	}
 }

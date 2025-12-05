@@ -3,9 +3,28 @@
 package builder
 
 import (
+	"fmt"
 	"math/rand"
+	"strings"
 	"testing"
 )
+
+// assertPanics runs f and asserts that it panics with a message containing wantSubstr.
+func assertPanics(t *testing.T, f func(), wantSubstr string) {
+	t.Helper()
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic containing %q, got none", wantSubstr)
+			return
+		}
+		got := fmt.Sprint(r)
+		if wantSubstr != "" && !strings.Contains(got, wantSubstr) {
+			t.Fatalf("panic mismatch: want substring %q, got %q", wantSubstr, got)
+		}
+	}()
+	f()
+}
 
 // TestIDSchemeOptions verifies that ID scheme options are applied in order
 // and that nil schemes are ignored (no-op).
@@ -43,11 +62,8 @@ func TestIDSchemeOptions(t *testing.T) {
 		t.Errorf("WithDefaultIDs override: expected \"3\", got %q", got)
 	}
 
-	// 6. Nil IDFn in WithIDScheme should be ignored
-	cfgNil := newBuilderConfig(WithIDScheme(nil))
-	if got := cfgNil.idFn(5); got != "5" {
-		t.Errorf("WithIDScheme(nil): expected default \"5\", got %q", got)
-	}
+	// 6. WithIDScheme(nil) MUST panic (fail-fast), not no-op
+	assertPanics(t, func() { _ = newBuilderConfig(WithIDScheme(nil)) }, "WithIDScheme(nil)")
 }
 
 // TestRNGOptions verifies that RNG options configure the rng field correctly,
@@ -68,11 +84,8 @@ func TestRNGOptions(t *testing.T) {
 		t.Errorf("WithRand: expected rng %v, got %v", expRNG, cfgWithRand.rng)
 	}
 
-	// 3. WithRand(nil) should be no-op
-	cfgRandNil := newBuilderConfig(WithRand(nil))
-	if cfgRandNil.rng != nil {
-		t.Errorf("WithRand(nil): expected nil, got %v", cfgRandNil.rng)
-	}
+	// 3. WithRand(nil) MUST panic (fail-fast), not no-op
+	assertPanics(t, func() { _ = newBuilderConfig(WithRand(nil)) }, "WithRand(nil)")
 
 	// 4. WithSeed should produce reproducible RNG
 	cfgSeed1 := newBuilderConfig(WithSeed(42))
@@ -91,47 +104,44 @@ func TestRNGOptions(t *testing.T) {
 func TestWeightFnOptions(t *testing.T) {
 	t.Parallel() // allow parallel execution
 
-	const constVal = 9
-	const min, max = int64(2), int64(4)
+	const constVal = 9.0
+	const min, max = 2.0, 4.0
 	rng := rand.New(rand.NewSource(1))
 
 	// 1. Default configuration: weightFn should be DefaultWeightFn
 	cfgDefault := newBuilderConfig()
 	if w := cfgDefault.weightFn(nil); w != DefaultEdgeWeight {
-		t.Errorf("default weightFn(nil): expected %d, got %d", DefaultEdgeWeight, w)
+		t.Errorf("default weightFn(nil): expected %g, got %g", DefaultEdgeWeight, w)
 	}
 
 	// 2. WithConstantWeight should override to constant value
 	cfgConst := newBuilderConfig(WithConstantWeight(constVal))
 	if w := cfgConst.weightFn(nil); w != constVal {
-		t.Errorf("WithConstantWeight(nil): expected %d, got %d", constVal, w)
+		t.Errorf("WithConstantWeight(nil): expected %g, got %g", constVal, w)
 	}
 	if w := cfgConst.weightFn(rng); w != constVal {
-		t.Errorf("WithConstantWeight(rng): expected %d, got %d", constVal, w)
+		t.Errorf("WithConstantWeight(rng): expected %g, got %g", constVal, w)
 	}
 
 	// 3. WithUniformWeight should override to uniform sampler
 	cfgUni := newBuilderConfig(WithUniformWeight(min, max))
 	// nil rng yields default
 	if w := cfgUni.weightFn(nil); w != DefaultEdgeWeight {
-		t.Errorf("WithUniformWeight(nil rng): expected default %d, got %d", DefaultEdgeWeight, w)
+		t.Errorf("WithUniformWeight(nil rng): expected default %g, got %g", DefaultEdgeWeight, w)
 	}
 	// seeded rng yields value in [min,max]
 	val := cfgUni.weightFn(rng)
 	if val < min || val > max {
-		t.Errorf("WithUniformWeight(rng): expected in [%d,%d], got %d", min, max, val)
+		t.Errorf("WithUniformWeight(rng): expected in [%g,%g], got %g", min, max, val)
 	}
 
 	// 4. Override order: last option wins
 	cfgOverride := newBuilderConfig(WithConstantWeight(1), WithUniformWeight(min, max))
 	val2 := cfgOverride.weightFn(rng)
 	if val2 < min || val2 > max {
-		t.Errorf("override order: expected uniform in [%d,%d], got %d", min, max, val2)
+		t.Errorf("override order: expected uniform in [%g,%g], got %g", min, max, val2)
 	}
 
-	// 5. Nil WeightFn in WithWeightFn should be ignored
-	cfgNil := newBuilderConfig(WithWeightFn(nil))
-	if w := cfgNil.weightFn(nil); w != DefaultEdgeWeight {
-		t.Errorf("WithWeightFn(nil): expected default %d, got %d", DefaultEdgeWeight, w)
-	}
+	// 5. WithWeightFn(nil) MUST panic (fail-fast)
+	assertPanics(t, func() { _ = newBuilderConfig(WithWeightFn(nil)) }, "WithWeightFn(nil)")
 }

@@ -17,30 +17,30 @@
 // # What (major building blocks)
 //
 //	Core kernels
-//	- Add / Sub / Hadamard / Scale / Transpose — element-wise ops and transforms.
-//	- Mul / MatVec — matrix×matrix and matrix×vector.
-//	- Eigen (Jacobi) — symmetric eigen-decomposition (values + eigenvectors).
-//	- LU / Inverse / QR — basic factorizations without pivoting (deterministic).
-//	- FloydWarshall — APSP in-place (k→i→j); +Inf=no edge; diag=0.
+//	- Add / Sub / Hadamard / Scale / Transpose - element-wise ops and transforms.
+//	- Mul / MatVec - matrix×matrix and matrix×vector.
+//	- Eigen (Jacobi) - symmetric eigen-decomposition (values + eigenvectors).
+//	- LU / Inverse / QR - basic factorizations without pivoting (deterministic).
+//	- FloydWarshall - APSP in-place (k→i→j); +Inf=no edge; diag=0.
 //
 //	Graph-related
-//	- AdjacencyMatrix — dense adjacency with stable vertex order and options (directed/weighted/loops/multi).
-//	- NewAdjacencyMatrix / ToGraph — round-trip between core.Graph and adjacency (metric-closure guarded).
-//	- MetricClosure / APSP over adjacency — computes all-pairs shortest-path distances in-place.
-//	- DegreeVector — per-vertex row-sum; loops count as 1; +Inf/NaN ignored.
-//	- Neighbors — stable-order adjacency scan.
+//	- AdjacencyMatrix - dense adjacency with stable vertex order and options (directed/weighted/loops/multi).
+//	- NewAdjacencyMatrix / ToGraph - round-trip between core.Graph and adjacency (metric-closure guarded).
+//	- MetricClosure / APSP over adjacency - computes all-pairs shortest-path distances in-place.
+//	- DegreeVector - per-vertex row-sum; loops count as 1; +Inf/NaN ignored.
+//	- Neighbors - stable-order adjacency scan.
 //
 //	Facades & convenience
-//	- T / Sum / Diff / Product / HadamardProd / ScaleBy / MatVecMul — thin aliases to kernels.
-//	- RowSums / ColSums — reductions via MatVec (useful for stochastic normalization and features).
-//	- NewZeros / NewIdentity / ZerosLike / IdentityLike — intention-revealing constructors.
-//	- Symmetrize — (A + Aᵀ)/2 to repair asymmetry for spectral methods.
-//	- BuildMetricClosure — adjacency build + APSP + policy flag to refuse edge export.
-//	- CenterColumns / CenterRows — mean-centering by columns/rows (PCA/DTW/Regression).
-//	- NormalizeRowsL1 / NormalizeRowsL2 — row-stochastic / L2-normalization.
-//	- Covariance / Correlation — sample covariance and Pearson correlation (by columns).
-//	- AllClose — PR-friendly equality with tolerances.
-//	- Clip / ReplaceInfNaN — numeric sanitizers for robust pipelines.
+//	- T / Sum / Diff / Product / HadamardProd / ScaleBy / MatVecMul - thin aliases to kernels.
+//	- RowSums / ColSums - reductions via MatVec (useful for stochastic normalization and features).
+//	- NewZeros / NewIdentity / ZerosLike / IdentityLike - intention-revealing constructors.
+//	- Symmetrize - (A + Aᵀ)/2 to repair asymmetry for spectral methods.
+//	- BuildMetricClosure - adjacency build + APSP + policy flag to refuse edge export.
+//	- CenterColumns / CenterRows - mean-centering by columns/rows (PCA/DTW/Regression).
+//	- NormalizeRowsL1 / NormalizeRowsL2 - row-stochastic / L2-normalization.
+//	- Covariance / Correlation - sample covariance and Pearson correlation (by columns).
+//	- AllClose - PR-friendly equality with tolerances.
+//	- Clip / ReplaceInfNaN - numeric sanitizers for robust pipelines.
 //
 // # Why
 //

@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_platonic.go — implementation of PlatonicSolid(name, withCenter) constructor.
+// impl_platonic.go - implementation of PlatonicSolid(name, withCenter) constructor.
 //
 // Canonical model (Ta-builder V1):
-//   • Build one of the five Platonic solids using a canonical, deterministic edge set.
-//   • Optionally add a central hub "Center" with spokes to all shell vertices.
+//   - Build one of the five Platonic solids using a canonical, deterministic edge set.
+//   - Optionally add a central hub "Center" with spokes to all shell vertices.
 //
 // Contract:
-//   • name ∈ {Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron}.
-//   • Unknown name → ErrOptionViolation (invalid parameter).
-//   • Adds vertices via cfg.idFn in ascending index order (0..n-1).
-//   • Emits shell edges in stable order (pre-sorted in variants_platonic.go).
-//   • For directed graphs, mirrors each shell edge to preserve symmetry.
-//   • If withCenter == true, adds fixed hub ID "Center" and spokes (mirrored if directed).
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - name ∈ {Tetrahedron, Cube, Octahedron, Dodecahedron, Icosahedron}.
+//   - Unknown name → ErrOptionViolation (invalid parameter).
+//   - Adds vertices via cfg.idFn in ascending index order (0..n-1).
+//   - Emits shell edges in stable order (pre-sorted in variants_platonic.go).
+//   - For directed graphs, mirrors each shell edge to preserve symmetry.
+//   - If withCenter == true, adds fixed hub ID "Center" and spokes (mirrored if directed).
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(V+E) for the selected solid (constants: V≤20, E≤30).
-//   • Space: O(1) extra beyond small loop locals.
+//   - Time: O(V+E) for the selected solid (constants: V≤20, E≤30).
+//   - Space: O(1) extra beyond small loop locals.
 //
 // Determinism:
-//   • Vertex IDs are deterministic via cfg.idFn.
-//   • Edge emission order is deterministic (pre-sorted (u,v) pairs).
-//   • Spoke order uses ascending vertex indices.
+//   - Vertex IDs are deterministic via cfg.idFn.
+//   - Edge emission order is deterministic (pre-sorted (u,v) pairs).
+//   - Spoke order uses ascending vertex indices.
 
 package builder
 
@@ -72,6 +72,10 @@ func PlatonicSolid(name PlatonicName, withCenter bool) Constructor {
 		useWeight := g.Weighted() // whether weights are observed by the core graph
 		directed := g.Directed()  // whether to mirror edges explicitly
 
+		var (
+			w        float64 // decide weight exactly once per realized edge (deterministic per rng state).
+			uID, vID string  // edges key
+		)
 		// 4) Fetch the pre-sorted canonical shell edges and emit them deterministically.
 		edges, ok := platonicEdgeSets[name] // O(1) retrieval (predefined at init)
 		if !ok {
@@ -79,11 +83,9 @@ func PlatonicSolid(name PlatonicName, withCenter bool) Constructor {
 			return fmt.Errorf("%s: missing edge set for %q: %w", methodPlatonicSolid, name, ErrConstructFailed)
 		}
 		for _, ch := range edges { // deterministic iteration order guaranteed by pre-sort
-			uID := cfg.idFn(ch.U) // left endpoint ID via cfg.idFn
-			vID := cfg.idFn(ch.V) // right endpoint ID via cfg.idFn
+			uID = cfg.idFn(ch.U) // left endpoint ID via cfg.idFn
+			vID = cfg.idFn(ch.V) // right endpoint ID via cfg.idFn
 
-			// Decide weight exactly once per realized edge (deterministic per rng state).
-			var w int64
 			if useWeight {
 				w = cfg.weightFn(cfg.rng)
 			} else {
@@ -92,12 +94,12 @@ func PlatonicSolid(name PlatonicName, withCenter bool) Constructor {
 
 			// Add shell edge u—v; core interprets directedness/multigraph policy.
 			if _, err := g.AddEdge(uID, vID, w); err != nil {
-				return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodPlatonicSolid, uID, vID, w, err)
+				return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodPlatonicSolid, uID, vID, w, err)
 			}
 			// Mirror for directed graphs to preserve shell symmetry explicitly.
 			if directed {
 				if _, err := g.AddEdge(vID, uID, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodPlatonicSolid, vID, uID, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodPlatonicSolid, vID, uID, w, err)
 				}
 			}
 		}
@@ -110,10 +112,8 @@ func PlatonicSolid(name PlatonicName, withCenter bool) Constructor {
 			}
 			// Connect hub to every shell vertex idFn(i) for i=0..n-1 (stable order).
 			for i := 0; i < n; i++ {
-				vID := cfg.idFn(i) // shell vertex ID
+				vID = cfg.idFn(i) // shell vertex ID
 
-				// Choose spoke weight once per spoke (deterministic for fixed seed).
-				var w int64
 				if useWeight {
 					w = cfg.weightFn(cfg.rng)
 				} else {
@@ -122,12 +122,12 @@ func PlatonicSolid(name PlatonicName, withCenter bool) Constructor {
 
 				// Add Center → vID spoke (core handles semantics).
 				if _, err := g.AddEdge(centerVertexID, vID, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodPlatonicSolid, centerVertexID, vID, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodPlatonicSolid, centerVertexID, vID, w, err)
 				}
 				// Mirror for directed graphs (explicit symmetric spokes).
 				if directed {
 					if _, err := g.AddEdge(vID, centerVertexID, w); err != nil {
-						return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodPlatonicSolid, vID, centerVertexID, w, err)
+						return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodPlatonicSolid, vID, centerVertexID, w, err)
 					}
 				}
 			}

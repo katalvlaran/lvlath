@@ -19,20 +19,20 @@
 //
 // Algorithms Provided
 //
-//   - Kruskal(g *core.Graph) ([]core.Edge, int64, error)
+//   - Kruskal(g *core.Graph) ([]core.Edge, float64, error)
 //
 //   - Strategy: Sort all edges by weight, then iterate from smallest to largest. Use a Disjoint-Set (Union-Find) data structure
 //     to merge vertices component-by-component, skipping edges whose endpoints are already connected. Stop once |V|−1 edges have been added.
 //
 //   - Complexity:
 //
-//   - Time: O(E log E + α(V)·E) ≈ O(E log V) because sorting dominates (E = number of edges, V = number of vertices, α = inverse Ackermann).
+//   - Time: O(E log E + α(V)*E) ≈ O(E log V) because sorting dominates (E = number of edges, V = number of vertices, α = inverse Ackermann).
 //
 //   - Space: O(V + E) for storing parent/rank arrays and the sorted edge list.
 //
 //   - Determinism: graph.Edges() returns edges in ascending ID order; we perform a stable sort by weight, ensuring that ties break predictably.
 //
-//   - Prim(g *core.Graph, root string) ([]core.Edge, int64, error)
+//   - Prim(g *core.Graph, root string) ([]core.Edge, float64, error)
 //
 //   - Strategy: Grow a single tree starting from a specified root vertex. Maintain a min-heap (priority queue) of candidate edges
 //     that connect the current tree to an outside vertex. At each step, extract the smallest-weight edge that adds a new vertex.
@@ -54,7 +54,7 @@
 //
 //   - Requires a valid starting vertex (root). If you know a “good” root (e.g., a central hub), Prim often outperforms Kruskal.
 //
-//   - Kruskal (O(E log E + α(V)·E))
+//   - Kruskal (O(E log E + α(V)*E))
 //
 //   - Easy to implement when you simply need one global pass over all edges.
 //
@@ -67,28 +67,28 @@
 //	Both Kruskal and Prim return meaningful sentinel errors to signal invalid inputs or unreachable MST scenarios:
 //
 //	- ErrInvalidGraph
-//	    • Graph is nil, OR
-//	    • graph.Directed() == true (MST requires undirected), OR
-//	    • !graph.Weighted() (MST requires nonzero weights), OR
-//	    • graph.HasDirectedEdges() == true (if mixed-mode per-edge overrides exist; MST requires purely undirected).
+//	    - Graph is nil, OR
+//	    - graph.Directed() == true (MST requires undirected), OR
+//	    - !graph.Weighted() (MST requires nonzero weights), OR
+//	    - graph.HasDirectedEdges() == true (if mixed-mode per-edge overrides exist; MST requires purely undirected).
 //
 //	- ErrEmptyRoot (Prim only)
-//	    • root == "" (no starting vertex specified).
+//	    - root == "" (no starting vertex specified).
 //
 //	- core.ErrVertexNotFound (Prim only)
-//	    • root does not exist in graph.Vertices().
+//	    - root does not exist in graph.Vertices().
 //
 //	- ErrDisconnected
-//	    • |V| == 0 (empty graph), OR
-//	    • |V| > 1 but the graph is not fully connected (no spanning tree can cover all vertices).
+//	    - |V| == 0 (empty graph), OR
+//	    - |V| > 1 but the graph is not fully connected (no spanning tree can cover all vertices).
 //
 // GoDoc Summary
 //
-//   - Kruskal(graph *core.Graph) ([]core.Edge, int64, error)
+//   - Kruskal(graph *core.Graph) ([]core.Edge, float64, error)
 //     Compute MST via global edge sort + union-find.
 //     Returns (edges, totalWeight, nil) on success, else returns (nil, 0, ErrInvalidGraph/ErrDisconnected).
 //
-//   - Prim(graph *core.Graph, root string) ([]core.Edge, int64, error)
+//   - Prim(graph *core.Graph, root string) ([]core.Edge, float64, error)
 //     Compute MST via a min-heap expansion from a specified root vertex.
 //     Returns (edges, totalWeight, nil) on success, else returns (nil, 0, ErrInvalidGraph/ErrEmptyRoot/core.ErrVertexNotFound/ErrDisconnected).
 //

@@ -323,7 +323,7 @@ func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, 
 //
 // Behavior highlights:
 //   - Threshold is strict (a[i,j] > threshold).
-//   - keepWeights casts a[i,j] to int64 (truncate toward zero); binary emits weight=1.
+//   - keepWeights casts a[i,j] to float64 (truncate toward zero); binary emits weight=1.
 //   - Orientation is inherited from the original build options (am.opts.directed).
 //
 // Inputs:
@@ -450,7 +450,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 // returnEdge EMIT a single edge when aij passes threshold under the chosen weight policy.
 // Implementation:
 //   - Stage 1: skip +Inf and sub-threshold entries.
-//   - Stage 2: derive integer weight: keep ⇒ int64(aij) (truncate toward zero), binary ⇒ 1.
+//   - Stage 2: derive integer weight: keep ⇒ float64(aij) (truncate toward zero), binary ⇒ 1.
 //   - Stage 3: call core.AddEdge(fromID, toID, w).
 //
 // Behavior highlights:
@@ -473,11 +473,11 @@ func returnEdge(g *core.Graph, fromID, toID string, aij float64, threshold float
 		return nil // not an edge per strict policy
 	}
 	// Derive integer weight for core: keep ⇒ cast a[i,j]; binary ⇒ 1.
-	var w int64
+	var w float64
 	if keep {
-		w = int64(aij) // adjacency values originate from int64 edge weights
+		w = aij // adjacency values originate from edge weights
 	} else {
-		w = 1
+		w = 1.0
 	}
 	// Insert the edge; core enforces multi/loop constraints and ordering.
 	if _, err := g.AddEdge(fromID, toID, w); err != nil {
@@ -558,6 +558,7 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 			}
 			out[i] = s // store degree/strength of vertex i
 		}
+
 		return out, nil // return fast-path result
 	}
 
@@ -587,5 +588,6 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 		}
 		out[i] = s // assign row sum
 	}
+
 	return out, nil
 }

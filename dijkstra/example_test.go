@@ -17,11 +17,11 @@ func ExampleDijkstra_Triangle() {
 	// 1) Create a new weighted graph. By passing core.WithWeighted(), we enable non-negative weights.
 	g := core.NewGraph(core.WithWeighted())
 	// 2) Add an undirected edge A—B with weight=1.
-	g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("A", "B", 1)
 	// 3) Add an undirected edge B—C with weight=2.
-	g.AddEdge("B", "C", 2)
+	_, _ = g.AddEdge("B", "C", 2)
 	// 4) Add an undirected edge A—C with weight=5.
-	g.AddEdge("A", "C", 5)
+	_, _ = g.AddEdge("A", "C", 5)
 
 	// 5) Compute Dijkstra from source "A" without requesting the predecessor map.
 	//    We call dijkstra.Source("A") to set the Source field; no WithReturnPath() means prev==nil.
@@ -37,7 +37,7 @@ func ExampleDijkstra_Triangle() {
 
 	// 7) Print distances to A, B, and C.
 	//    dist["A"] should be 0, dist["B"] should be 1, dist["C"] should be 3 (via A→B→C).
-	fmt.Printf("dist[A]=%d, dist[B]=%d, dist[C]=%d\n", dist["A"], dist["B"], dist["C"])
+	fmt.Printf("dist[A]=%g, dist[B]=%g, dist[C]=%g\n", dist["A"], dist["B"], dist["C"])
 	// Output: dist[A]=0, dist[B]=1, dist[C]=3
 }
 
@@ -48,15 +48,15 @@ func ExampleDijkstra_MediumGraph() {
 	// 1) Create a new directed, weighted graph.
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// 2) Add directed edge A→B weight=2.
-	g.AddEdge("A", "B", 2)
+	_, _ = g.AddEdge("A", "B", 2)
 	// 3) Add directed edge A→C weight=1.
-	g.AddEdge("A", "C", 1)
+	_, _ = g.AddEdge("A", "C", 1)
 	// 4) Add directed edge C→B weight=1.
-	g.AddEdge("C", "B", 1)
+	_, _ = g.AddEdge("C", "B", 1)
 	// 5) Add directed edge B→D weight=3.
-	g.AddEdge("B", "D", 3)
+	_, _ = g.AddEdge("B", "D", 3)
 	// 6) Add directed edge C→D weight=5.
-	g.AddEdge("C", "D", 5)
+	_, _ = g.AddEdge("C", "D", 5)
 
 	// 7) Run Dijkstra from source "A", requesting the predecessor map via WithReturnPath().
 	dist, prev, err := dijkstra.Dijkstra(
@@ -72,7 +72,7 @@ func ExampleDijkstra_MediumGraph() {
 
 	// 9) Print the distance to "D" and its immediate predecessor.
 	//    The shortest path to D is A→C→B→D with total cost 1+1+3 = 5.
-	fmt.Printf("dist[D]=%d, prev[D]=%s\n", dist["D"], prev["D"])
+	fmt.Printf("dist[D]=%g, prev[D]=%s\n", dist["D"], prev["D"])
 	// Output: dist[D]=5, prev[D]=B
 }
 
@@ -83,14 +83,14 @@ func ExampleDijkstra_Thresholds() {
 	// 1) Create a new weighted graph.
 	g := core.NewGraph(core.WithWeighted())
 	// 2) Add an edge A—B weight=2.
-	g.AddEdge("A", "B", 2)
+	_, _ = g.AddEdge("A", "B", 2)
 	// 3) Add an edge B—C weight=4.
-	g.AddEdge("B", "C", 4)
+	_, _ = g.AddEdge("B", "C", 4)
 	// 4) Add an edge A—C weight=10.
-	g.AddEdge("A", "C", 10)
+	_, _ = g.AddEdge("A", "C", 10)
 
 	// 5) Define a threshold = 5. Any edge with weight ≥5 is skipped.
-	threshold := int64(5)
+	threshold := 5.0
 	// 6) Run Dijkstra from "A" with InfEdgeThreshold=5.
 	//    This causes the direct edge A—C (weight=10) to be ignored.
 	dist, _, err := dijkstra.Dijkstra(
@@ -105,7 +105,7 @@ func ExampleDijkstra_Thresholds() {
 	}
 
 	// 8) Now the only path from A→C goes A→B→C = 2 + 4 = 6.
-	fmt.Printf("dist[C]=%d\n", dist["C"])
+	fmt.Printf("dist[C]=%g\n", dist["C"])
 	// Output: dist[C]=6
 }
 
@@ -116,11 +116,11 @@ func ExampleDijkstra_FromMatrix() {
 	// 1) Build an initial weighted graph g0.
 	g0 := core.NewGraph(core.WithWeighted())
 	// 2) Add directed edges A→B weight=5, B→C weight=7.
-	g0.AddEdge("A", "B", 5)
-	g0.AddEdge("B", "C", 7)
+	_, _ = g0.AddEdge("A", "B", 5)
+	_, _ = g0.AddEdge("B", "C", 7)
 
 	// 3) Convert g0 to an adjacency matrix. We set weighted=true so the matrix stores weights.
-	am, err := matrix.NewAdjacencyMatrix(g0, matrix.NewMatrixOptions(matrix.WithWeighted(true)))
+	am, err := matrix.NewAdjacencyMatrix(g0, matrix.NewMatrixOptions(matrix.WithWeighted()))
 	if err != nil {
 		fmt.Println("error building adjacency matrix:", err)
 		return
@@ -141,7 +141,7 @@ func ExampleDijkstra_FromMatrix() {
 	}
 
 	// 6) Print distance to "C", which should be 5 + 7 = 12.
-	fmt.Printf("dist[C]=%d\n", dist["C"])
+	fmt.Printf("dist[C]=%g\n", dist["C"])
 	// Output: dist[C]=12
 }
 
@@ -161,18 +161,18 @@ func ExampleDijkstra_HouseGraph() {
 	g := core.NewGraph(core.WithWeighted()) // directed, weighted
 	for _, e := range []struct {
 		U, V string
-		W    int64
+		W    float64
 	}{
-		{"A", "B", 4},
-		{"A", "C", 2},
-		{"B", "D", 5},
-		{"C", "D", 10},
-		{"C", "E", 3},
-		{"E", "D", 4},
+		{"A", "B", 4.0},
+		{"A", "C", 2.0},
+		{"B", "D", 5.0},
+		{"C", "D", 10.0},
+		{"C", "E", 3.0},
+		{"E", "D", 4.0},
 	} {
-		g.AddEdge(e.U, e.V, e.W)
+		_, _ = g.AddEdge(e.U, e.V, e.W)
 	}
 	dist, _, _ := dijkstra.Dijkstra(g, dijkstra.Source("A"))
-	fmt.Printf("dist[D]=%d dist[E]=%d\n", dist["D"], dist["E"])
+	fmt.Printf("dist[D]=%g dist[E]=%g\n", dist["D"], dist["E"])
 	// Output: dist[D]=9 dist[E]=5
 }

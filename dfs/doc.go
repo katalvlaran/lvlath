@@ -32,7 +32,7 @@
 // Complexity:
 //
 //   - DFS:            Time O(V+E), Memory O(V)
-//   - DetectCycles:   Time O(V+E + C·L²), Memory O(V+L\_max)
+//   - DetectCycles:   Time O(V+E + C*L²), Memory O(V+L\_max)
 //     (C=#cycles, L=avg cycle length; normalization is O(L²))
 //   - TopologicalSort\:Time O(V+E), Memory O(V)
 //

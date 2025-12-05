@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_bipartite.go — implementation of CompleteBipartite(n1,n2) constructor.
+// impl_bipartite.go - implementation of CompleteBipartite(n1,n2) constructor.
 //
 // Contract:
-//   • n1 ≥ 1 and n2 ≥ 1 (else ErrTooFewVertices).
-//   • Adds left partition IDs as "{leftPrefix}{i}", i=0..n1-1.
-//   • Adds right partition IDs as "{rightPrefix}{j}", j=0..n2-1.
+//   - n1 ≥ 1 and n2 ≥ 1 (else ErrTooFewVertices).
+//   - Adds left partition IDs as "{leftPrefix}{i}", i=0..n1-1.
+//   - Adds right partition IDs as "{rightPrefix}{j}", j=0..n2-1.
 //     (Prefixes are resolved deterministically in newBuilderConfig; empty → defaults "L"/"R".)
-//   • Emits every cross-pair L_i → R_j; mirrors R_j → L_i only if g.Directed().
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - Emits every cross-pair L_i → R_j; mirrors R_j → L_i only if g.Directed().
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(n1 + n2) vertices + O(n1·n2) edges emission.
-//   • Space: O(n1 + n2) extra for ID slices.
+//   - Time: O(n1 + n2) vertices + O(n1*n2) edges emission.
+//   - Space: O(n1 + n2) extra for ID slices.
 //
 // Determinism:
-//   • Deterministic IDs via (prefix, index) with stable prefixes from cfg.
-//   • Deterministic edge emission order: i asc over L, inner j asc over R.
-//   • Deterministic weights for a fixed cfg.rng/weightFn.
+//   - Deterministic IDs via (prefix, index) with stable prefixes from cfg.
+//   - Deterministic edge emission order: i asc over L, inner j asc over R.
+//   - Deterministic weights for a fixed cfg.rng/weightFn.
 
 package builder
 
@@ -75,15 +75,18 @@ func CompleteBipartite(n1, n2 int) Constructor {
 
 		// Cache whether weights are observed by the core graph.
 		useWeight := g.Weighted()
+		var (
+			i, j int     // loop iterators
+			w    float64 // decide weight once per cross pair.
+			u, v string  // edges key
+		)
 
 		// Emit all cross edges in stable (i over left, j over right) order.
-		for i := 0; i < n1; i++ { // iterate left side first
-			u := leftIDs[i]           // left endpoint ID
-			for j := 0; j < n2; j++ { // then each right endpoint
-				v := rightIDs[j] // right endpoint ID
+		for i = 0; i < n1; i++ { // iterate left side first
+			u = leftIDs[i]           // left endpoint ID
+			for j = 0; j < n2; j++ { // then each right endpoint
+				v = rightIDs[j] // right endpoint ID
 
-				// Decide weight once per cross pair.
-				var w int64
 				if useWeight {
 					w = cfg.weightFn(cfg.rng)
 				} else {
@@ -92,13 +95,13 @@ func CompleteBipartite(n1, n2 int) Constructor {
 
 				// Add u→v edge.
 				if _, err := g.AddEdge(u, v, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodCompleteBipartite, u, v, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodCompleteBipartite, u, v, w, err)
 				}
 
 				// If directed, also add v→u for full bipartite symmetry in digraph mode.
 				if g.Directed() {
 					if _, err := g.AddEdge(v, u, w); err != nil {
-						return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodCompleteBipartite, v, u, w, err)
+						return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodCompleteBipartite, v, u, w, err)
 					}
 				}
 			}

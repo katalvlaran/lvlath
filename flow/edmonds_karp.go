@@ -23,7 +23,7 @@ import (
 //  1. Normalize options and capture context (O(1)).
 //  2. Validate that `source` and `sink` exist in `g` (O(1)).
 //  3. Build the initial capacity map via buildCapMap
-//     (O(V + E·log d_max) for neighbor sorting).
+//     (O(V + E*log d_max) for neighbor sorting).
 //  4. Repeat until no augmenting path:
 //     a. Check for cancellation (O(1)).
 //     b. BFS from source to sink to find the shortest augmenting path
@@ -36,13 +36,13 @@ import (
 //
 // Complexity:
 //
-//	Time:   O(V · E²) worst-case on integer capacities (BFS per augmentation).
+//	Time:   O(V * E²) worst-case on integer capacities (BFS per augmentation).
 //	Memory: O(V + E) for capMap and BFS auxiliary maps.
 func EdmondsKarp(
 	g *core.Graph,
 	source, sink string,
 	opts FlowOptions,
-) (maxFlow int64, residualGraph *core.Graph, err error) {
+) (maxFlow float64, residualGraph *core.Graph, err error) {
 	// 1) Ensure opts.Ctx and opts.Epsilon are set to defaults if zero-valued.
 	opts.normalize()
 	// 1a) Capture the normalized context for cancellation.
@@ -75,7 +75,7 @@ func EdmondsKarp(
 		//    parent[v] = preceding vertex on shortest path to v.
 		parent := make(map[string]string, len(capMap))
 		//    bottle[v] = bottleneck capacity from source to v.
-		bottle := make(map[string]int64, len(capMap))
+		bottle := make(map[string]float64, len(capMap))
 
 		// Initialize all bottlenecks to zero.
 		for u := range capMap {
@@ -143,7 +143,7 @@ func EdmondsKarp(
 			}
 			// Prepend the source at the beginning.
 			path = append([]string{source}, path...)
-			fmt.Printf("augmenting path %v with flow %d\n", path, flowValue)
+			fmt.Printf("augmenting path %v with flow %g\n", path, flowValue)
 		}
 
 		// 4f) Increase total max flow by the bottleneck of this path.

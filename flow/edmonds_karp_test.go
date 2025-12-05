@@ -24,12 +24,12 @@ type EdmondsKarpSuite struct {
 // and that the residual graph has no forward edge and a reverse edge of equal weight.
 func (s *EdmondsKarpSuite) TestSingleEdge() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("S", "T", 5)
+	_, _ = g.AddEdge("S", "T", 5)
 
 	opts := flow.DefaultOptions()
 	mf, res, err := flow.EdmondsKarp(g, "S", "T", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(5), mf)
+	require.Equal(s.T(), 5.0, mf)
 	require.False(s.T(), res.HasEdge("S", "T"), "forward edge should be saturated")
 	require.True(s.T(), res.HasEdge("T", "S"), "reverse edge should carry the flow")
 }
@@ -38,17 +38,17 @@ func (s *EdmondsKarpSuite) TestSingleEdge() {
 func (s *EdmondsKarpSuite) TestMultiPath() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Path1: S→A (3) → A→T (3)
-	g.AddEdge("S", "A", 3)
-	g.AddEdge("A", "T", 3)
+	_, _ = g.AddEdge("S", "A", 3)
+	_, _ = g.AddEdge("A", "T", 3)
 	// Path2: S→B (4) → B→T (2)
-	g.AddEdge("S", "B", 4)
-	g.AddEdge("B", "T", 2)
+	_, _ = g.AddEdge("S", "B", 4)
+	_, _ = g.AddEdge("B", "T", 2)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.EdmondsKarp(g, "S", "T", opts)
 	require.NoError(s.T(), err)
 	// Expected max flow = 3 + 2 = 5
-	require.Equal(s.T(), int64(5), mf)
+	require.Equal(s.T(), 5.0, mf)
 }
 
 // TestMultiEdgeAggregation verifies that parallel edges are summed before flow.
@@ -59,36 +59,36 @@ func (s *EdmondsKarpSuite) TestMultiEdgeAggregation() {
 		core.WithMultiEdges(),
 	)
 	// Parallel edges X→Y: 2 and 7 => total capacity 9
-	g.AddEdge("X", "Y", 2)
-	g.AddEdge("X", "Y", 7)
+	_, _ = g.AddEdge("X", "Y", 2)
+	_, _ = g.AddEdge("X", "Y", 7)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.EdmondsKarp(g, "X", "Y", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(9), mf)
+	require.Equal(s.T(), 9.0, mf)
 }
 
 // TestZeroCapacity ensures that zero-capacity edges produce zero flow.
 func (s *EdmondsKarpSuite) TestZeroCapacity() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("U", "V", 0)
+	_, _ = g.AddEdge("U", "V", 0)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.EdmondsKarp(g, "U", "V", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(0), mf)
+	require.Equal(s.T(), 0.0, mf)
 }
 
 // TestEpsilonEdgeCase verifies that edges with weight ≤ Epsilon are ignored.
 func (s *EdmondsKarpSuite) TestEpsilonEdgeCase() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("U", "V", 1)
+	_, _ = g.AddEdge("U", "V", 1)
 
 	opts := flow.DefaultOptions()
 	opts.Epsilon = 2 // capacities ≤2 are filtered out => capacity 1 ignored
 	mf, _, err := flow.EdmondsKarp(g, "U", "V", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(0), mf)
+	require.Equal(s.T(), 0.0, mf)
 }
 
 // TestContextCancellationDuringBFS ensures that a canceled context aborts BFS promptly.
@@ -96,12 +96,12 @@ func (s *EdmondsKarpSuite) TestContextCancellationDuringBFS() {
 	// Build a long chain to force a longer BFS
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	prev := "V0"
-	g.AddVertex(prev)
+	_ = g.AddVertex(prev)
 	const N = 10000
 	for i := 1; i < N; i++ {
 		cur := "V" + fmt.Sprint(i)
-		g.AddVertex(cur)
-		g.AddEdge(prev, cur, 1)
+		_ = g.AddVertex(cur)
+		_, _ = g.AddEdge(prev, cur, 1)
 		prev = cur
 	}
 	source, sink := "V0", "V9999"
@@ -129,17 +129,17 @@ func (s *EdmondsKarpSuite) TestResidualIntegrity() {
 	)
 	// Construct graph:
 	//   A→B (5, then 3) =8, B→C=4, C→D=2, A→D=1
-	g.AddEdge("A", "B", 5)
-	g.AddEdge("A", "B", 3)
-	g.AddEdge("B", "C", 4)
-	g.AddEdge("C", "D", 2)
-	g.AddEdge("A", "D", 1)
+	_, _ = g.AddEdge("A", "B", 5)
+	_, _ = g.AddEdge("A", "B", 3)
+	_, _ = g.AddEdge("B", "C", 4)
+	_, _ = g.AddEdge("C", "D", 2)
+	_, _ = g.AddEdge("A", "D", 1)
 
 	opts := flow.DefaultOptions()
 	mf, res, err := flow.EdmondsKarp(g, "A", "D", opts)
 	require.NoError(s.T(), err)
 	// Direct A→D =1 plus A→B→C→D =2 => total flow =3
-	require.Equal(s.T(), int64(3), mf)
+	require.Equal(s.T(), 3.0, mf)
 
 	// Assert residual integrity for every original edge.
 	assertResidualIntegrity(s.T(), g, res)
@@ -148,7 +148,7 @@ func (s *EdmondsKarpSuite) TestResidualIntegrity() {
 // TestSourceSinkNotFound covers missing source or sink error cases.
 func (s *EdmondsKarpSuite) TestSourceSinkNotFound() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddVertex("A")
+	_ = g.AddVertex("A")
 
 	opts := flow.DefaultOptions()
 	_, _, err1 := flow.EdmondsKarp(g, "X", "A", opts)

@@ -61,11 +61,11 @@
 //
 //	  - g:       pointer to a core.Graph that must be weighted.
 //	  - opts:    zero or more functional options, including:
-//	      • Source(string):            required, the starting vertex ID.
-//	      • WithReturnPath():          if set, returns a predecessor map; otherwise prev == nil.
-//	      • WithMaxDistance(int64):    if set, explores only vertices with distance ≤ given value.
-//	      • WithInfEdgeThreshold(int64): if set, skips any edge whose weight ≥ threshold.
-//	      • WithMemoryMode(MemoryMode): currently Full by default; Compact planned for future.
+//	      - Source(string):            required, the starting vertex ID.
+//	      - WithReturnPath():          if set, returns a predecessor map; otherwise prev == nil.
+//	      - WithMaxDistance(int64):    if set, explores only vertices with distance ≤ given value.
+//	      - WithInfEdgeThreshold(int64): if set, skips any edge whose weight ≥ threshold.
+//	      - WithMemoryMode(MemoryMode): currently Full by default; Compact planned for future.
 //	  - dist:    map[v] = minimal distance from Source to v, or math.MaxInt64 if unreachable.
 //	  - prev:    map[v] = immediate predecessor of v on one shortest path from Source,
 //	              or "" if v is the Source or v is unreachable. Nil if ReturnPath=false.

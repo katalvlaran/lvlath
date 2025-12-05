@@ -32,7 +32,7 @@ func BenchmarkAddEdge_Weighted(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Using i as weight exercises the weighted path
-		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i), int64(i))
+		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i), float64(i))
 	}
 }
 
@@ -45,7 +45,7 @@ func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		// Cycle through 100 target nodes to stress many parallel edges
-		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i%100), int64(i))
+		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i%100), float64(i))
 	}
 }
 
@@ -73,7 +73,7 @@ func BenchmarkClone(b *testing.B) {
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 	// Populate with 1000 edges A→V{i}
 	for i := 0; i < 1000; i++ {
-		_, _ = g.AddEdge("A", fmt.Sprintf("V%d", i), int64(i))
+		_, _ = g.AddEdge("A", fmt.Sprintf("V%d", i), float64(i))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

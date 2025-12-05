@@ -145,14 +145,14 @@ func T(m Matrix) (Matrix, error) { return Transpose(m) }
 // Complexity: O(rc).
 func ScaleBy(m Matrix, alpha float64) (Matrix, error) { return Scale(m, alpha) }
 
-// MatVecMul is an alias for MatVec: y = m·x.
+// MatVecMul is an alias for MatVec: y = m*x.
 // Complexity: O(rc).
 //
 // AI-Hints: For repeated calls with same shape, reuse x/y slices outside.
 func MatVecMul(m Matrix, x []float64) ([]float64, error) { return MatVec(m, x) }
 
 // EigenSym calls the canonical Jacobi eigen-decomposition (symmetric input).
-// Complexity: O(maxIter · n^3). Numeric policy unchanged.
+// Complexity: O(maxIter * n^3). Numeric policy unchanged.
 // Note: Under the hood it calls Eigen; symmetric validation lives in kernels.
 func EigenSym(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	// Delegate directly to the kernel. The kernel performs ValidateNotNil/Square/Symmetric.

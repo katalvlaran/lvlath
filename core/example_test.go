@@ -5,7 +5,6 @@ import (
 	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/matrix"
 )
 
 // sortAsc returns a sorted copy of ids.
@@ -78,7 +77,7 @@ func ExampleGraph_Advanced() {
 		// lookup in map
 		for _, e := range g.Edges() {
 			if e.ID == eid {
-				fmt.Printf("%s weight=%d\n", eid, e.Weight)
+				fmt.Printf("%s weight=%g\n", eid, e.Weight)
 			}
 		}
 	}
@@ -98,7 +97,7 @@ func ExampleGraph_Advanced() {
 func extractNeighborInfo(edges []*core.Edge) []string {
 	out := make([]string, len(edges))
 	for i, e := range edges {
-		out[i] = fmt.Sprintf("%s(w=%d,d=%v)", e.To, e.Weight, e.Directed)
+		out[i] = fmt.Sprintf("%s(w=%g,d=%v)", e.To, e.Weight, e.Directed)
 	}
 	sort.Strings(out)
 
@@ -142,25 +141,11 @@ func ExampleGraph_Special() {
 	fmt.Printf("Undirected B—C? %v\n", g.HasEdge("B", "C"))
 	fmt.Printf("Loop on C? %v\n", g.HasEdge("C", "C"))
 	fmt.Printf("DE parallel weights: %v\n",
-		[]int64{g.Edges()[4].Weight, g.Edges()[5].Weight}) // weights 3 and 4
+		[]float64{g.Edges()[4].Weight, g.Edges()[5].Weight}) // weights 3 and 4
 
 	// 4) Neighbors of D (should list both parallel edges)
 	nbD, _ := g.Neighbors("D")
 	fmt.Println("Neighbors of D:", extractNeighborInfo(nbD))
-
-	// 5) Build an adjacency matrix matching graph features
-	mo := matrix.NewMatrixOptions(
-		matrix.WithDirected(true),   // include directed arcs
-		matrix.WithWeighted(true),   // preserve actual weights
-		matrix.WithAllowMulti(true), // show parallel edges
-		matrix.WithAllowLoops(true), // include self-loops
-	)
-	am, _ := matrix.NewAdjacencyMatrix(g, mo)
-
-	// 6) Query the matrix: A→B should be 10.0
-	iA, iB := am.VertexIndex["A"], am.VertexIndex["B"]
-	wAB, _ := am.Mat.At(iA, iB)
-	fmt.Printf("Adjacency A→B weight: %f\n", wAB)
 
 	// Output:
 	// Vertices: [A B C D E F G H I J]
@@ -170,5 +155,4 @@ func ExampleGraph_Special() {
 	// Loop on C? true
 	// DE parallel weights: [3 4]
 	// Neighbors of D: [E(w=3,d=false) E(w=4,d=false)]
-	// Adjacency A→B weight: 10.000000
 }

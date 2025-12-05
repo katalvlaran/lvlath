@@ -25,8 +25,8 @@ import (
 //  6. Loop over sorted edges: for each edge (u,v), if find(u) != find(v), then union(u,v) and include edge in MST.
 //  7. Once MST has |V|-1 edges, break. After loop, if MST edge count < |V|-1 → ErrDisconnected.
 //
-// Complexity: O(E log E + α(V)·E) ≈ O(E log V). Memory: O(E + V).
-func Kruskal(graph *core.Graph) ([]core.Edge, int64, error) {
+// Complexity: O(E log E + α(V)*E) ≈ O(E log V). Memory: O(E + V).
+func Kruskal(graph *core.Graph) ([]core.Edge, float64, error) {
 	// 1. Validate that graph is non-nil, weighted, undirected and have no direct edges.
 	if graph == nil || !graph.Weighted() || graph.Directed() || graph.HasDirectedEdges() {
 		// Return ErrInvalidGraph for any invalid condition.
@@ -110,7 +110,7 @@ func Kruskal(graph *core.Graph) ([]core.Edge, int64, error) {
 		mst         []core.Edge // resulting edges in the MST
 		e           *core.Edge
 		u, v        string
-		totalWeight int64 // sum of weights
+		totalWeight float64 // sum of weights
 		numVerts    = len(vertices)
 	)
 	for _, e = range edges {

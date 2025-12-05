@@ -1,30 +1,30 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_grid.go — implementation of Grid(rows, cols) constructor.
+// impl_grid.go - implementation of Grid(rows, cols) constructor.
 //
 // Canonical model (approved in Ta-builder V1):
-//   • 2D orthogonal grid with 4-neighborhood (right & bottom neighbors per cell).
-//   • Vertex IDs use a fixed, documented scheme "r,c" (row-major order).
+//   - 2D orthogonal grid with 4-neighborhood (right & bottom neighbors per cell).
+//   - Vertex IDs use a fixed, documented scheme "r,c" (row-major order).
 //     This is a deliberate exception to cfg.idFn to keep coordinates explicit.
 //
 // Contract:
-//   • rows ≥ 1 and cols ≥ 1 (else ErrTooFewVertices).
-//   • Adds vertices in row-major order with IDs "r,c" for r∈[0..rows-1], c∈[0..cols-1].
-//   • Adds edges to right (r,c+1) and bottom (r+1,c) neighbors where they exist.
+//   - rows ≥ 1 and cols ≥ 1 (else ErrTooFewVertices).
+//   - Adds vertices in row-major order with IDs "r,c" for r∈[0..rows-1], c∈[0..cols-1].
+//   - Adds edges to right (r,c+1) and bottom (r+1,c) neighbors where they exist.
 //     In directed graphs, also emits the reverse arc for symmetry.
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(rows*cols) vertices + O(rows*cols) edges emission (linear in grid size).
-//   • Space: O(1) extra (IDs are composed on the fly; no full grid storage).
+//   - Time: O(rows*cols) vertices + O(rows*cols) edges emission (linear in grid size).
+//   - Space: O(1) extra (IDs are composed on the fly; no full grid storage).
 //
 // Determinism:
-//   • Stable vertex order: row-major (r asc, then c asc).
-//   • Stable edge order: for each (r,c) emit Right then Bottom if present.
-//   • Deterministic weights for a fixed cfg.rng/weightFn.
+//   - Stable vertex order: row-major (r asc, then c asc).
+//   - Stable edge order: for each (r,c) emit Right then Bottom if present.
+//   - Deterministic weights for a fixed cfg.rng/weightFn.
 
 package builder
 
@@ -38,7 +38,7 @@ import (
 const (
 	methodGrid = "Grid"
 	minGridDim = 1
-	gridIDFmt  = "%d,%d" // "r,c" — fixed, documented coordinate ID scheme
+	gridIDFmt  = "%d,%d" // "r,c" - fixed, documented coordinate ID scheme
 )
 
 // Grid returns a Constructor that builds a rows×cols orthogonal grid.
@@ -66,17 +66,20 @@ func Grid(rows, cols int) Constructor {
 		// 3) Prepare weight observation flag once (single-branch logic).
 		useWeight := g.Weighted()
 
+		var (
+			r, c int
+			w    float64 // decide weight once per edge; deterministic for fixed rng.
+			u, v string  // edges key
+		)
 		// 4) Emit edges: for each (r,c), connect to Right and Bottom neighbors if they exist.
-		for r := 0; r < rows; r++ {
-			for c := 0; c < cols; c++ {
-				u := fmt.Sprintf(gridIDFmt, r, c) // current cell ID
+		for r = 0; r < rows; r++ {
+			for c = 0; c < cols; c++ {
+				u = fmt.Sprintf(gridIDFmt, r, c) // current cell ID
 
 				// 4a) Right neighbor (r, c+1).
 				if c+1 < cols {
-					v := fmt.Sprintf(gridIDFmt, r, c+1) // right neighbor ID
+					v = fmt.Sprintf(gridIDFmt, r, c+1) // right neighbor ID
 
-					// Decide weight once per edge; deterministic for fixed rng.
-					var w int64
 					if useWeight {
 						w = cfg.weightFn(cfg.rng)
 					} else {
@@ -85,22 +88,20 @@ func Grid(rows, cols int) Constructor {
 
 					// Add u→v; core handles undirected/parallel constraints.
 					if _, err := g.AddEdge(u, v, w); err != nil {
-						return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodGrid, u, v, w, err)
+						return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodGrid, u, v, w, err)
 					}
 					// Mirror for directed graphs to preserve symmetric neighborhood.
 					if g.Directed() {
 						if _, err := g.AddEdge(v, u, w); err != nil {
-							return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodGrid, v, u, w, err)
+							return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodGrid, v, u, w, err)
 						}
 					}
 				}
 
 				// 4b) Bottom neighbor (r+1, c).
 				if r+1 < rows {
-					v := fmt.Sprintf(gridIDFmt, r+1, c) // bottom neighbor ID
+					v = fmt.Sprintf(gridIDFmt, r+1, c) // bottom neighbor ID
 
-					// Decide weight once per edge.
-					var w int64
 					if useWeight {
 						w = cfg.weightFn(cfg.rng)
 					} else {
@@ -109,12 +110,12 @@ func Grid(rows, cols int) Constructor {
 
 					// Add u→v.
 					if _, err := g.AddEdge(u, v, w); err != nil {
-						return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodGrid, u, v, w, err)
+						return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodGrid, u, v, w, err)
 					}
 					// Mirror for directed graphs.
 					if g.Directed() {
 						if _, err := g.AddEdge(v, u, w); err != nil {
-							return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodGrid, v, u, w, err)
+							return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodGrid, v, u, w, err)
 						}
 					}
 				}

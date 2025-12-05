@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_cycle.go — implementation of Cycle(n) constructor.
+// impl_cycle.go - implementation of Cycle(n) constructor.
 //
 // Contract:
-//   • n ≥ 3 (else ErrTooFewVertices).
-//   • Adds vertices via cfg.idFn in ascending index order (0..n-1).
-//   • Emits edges in stable order i -> (i+1)%n for i=0..n-1.
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - n ≥ 3 (else ErrTooFewVertices).
+//   - Adds vertices via cfg.idFn in ascending index order (0..n-1).
+//   - Emits edges in stable order i -> (i+1)%n for i=0..n-1.
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(n) vertices + O(n) edges.
-//   • Space: O(1) extra (iter vars only).
+//   - Time: O(n) vertices + O(n) edges.
+//   - Space: O(1) extra (iter vars only).
 //
 // Determinism:
-//   • Deterministic IDs via cfg.idFn.
-//   • Deterministic edge emission order by increasing i.
-//   • Deterministic weights given fixed cfg.rng/weightFn.
+//   - Deterministic IDs via cfg.idFn.
+//   - Deterministic edge emission order by increasing i.
+//   - Deterministic weights given fixed cfg.rng/weightFn.
 
 package builder
 
@@ -58,14 +58,17 @@ func Cycle(n int) Constructor {
 		// Precompute whether weights are observed by the core graph.
 		useWeight := g.Weighted()
 
+		var (
+			i        int     // loop iterator
+			w        float64 // choose edge weight based on graph weighting policy.
+			uID, vID string  // edges key
+		)
 		// Emit edges in ascending i; for i==n-1, connect to 0 to close the ring.
-		for i := 0; i < n; i++ {
+		for i = 0; i < n; i++ {
 			// Compute ordered pair (u,v) for the ring step.
-			uID := cfg.idFn(i)
-			vID := cfg.idFn((i + 1) % n)
+			uID = cfg.idFn(i)
+			vID = cfg.idFn((i + 1) % n)
 
-			// Choose edge weight based on graph weighting policy.
-			var w int64
 			if useWeight {
 				// Call configured generator; determinism depends on rng seed.
 				w = cfg.weightFn(cfg.rng)
@@ -77,7 +80,7 @@ func Cycle(n int) Constructor {
 			// Add the ring edge; core handles directed/undirected per its flags.
 			if _, err := g.AddEdge(uID, vID, w); err != nil {
 				// Wrap and return immediately on first failure (no partial cleanup).
-				return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodCycle, uID, vID, w, err)
+				return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodCycle, uID, vID, w, err)
 			}
 		}
 

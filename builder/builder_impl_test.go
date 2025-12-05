@@ -24,8 +24,8 @@ func sortedVertices(g *core.Graph) []string {
 }
 
 // sortedEdgeWeights returns a map from edgeKey to weight for all edges in g.
-func sortedEdgeWeights(g *core.Graph) map[edgeKey]int64 {
-	m := make(map[edgeKey]int64)
+func sortedEdgeWeights(g *core.Graph) map[edgeKey]float64 {
+	m := make(map[edgeKey]float64)
 	for _, e := range g.Edges() {
 		m[edgeKey{U: e.From, V: e.To}] = e.Weight
 	}
@@ -36,11 +36,6 @@ func sortedEdgeWeights(g *core.Graph) map[edgeKey]int64 {
 func TestBuilders_Functional(t *testing.T) {
 	t.Parallel() // allow this test to run in parallel with others
 
-	const (
-		// defaultWeight is the constant weight used when no custom WeightFn is set.
-		defaultWeight = builder.DefaultEdgeWeight
-	)
-
 	// helper to count undirected edges: since builder uses undirected graphs by default,
 	// each AddEdge call creates exactly one entry in Edges().
 	// For symmetric constructions, counts must match expected.
@@ -50,6 +45,7 @@ func TestBuilders_Functional(t *testing.T) {
 		wantV       int                               // expected number of vertices
 		wantE       int                               // expected number of edges
 		sampleCheck func(t *testing.T, g *core.Graph) // additional topology-specific checks
+		bopts       []builder.BuilderOption
 	}{
 		{
 			name:  "Cycle(5)",
@@ -61,8 +57,8 @@ func TestBuilders_Functional(t *testing.T) {
 				for i := 0; i < 5; i++ {
 					from := fmt.Sprint(i)
 					to := fmt.Sprint((i + 1) % 5)
-					if w, ok := edges[edgeKey{from, to}]; !ok || w != defaultWeight {
-						t.Errorf("Cycle: missing or wrong weight for edge %s→%s: got %d, ok=%v", from, to, w, ok)
+					if w, ok := edges[edgeKey{from, to}]; !ok || w != builder.DefaultEdgeWeight {
+						t.Errorf("Cycle: missing or wrong weight for edge %s→%s: got %g, ok=%v", from, to, w, ok)
 					}
 				}
 			},
@@ -76,7 +72,7 @@ func TestBuilders_Functional(t *testing.T) {
 				// verify edges 0→1,1→2,2→3
 				for i := 0; i < 3; i++ {
 					from, to := fmt.Sprint(i), fmt.Sprint(i+1)
-					if w, ok := edges[edgeKey{from, to}]; !ok || w != defaultWeight {
+					if w, ok := edges[edgeKey{from, to}]; !ok || w != builder.DefaultEdgeWeight {
 						t.Errorf("Path: missing or wrong weight for edge %s→%s", from, to)
 					}
 				}
@@ -91,7 +87,7 @@ func TestBuilders_Functional(t *testing.T) {
 				// leaves are IDs "1","2","3" all from "Center"
 				for i := 1; i < 4; i++ {
 					leaf := fmt.Sprint(i)
-					if w, ok := edges[edgeKey{"Center", leaf}]; !ok || w != defaultWeight {
+					if w, ok := edges[edgeKey{"Center", leaf}]; !ok || w != builder.DefaultEdgeWeight {
 						t.Errorf("Star: missing or wrong weight for edge Center→%s", leaf)
 					}
 				}
@@ -146,6 +142,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomSparse_p0(5)",
 			ctor:  builder.RandomSparse(5, 0.0),
 			wantV: 5, wantE: 0, // p=0 yields no edges
+			bopts: []builder.BuilderOption{builder.WithSeed(1)}, // satisfy rng-required contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 0 {
 					t.Errorf("RandomSparse(p=0): expected 0 edges, got %d", len(g.Edges()))
@@ -156,6 +153,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomSparse_p1(5)",
 			ctor:  builder.RandomSparse(5, 1.0),
 			wantV: 5, wantE: 10, // 5*4/2 = 10
+			bopts: []builder.BuilderOption{builder.WithSeed(1)}, // satisfy rng-required contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 10 {
 					t.Errorf("RandomSparse(p=1): expected 10 edges, got %d", len(g.Edges()))
@@ -166,6 +164,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomRegular(6,2)",
 			ctor:  builder.RandomRegular(6, 2),
 			wantV: 6, wantE: 6, // n*d/2 = 6*2/2 = 6 edges
+			bopts: []builder.BuilderOption{builder.WithSeed(42)}, // rng required by contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 6 {
 					t.Errorf("RandomRegular: expected 6 edges, got %d", len(g.Edges()))
@@ -229,7 +228,7 @@ func TestBuilders_Functional(t *testing.T) {
 			t.Parallel()
 			// build into a weighted graph so AddEdge never returns ErrBadWeight
 			graphOpts := []core.GraphOption{core.WithWeighted()}
-			g, err := builder.BuildGraph(graphOpts, []builder.BuilderOption{}, tc.ctor)
+			g, err := builder.BuildGraph(graphOpts, tc.bopts, tc.ctor)
 			if err != nil {
 				t.Fatalf("BuildGraph(%s) returned error: %v", tc.name, err)
 			}
@@ -248,7 +247,7 @@ func TestBuilders_Functional(t *testing.T) {
 			tc.sampleCheck(t, g)
 
 			// idempotence: rerun builder on a fresh weighted graph
-			g2, err2 := builder.BuildGraph(graphOpts, []builder.BuilderOption{}, tc.ctor)
+			g2, err2 := builder.BuildGraph(graphOpts, tc.bopts, tc.ctor)
 			if err2 != nil {
 				t.Fatalf("second BuildGraph(%s) returned error: %v", tc.name, err2)
 			}

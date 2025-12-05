@@ -60,7 +60,7 @@ import (
 //
 //   - Time:  O((V + E) log V)
 //   - Space: O(V + E)
-func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]string, error) {
+func Dijkstra(g *core.Graph, opts ...Option) (map[string]float64, map[string]string, error) {
 	// 1) Build and validate Options
 	cfg := DefaultOptions("") // default options
 	var opt Option
@@ -98,9 +98,9 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 	// 8) Pre-scan all edges to detect negative weights. Fail fast with ErrNegativeWeight.
 	var e *core.Edge
 	for _, e = range g.Edges() {
-		if e.Weight < 0 {
+		if e.Weight < 0.0 {
 			// Return the sentinel error with context of which edge failed.
-			return nil, nil, fmt.Errorf("%w: edge %s→%s weight=%d", ErrNegativeWeight, e.From, e.To, e.Weight)
+			return nil, nil, fmt.Errorf("%w: edge %s→%s weight=%g", ErrNegativeWeight, e.From, e.To, e.Weight)
 		}
 	}
 
@@ -109,7 +109,7 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 	V := len(g.Vertices())
 
 	//    dist maps each vertex ID to its current best-known distance from Source.
-	dist := make(map[string]int64, V)
+	dist := make(map[string]float64, V)
 
 	//    If ReturnPath or MemoryModeFull, we allocate prev map to track predecessors.
 	//    Otherwise prev remains nil to save memory.
@@ -153,12 +153,12 @@ func Dijkstra(g *core.Graph, opts ...Option) (map[string]int64, map[string]strin
 
 // runner holds the mutable state for a single Dijkstra execution.
 type runner struct {
-	g       *core.Graph       // The input graph; read-only within Dijkstra.
-	options Options           // Configuration options (Source, thresholds, etc.).
-	dist    map[string]int64  // Maps vertex ID → current best distance from Source.
-	prev    map[string]string // Maps vertex ID → predecessor on the shortest path.
-	visited map[string]bool   // Tracks if a vertex's distance is finalized.
-	pq      nodePQ            // Min-heap of *nodeItem for lazy priority queue.
+	g       *core.Graph        // The input graph; read-only within Dijkstra.
+	options Options            // Configuration options (Source, thresholds, etc.).
+	dist    map[string]float64 // Maps vertex ID → current best distance from Source.
+	prev    map[string]string  // Maps vertex ID → predecessor on the shortest path.
+	visited map[string]bool    // Tracks if a vertex's distance is finalized.
+	pq      nodePQ             // Min-heap of *nodeItem for lazy priority queue.
 }
 
 // init sets up initial distances, predecessors, visited flags, and pushes Source=0 into the heap.
@@ -170,7 +170,7 @@ func (r *runner) init() {
 	//    Initialize visited[v] = false.
 	//    If prev is allocated, set prev[v] = "" for all v.
 	for _, v := range vertices {
-		r.dist[v] = math.MaxInt64
+		r.dist[v] = math.Inf(1)
 		r.visited[v] = false
 		if r.prev != nil {
 			r.prev[v] = "" // no predecessor yet
@@ -204,7 +204,7 @@ func (r *runner) process() error {
 	// Unpack local references for brevity.
 	cfg := r.options
 	var u string
-	var d int64
+	var d float64
 	for r.pq.Len() > 0 {
 		// 1) Pop the smallest-distance item from the heap.
 		item := heap.Pop(&r.pq).(*nodeItem)
@@ -251,8 +251,8 @@ func (r *runner) relax(u string) error {
 	// 2) For each edge e in neighbors, attempt relaxation.
 	var e *core.Edge
 	var v string
-	var w int64
-	var newDist int64
+	var w float64
+	var newDist float64
 	for _, e = range neighbors {
 		// e.From and e.To are vertex IDs for this edge.
 		// e.Directed indicates if this edge is one-way; if true, the edge is valid only if e.From == u.
@@ -275,7 +275,7 @@ func (r *runner) relax(u string) error {
 
 		// Safety check: though we pre-scanned for negative weights, double-check nonetheless.
 		if w < 0 {
-			return fmt.Errorf("%w: edge %s→%s weight=%d", ErrNegativeWeight, u, v, w)
+			return fmt.Errorf("%w: edge %s→%s weight=%g", ErrNegativeWeight, u, v, w)
 		}
 
 		// Compute candidate distance if we go from Source → … → u → v.
@@ -316,8 +316,8 @@ func (r *runner) relax(u string) error {
 // nodeItem represents a vertex and its current distance from the source.
 // It is stored in the priority queue to order vertices by increasing distance.
 type nodeItem struct {
-	id   string // vertex ID
-	dist int64  // distance from source
+	id   string  // vertex ID
+	dist float64 // distance from source
 }
 
 // nodePQ is a min-heap (priority queue) of *nodeItem, ordered by nodeItem.dist ascending.

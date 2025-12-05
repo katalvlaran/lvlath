@@ -21,13 +21,13 @@ import (
 //   - Window = 1         (Sakoe-Chiba band → allow ±1 offset)
 //   - SlopePenalty = 0.5 (penalize uneven stretches)
 //   - ReturnPath = true  (retrieve alignment path)
-//   - MemoryMode = FullMatrix (O(N·M) mem)
+//   - MemoryMode = FullMatrix (O(N*M) mem)
 //
 // Use case:
 //
 //	Time-series similarity when small local shifts are expected.
 //
-// Complexity: O(N·M) time, O(N·M) memory
+// Complexity: O(N*M) time, O(N*M) memory
 //
 // ExampleDTW_Medium demonstrates DTW with a small Sakoe-Chiba window.
 // Playground: [![Playground - DTW](https://img.shields.io/badge/Go_Playground-DTW-blue?logo=go)](https://play.golang.org/p/dtw)
@@ -76,7 +76,7 @@ func ExampleDTW_Medium() {
 //   - ReturnPath   = false    // TwoRows mode, only distance
 //   - MemoryMode   = TwoRows  // O(min(N,M)) memory
 //
-// Complexity: O(N·M) time, O(min(N,M)) memory
+// Complexity: O(N*M) time, O(min(N,M)) memory
 func ExampleDTW_FreeWarping() {
 	// 1) Define our “noisy” and “clean” sequences
 	a := []float64{0, 0.8, 1, 2, 1, 0}
@@ -111,7 +111,7 @@ func ExampleDTW_FreeWarping() {
 // optimal alignment path by switching to FullMatrix + ReturnPath.
 // You’ll see the zero-cost “subsequence” alignments explicitly.
 //
-// Complexity: O(N·M) time, O(N·M) memory
+// Complexity: O(N*M) time, O(N*M) memory
 func ExampleDTW_FreeWarpingWithPath() {
 	a := []float64{0, 0.8, 1, 2, 1, 0}
 	b := []float64{0, 1.3, 1.9, 1.6, 0}
@@ -156,7 +156,7 @@ func ExampleDTW_FreeWarpingWithPath() {
 //   - ReturnPath   = false        // we only care about distance
 //   - MemoryMode   = FullMatrix   // full-matrix to illustrate the failure
 //
-// Complexity: O(N·M) time, O(N·M) memory
+// Complexity: O(N*M) time, O(N*M) memory
 func ExampleDTW_WindowOnly() {
 	// Define two sequences of different length
 	a := []float64{2, 3, 4}
@@ -205,7 +205,7 @@ func ExampleDTW_WindowOnly() {
 //
 //	Sensor‐data streams with occasional dropped samples.
 //
-// Complexity: O(N·M) time, O(N·M) memory
+// Complexity: O(N*M) time, O(N*M) memory
 func ExampleDTW_Special() {
 	// 1) Define the sequences
 	a := []float64{10, 11, 12, 13, 14, 15}

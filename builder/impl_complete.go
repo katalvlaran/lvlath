@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_complete.go — implementation of Complete(n) constructor.
+// impl_complete.go - implementation of Complete(n) constructor.
 //
 // Contract:
-//   • n ≥ 1 (else ErrTooFewVertices).
-//   • Adds vertices via cfg.idFn in ascending index order (0..n-1).
-//   • Emits each unordered pair {i,j} with i<j exactly once,
+//   - n ≥ 1 (else ErrTooFewVertices).
+//   - Adds vertices via cfg.idFn in ascending index order (0..n-1).
+//   - Emits each unordered pair {i,j} with i<j exactly once,
 //     and mirrors to j→i only if g.Directed() is true.
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(n) vertices + O(n²) edges emission.
-//   • Space: O(n) extra for the precomputed ID slice.
+//   - Time: O(n) vertices + O(n²) edges emission.
+//   - Space: O(n) extra for the precomputed ID slice.
 //
 // Determinism:
-//   • Deterministic IDs via cfg.idFn.
-//   • Deterministic pair order: lexicographic by (i,j), i<j.
-//   • Deterministic weights for a fixed cfg.rng/weightFn.
+//   - Deterministic IDs via cfg.idFn.
+//   - Deterministic pair order: lexicographic by (i,j), i<j.
+//   - Deterministic weights for a fixed cfg.rng/weightFn.
 
 package builder
 
@@ -57,15 +57,18 @@ func Complete(n int) Constructor {
 
 		// Cache whether weights are observed by the core graph for single-branch logic.
 		useWeight := g.Weighted()
+		var (
+			i, j int     // loop iterators
+			w    float64 // decide edge weight once per pair (deterministic for fixed RNG).
+			u, v string  // edges key
+		)
 
 		// Emit each unordered pair {i,j} with i<j in stable lexicographic order.
-		for i := 0; i < n; i++ { // outer endpoint index
-			u := ids[i]                  // stable left endpoint ID
-			for j := i + 1; j < n; j++ { // right endpoint index (strictly greater)
-				v := ids[j] // stable right endpoint ID
+		for i = 0; i < n; i++ { // outer endpoint index
+			u = ids[i]                  // stable left endpoint ID
+			for j = i + 1; j < n; j++ { // right endpoint index (strictly greater)
+				v = ids[j] // stable right endpoint ID
 
-				// Decide edge weight once per pair (deterministic for fixed RNG).
-				var w int64
 				if useWeight {
 					w = cfg.weightFn(cfg.rng)
 				} else {
@@ -74,13 +77,13 @@ func Complete(n int) Constructor {
 
 				// Add u→v (core handles undirected/parallel/loop policies).
 				if _, err := g.AddEdge(u, v, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodComplete, u, v, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodComplete, u, v, w, err)
 				}
 
 				// If the graph is directed, also add v→u for symmetry of K_n.
 				if g.Directed() {
 					if _, err := g.AddEdge(v, u, w); err != nil {
-						return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodComplete, v, u, w, err)
+						return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodComplete, v, u, w, err)
 					}
 				}
 			}

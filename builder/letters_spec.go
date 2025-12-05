@@ -1,46 +1,46 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// letters_spec.go — canonical per-glyph vertex/edge specifications (data-only).
+// letters_spec.go - canonical per-glyph vertex/edge specifications (data-only).
 //
 // Purpose:
-//   • This file is the single source of truth for glyph geometry on the approved
+//   - This file is the single source of truth for glyph geometry on the approved
 //     5×7 grid. It provides a deterministic, minimal-yet-sufficient set of
 //     vertices and edges for all 52 Latin letters (A..Z, a..z) and digits 0..9.
-//   • Vertex IDs strictly follow "<Glyph>_<Horiz>_<Vert>" where
+//   - Vertex IDs strictly follow "<Glyph>_<Horiz>_<Vert>" where
 //       Horiz ∈ {L, LC, C, RC, R}   (Leftmost → Rightmost)
 //       Vert  ∈ {T, PT, UM, M, PM, UB, B} (Topmost → Bottommost)
 //     These symbolic tokens avoid magic strings and are shared across the repo.
-//   • Data here are immutable; building logic (weights, directed mirroring,
+//   - Data here are immutable; building logic (weights, directed mirroring,
 //     idempotency, namespacing) lives in impl_letters.go.
 //
 // Contract (for consumers such as impl_letters.go):
-//   • For each glyph, letterSpec.IDs is the canonical vertex-add order
+//   - For each glyph, letterSpec.IDs is the canonical vertex-add order
 //     (lexicographic, computed once at makeSpec).
-//   • letterSpec.Edges is the canonical emission order (drawing order).
-//   • Edges are undirected in semantics; builders mirror them explicitly for
+//   - letterSpec.Edges is the canonical emission order (drawing order).
+//   - Edges are undirected in semantics; builders mirror them explicitly for
 //     Directed() graphs.
-//   • No weight policy is applied here (data-only); builders choose weight=1
+//   - No weight policy is applied here (data-only); builders choose weight=1
 //     for Weighted() graphs, otherwise 0.
-//   • OptionalEdges is reserved for stylistic extras if/when formalized.
+//   - OptionalEdges is reserved for stylistic extras if/when formalized.
 //
 // Determinism:
-//   • All vertex IDs follow a stable pattern and are sorted once (O(V log V), V is tiny).
-//   • Edge lists are hand-ordered and stable; do not mutate after review.
+//   - All vertex IDs follow a stable pattern and are sorted once (O(V log V), V is tiny).
+//   - Edge lists are hand-ordered and stable; do not mutate after review.
 //
 // Complexity (for consumers):
-//   • Add vertices: O(V). Emit edges: O(E). Constants are small for 5×7 glyphs.
+//   - Add vertices: O(V). Emit edges: O(E). Constants are small for 5×7 glyphs.
 //
 // AI-Hints:
-//   • To extend the alphabet (e.g., punctuation, math signs), add data-only
+//   - To extend the alphabet (e.g., punctuation, math signs), add data-only
 //     entries with the same pattern, then builders will pick them up automatically.
-//   • Keep changes append-only and non-breaking: never rename existing IDs,
+//   - Keep changes append-only and non-breaking: never rename existing IDs,
 //     never reorder existing edges; only add new glyphs or OptionalEdges.
 //
 // Notes:
-//   • Shapes are expressed as one or more polylines over the 5×7 grid.
-//   • To keep data concise and precise, helper functions poly() and bar() generate edge chains.
-//   • Optional edges can be added later (e.g., stylistic tails) via OptionalEdges when formalized.
+//   - Shapes are expressed as one or more polylines over the 5×7 grid.
+//   - To keep data concise and precise, helper functions poly() and bar() generate edge chains.
+//   - Optional edges can be added later (e.g., stylistic tails) via OptionalEdges when formalized.
 
 package builder
 
@@ -49,7 +49,7 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// Grid tokens — no magic strings.
+// Grid tokens - no magic strings.
 // -----------------------------------------------------------------------------
 
 // Horizontal positions (Leftmost…Rightmost).
@@ -140,10 +140,10 @@ func makeSpec(edges []edgePair, optionalEdges []edgePair) letterSpec {
 }
 
 // -----------------------------------------------------------------------------
-// Canonical letter registry (ALL 52 letters) — edges only, stable order.
+// Canonical letter registry (ALL 52 letters) - edges only, stable order.
 // Each entry uses ONE uniform comment style:
 //
-//	// <Letter> — canonical minimal 5×7 skeleton; edges listed in drawing order.
+//	// <Letter> - canonical minimal 5×7 skeleton; edges listed in drawing order.
 //
 // -----------------------------------------------------------------------------
 var letterSpecs = map[rune]letterSpec{

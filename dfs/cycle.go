@@ -7,7 +7,7 @@
 //
 // Complexity:
 //
-//   - Time:   O(V + E + C·L)   (V=#vertices, E=#edges, C=#cycles, L=avg cycle length)
+//   - Time:   O(V + E + C*L)   (V=#vertices, E=#edges, C=#cycles, L=avg cycle length)
 //   - Memory: O(V + L_max)     (recursion stack + state map + cycle storage)
 package dfs
 

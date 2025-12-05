@@ -1,45 +1,45 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_letters.go — builders for letters, words, digits, and numbers.
+// impl_letters.go - builders for letters, words, digits, and numbers.
 //
 // Purpose:
-//   • Build glyph skeletons (letters A..Z/a..z, digits 0..9) using the canonical
+//   - Build glyph skeletons (letters A..Z/a..z, digits 0..9) using the canonical
 //     datasets from letters_spec.go (data-only registry).
-//   • Preserve determinism and idempotency: we check HasVertex/HasEdge before
+//   - Preserve determinism and idempotency: we check HasVertex/HasEdge before
 //     any addition to avoid duplicates.
-//   • Respect core flags: Directed() → mirror edges; Weighted() → default
+//   - Respect core flags: Directed() → mirror edges; Weighted() → default
 //     constant weight 1; Looped()/Multigraph() → enforced when emitting edges.
 //
 // Contract:
-//   • Public entry points return Constructor (same pattern as other builders).
-//   • Vertex IDs come from the canonical spec. For multi-glyph inputs that
+//   - Public entry points return Constructor (same pattern as other builders).
+//   - Vertex IDs come from the canonical spec. For multi-glyph inputs that
 //     contain repeated glyphs (e.g., "AA"), you have two options:
 //       – Pass an explicit non-empty `scope` to namespace IDs like
 //         "<scope>::<idx>::<CanonicalID>" (collision-free).
 //       – Or keep `scope == ""` (pure canonical IDs) but avoid repeated glyphs,
 //         otherwise an ErrOptionViolation is returned.
-//   • For non-loop-capable graphs (g.Looped()==false) self-loop edges from the
+//   - For non-loop-capable graphs (g.Looped()==false) self-loop edges from the
 //     dataset are safely skipped (no error).
-//   • Weight policy: if g.Weighted() => weight=1 (constant); else weight=0.
-//   • Edge idempotency: we do not add an edge if it already exists
+//   - Weight policy: if g.Weighted() => weight=1 (constant); else weight=0.
+//   - Edge idempotency: we do not add an edge if it already exists
 //     (both orientations are checked for undirected graphs).
 //
 // Complexity:
-//   • Per glyph: O(V+E). Word/number of length k: O(k·(V+E)).
-//   • Only tiny constants (5×7 grid skeletons).
+//   - Per glyph: O(V+E). Word/number of length k: O(k*(V+E)).
+//   - Only tiny constants (5×7 grid skeletons).
 //
 // Determinism:
-//   • Emission strictly follows the stable order encoded in letterSpec.Edges.
-//   • Vertex-add order uses letterSpec.IDs (pre-sorted in letters_spec.go).
+//   - Emission strictly follows the stable order encoded in letterSpec.Edges.
+//   - Vertex-add order uses letterSpec.IDs (pre-sorted in letters_spec.go).
 //
 // AI-Hints:
-//   • If you need decimal dot or extra symbols, extend letters_spec.go with a
+//   - If you need decimal dot or extra symbols, extend letters_spec.go with a
 //     data-only entry (do not hardcode shapes here).
-//   • Keep `scope` stable in tests to ensure reproducible vertex namespaces.
+//   - Keep `scope` stable in tests to ensure reproducible vertex namespaces.
 //
 // Notes:
-//   • This file intentionally contains only building logic; all glyph geometry
+//   - This file intentionally contains only building logic; all glyph geometry
 //     (IDs/edges) stays in letters_spec.go to keep responsibilities clean.
 
 package builder
@@ -62,8 +62,8 @@ const (
 	methodBuildNumber  = "BuildNumber"  // context tag for error wrapping
 
 	nsSep      = "::" // stable namespace separator when scope is used
-	weightOne  = int64(1)
-	weightZero = int64(0)
+	weightOne  = 1.0
+	weightZero = 0.0
 )
 
 // -----------------------------------------------------------------------------
@@ -101,7 +101,7 @@ func Letters(text string, scope string) Constructor {
 		}
 
 		// Determine fixed edge weight according to weight policy.
-		var w int64
+		var w float64
 		if g.Weighted() { // Observe weight when the graph supports weights.
 			w = weightOne // Default constant weight = 1 (as required).
 		} else {
@@ -109,7 +109,7 @@ func Letters(text string, scope string) Constructor {
 		}
 
 		// Emit every rune in order; each becomes an independent component.
-		// Complexity: O(len(text) · (V+E)).
+		// Complexity: O(len(text) * (V+E)).
 		pos := 0 // positional index for stable namespacing
 		for _, r := range text {
 			// Skip whitespace runes gracefully (no-ops).
@@ -123,7 +123,7 @@ func Letters(text string, scope string) Constructor {
 				return fmt.Errorf("%s: unknown glyph %q: %w", methodBuildLetters, r, ErrOptionViolation)
 			}
 
-			// Compute namespace prefix once for this glyph.
+			// Compute the namespace prefix once for this glyph.
 			nsPrefix := makeNamespace(scope, pos)
 
 			// Emit vertices and edges with idempotency and mode guards.
@@ -158,7 +158,7 @@ func Digit(digit int, scope string) Constructor {
 		}
 
 		// Weight policy.
-		var w int64
+		var w float64
 		if g.Weighted() {
 			w = weightOne
 		} else {
@@ -216,7 +216,7 @@ func Number(number float64, decimal bool, scope string) Constructor {
 		}
 
 		// Weight policy.
-		var w int64
+		var w float64
 		if g.Weighted() {
 			w = weightOne
 		} else {
@@ -284,7 +284,7 @@ func qualify(prefix, canonical string) string {
 //   - Skips self-loops when g.Looped()==false.
 //
 // Complexity: O(V+E) with tiny constants.
-func emitGlyph(g *core.Graph, spec letterSpec, nsPrefix string, w int64) error {
+func emitGlyph(g *core.Graph, spec letterSpec, nsPrefix string, w float64) error {
 	// 1) Add all vertices in deterministic order.
 	for _, id := range spec.IDs {
 		qid := qualify(nsPrefix, id) // possibly namespaced ID
@@ -312,19 +312,19 @@ func emitGlyph(g *core.Graph, spec letterSpec, nsPrefix string, w int64) error {
 		exists = g.HasEdge(u, v) || (!g.Directed() && g.HasEdge(v, u))
 		if !exists {
 			if _, err := g.AddEdge(u, v, w); err != nil {
-				return fmt.Errorf("AddEdge(%s→%s, w=%d): %w", u, v, w, err)
+				return fmt.Errorf("AddEdge(%s→%s, w=%g): %w", u, v, w, err)
 			}
 		}
 
 		// Mirror for directed graphs to preserve undirected semantics explicitly.
 		if g.Directed() && !g.HasEdge(v, u) {
 			if _, err := g.AddEdge(v, u, w); err != nil {
-				return fmt.Errorf("AddEdge(%s→%s, w=%d): %w", v, u, w, err)
+				return fmt.Errorf("AddEdge(%s→%s, w=%g): %w", v, u, w, err)
 			}
 		}
 	}
 
-	// 3) (Optional edges) — emit if present in spec.OptionalEdges (none by default in your dataset).
+	// 3) (Optional edges) - emit if present in spec.OptionalEdges (none by default in your dataset).
 	for _, ep := range spec.OptionalEdges {
 		u = qualify(nsPrefix, ep.U)
 		v = qualify(nsPrefix, ep.V)
@@ -335,12 +335,12 @@ func emitGlyph(g *core.Graph, spec letterSpec, nsPrefix string, w int64) error {
 		exists = g.HasEdge(u, v) || (!g.Directed() && g.HasEdge(v, u))
 		if !exists {
 			if _, err := g.AddEdge(u, v, w); err != nil {
-				return fmt.Errorf("AddEdge(optional %s→%s, w=%d): %w", u, v, w, err)
+				return fmt.Errorf("AddEdge(optional %s→%s, w=%g): %w", u, v, w, err)
 			}
 		}
 		if g.Directed() && !g.HasEdge(v, u) {
 			if _, err := g.AddEdge(v, u, w); err != nil {
-				return fmt.Errorf("AddEdge(optional %s→%s, w=%d): %w", v, u, w, err)
+				return fmt.Errorf("AddEdge(optional %s→%s, w=%g): %w", v, u, w, err)
 			}
 		}
 	}

@@ -35,7 +35,7 @@ import (
 //  7. Return MST edges and total weight.
 //
 // Complexity: O(E log V) time, O(V + E) memory.
-func Prim(graph *core.Graph, root string) ([]core.Edge, int64, error) {
+func Prim(graph *core.Graph, root string) ([]core.Edge, float64, error) {
 	// 1. Validate that graph is non-nil, weighted, undirected and have no direct edges.
 	if graph == nil || !graph.Weighted() || graph.Directed() || graph.HasDirectedEdges() {
 		// Return ErrInvalidGraph for any invalid condition.
@@ -71,7 +71,7 @@ func Prim(graph *core.Graph, root string) ([]core.Edge, int64, error) {
 	n := len(vertices)                  // total number of vertices
 	visited := make(map[string]bool, n) // mark visited vertices
 	mst := make([]core.Edge, 0, n-1)    // will hold up to n-1 edges
-	var totalWeight int64               // sum of weights in MST
+	var totalWeight float64             // sum of weights in MST
 
 	// 4a. Prepare the priority queue (min‐heap) of *core.Edge pointers.
 	pq := &edgePQ{} // our custom edge priority queue

@@ -49,11 +49,11 @@
 //
 //   - BuilderOption mutates an internal builderConfig snapshot (immutable to impls).
 //     Typical fields (kept stable across implementations):
-//     – rng / seed               • for stochastic builders (rngFrom honors cfg.rng first)
-//     – idFn                     • vertex ID scheme for graph builders
-//     – leftPrefix/rightPrefix   • bipartite label roots
-//     – weightFn                 • edge-weight policy for Weighted() graphs
-//     – partition/namespace      • optional scoping utilities for composite IDs
+//     – rng / seed               - for stochastic builders (rngFrom honors cfg.rng first)
+//     – idFn                     - vertex ID scheme for graph builders
+//     – leftPrefix/rightPrefix   - bipartite label roots
+//     – weightFn                 - edge-weight policy for Weighted() graphs
+//     – partition/namespace      - optional scoping utilities for composite IDs
 //
 //   - ID schemes (examples):
 //     DefaultIDFn (0,1,2,…), SymbolIDFn (A,B,…), ExcelColumnIDFn (A..Z,AA..),
@@ -79,7 +79,7 @@
 //     Cycle(n), Path(n), Star(n), Wheel(n), Complete(n),
 //     CompleteBipartite(n1,n2), Grid(r,c),
 //     RandomSparse(n,p), RandomRegular(n,d), PlatonicSolid(name,withCenter),
-//     Hexagram(variant) — chord overlays over a base ring (Cycle/Wheel).
+//     Hexagram(variant) - chord overlays over a base ring (Cycle/Wheel).
 //
 //   - Complexity (typical):
 //     Cycle/Path/Star/Wheel/Grid       → O(V+E), memory O(V)
@@ -114,7 +114,7 @@
 //     If g.Weighted(): default ConstantWeightFn(1) is used; otherwise weight 0.
 //
 //   - Complexity:
-//     Per glyph O(V+E). For k glyphs, O(k·(V+E)). V,E are tiny for 5×7 skeletons.
+//     Per glyph O(V+E). For k glyphs, O(k*(V+E)). V,E are tiny for 5×7 skeletons.
 //
 // -----------------------------------------------------------------------------
 // Sequence datasets (impl_pulse.go / impl_chirp.go / impl_ohlc.go)
@@ -164,14 +164,14 @@
 // -----------------------------------------------------------------------------
 // Extensibility & file layout
 // -----------------------------------------------------------------------------
-// • To add a new topology:
+// - To add a new topology:
 //  1. Declare the factory in api.go (docstring + complexity).
 //  2. Implement Constructor in a dedicated impl_<topic>.go (no public symbols).
 //  3. Put any immutable datasets in a *_spec.go file (stable IDs, stable order).
 //  4. Add thin BuildX wrappers in api.go only if you need a convenience call
 //     that runs a single constructor against an existing graph.
 //
-// • To add a new sequence:
+// - To add a new sequence:
 //  1. Implement it in its own impl_<name>.go and reuse shared defaults/helpers
 //     from sequence_primitives.go (rngFrom, shared constants).
 //  2. Keep determinism and validation rules identical to the existing trio.

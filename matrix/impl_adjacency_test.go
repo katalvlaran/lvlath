@@ -18,8 +18,8 @@ import (
 // --- helpers ---
 
 // edgesMap collapses edges to a unique (from,to)->w map (last write wins).
-func edgesMap(g *core.Graph) map[[2]string]int64 {
-	m := map[[2]string]int64{}
+func edgesMap(g *core.Graph) map[[2]string]float64 {
+	m := map[[2]string]float64{}
 	for _, e := range g.Edges() {
 		m[[2]string{e.From, e.To}] = e.Weight
 	}
@@ -28,8 +28,8 @@ func edgesMap(g *core.Graph) map[[2]string]int64 {
 }
 
 // edgesMultiMap collects multi-edges; weights per (from,to) are sorted for stable compare.
-func edgesMultiMap(g *core.Graph) map[[2]string][]int64 {
-	m := map[[2]string][]int64{}
+func edgesMultiMap(g *core.Graph) map[[2]string][]float64 {
+	m := map[[2]string][]float64{}
 	for _, e := range g.Edges() {
 		k := [2]string{e.From, e.To}
 		m[k] = append(m[k], e.Weight)
@@ -191,7 +191,7 @@ func TestFirstEdgeWins_DisallowMulti_Directed(t *testing.T) {
 	}
 	em := edgesMap(g2)
 	if w, ok := em[[2]string{"v0", "v1"}]; !ok || w != 10 {
-		t.Fatalf("export mismatch: presence=%v weight=%d, want weight=10", ok, w)
+		t.Fatalf("export mismatch: presence=%v weight=%g, want weight=10", ok, w)
 	}
 	if len(g2.Edges()) != 1 {
 		t.Fatalf("export edges count: got %d, want 1", len(g2.Edges()))
@@ -240,7 +240,7 @@ func TestFirstEdgeWins_DisallowMulti_Undirected(t *testing.T) {
 		t.Fatalf("export edges count: got %d, want 1", len(g2.Edges()))
 	}
 	if w := g2.Edges()[0].Weight; w != 5 {
-		t.Fatalf("export weight: got %d, want 5", w)
+		t.Fatalf("export weight: got %g, want 5", w)
 	}
 }
 
@@ -288,7 +288,7 @@ func TestToGraph_RoundTrip_PreserveIDsAndWeights(t *testing.T) {
 			t.Fatalf("AddVertex %s: %v", id, err)
 		}
 	}
-	add := func(u, v string, w int64) {
+	add := func(u, v string, w float64) {
 		if _, err := g.AddEdge(u, v, w); err != nil {
 			t.Fatalf("AddEdge %s->%s: %v", u, v, err)
 		}
@@ -320,7 +320,7 @@ func TestToGraph_RoundTrip_PreserveIDsAndWeights(t *testing.T) {
 	}
 	for k, w := range m1 {
 		if w2, ok := m2[k]; !ok || w2 != w {
-			t.Fatalf("edge mismatch on %v: got %d, want %d (ok=%v)", k, w2, w, ok)
+			t.Fatalf("edge mismatch on %v: got %f, want %g (ok=%v)", k, w2, w, ok)
 		}
 	}
 }

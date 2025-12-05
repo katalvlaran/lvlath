@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_hexagram.go — Star-of-David (hexagram) patterns as deterministic builders.
+// impl_hexagram.go - Star-of-David (hexagram) patterns as deterministic builders.
 //
 // Purpose:
 //   - Provide several hexagram variants by overlaying chord sets over a base cycle/wheel.
@@ -25,7 +25,8 @@
 // AI-Hints:
 //  - To add a new variant, extend hexRingSize and hexChords only; do not touch builder logic.
 //  - Keep chord emission order stable to preserve determinism (affects weight RNG sequence).
-//  - If you need weighted chords with a different distribution than the base ring, inject a local weightFn via a dedicated option and read it in the constructor (backward-compatible).
+//  - If you need weighted chords with a different distribution than the base ring,
+//    inject a local weightFn via a dedicated option and read it in the constructor (backward-compatible).
 
 package builder
 
@@ -163,9 +164,11 @@ func Hexagram(variant HexagramVariant) Constructor {
 			return fmt.Errorf("%s: missing chords for %v: %w", methodHexagram, variant, ErrConstructFailed)
 		}
 
-		// Weight resolution once per edge (deterministic for same rng state).
-		var w int64
-		nextWeight := func() int64 {
+		var (
+			w    float64 // Weight resolution once per edge (deterministic for same rng state).
+			u, v string  // edges key
+		)
+		nextWeight := func() float64 {
 			if g.Weighted() {
 				return cfg.weightFn(cfg.rng)
 			}
@@ -175,8 +178,8 @@ func Hexagram(variant HexagramVariant) Constructor {
 		// Emit chords with idempotency and directed mirroring.
 		for _, ch := range set {
 			// Derive ring endpoint IDs via cfg.idFn (consistent with Cycle/Wheel).
-			u := cfg.idFn(ch.U)
-			v := cfg.idFn(ch.V)
+			u = cfg.idFn(ch.U)
+			v = cfg.idFn(ch.V)
 
 			// Skip invalid self-chords if loops are not allowed.
 			if u == v && !g.Looped() {
@@ -187,7 +190,7 @@ func Hexagram(variant HexagramVariant) Constructor {
 			if !hasEdgeUndirAware(g, u, v) {
 				w = nextWeight()
 				if _, err := g.AddEdge(u, v, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s,w=%d): %w", methodHexagram, u, v, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s,w=%g): %w", methodHexagram, u, v, w, err)
 				}
 			}
 
@@ -195,7 +198,7 @@ func Hexagram(variant HexagramVariant) Constructor {
 			if g.Directed() && !hasEdgeUndirAware(g, v, u) {
 				w = nextWeight()
 				if _, err := g.AddEdge(v, u, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s,w=%d): %w", methodHexagram, v, u, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s,w=%g): %w", methodHexagram, v, u, w, err)
 				}
 			}
 		}

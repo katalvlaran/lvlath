@@ -8,9 +8,9 @@
 //   - Build a minimum 1-tree T(π): MST on V\{r} using c', plus two cheapest
 //     r-incident edges (w.r.t. c').
 //   - Bound value (Lagrangian dual):
-//     L(π) = cost_c'(T(π)) − 2 · Σ_i π_i
+//     L(π) = cost_c'(T(π)) − 2 * Σ_i π_i
 //     where cost_c' sums reduced costs of 1-tree edges.
-//     Since Σ_(i,j)∈T (π_i+π_j) = Σ_i deg_T(i)·π_i, this matches the dual form.
+//     Since Σ_(i,j)∈T (π_i+π_j) = Σ_i deg_T(i)*π_i, this matches the dual form.
 //   - Update π by subgradient with components s_i = deg_T(i) − 2
 //     (tour feasibility requires deg(i)=2 for every i).
 //
@@ -28,7 +28,7 @@
 //   - NaN/negative weights are rejected (strict sentinels).
 //
 // Complexity (per call):
-//   - O(iters · n²) time for a fixed iteration budget.
+//   - O(iters * n²) time for a fixed iteration budget.
 //   - O(n²) memory for dense weights; O(n) working arrays.
 //
 // Determinism:
@@ -85,7 +85,7 @@ func DefaultOneTreeConfig() OneTreeConfig {
 //     or fewer than two finite root edges).
 //   - Strict sentinels for NaN/negative weights or shape issues.
 //
-// Complexity: O(cfg.MaxIter · n²) time, O(n²) memory.
+// Complexity: O(cfg.MaxIter * n²) time, O(n²) memory.
 func OneTreeLowerBound(
 	dist matrix.Matrix,
 	root int,
@@ -172,7 +172,7 @@ func OneTreeLowerBound(
 	)
 	if !math.IsInf(cfg.UB, 0) && cfg.UB > 0 {
 		haveUB = true
-		usedUB = cfg.UB // capture the incumbent UB to drive the adaptive step t = α·(UB−L)/||s||²
+		usedUB = cfg.UB // capture the incumbent UB to drive the adaptive step t = α*(UB−L)/||s||²
 	}
 
 	for iter = 0; iter < cfg.MaxIter; iter++ {
@@ -187,7 +187,7 @@ func OneTreeLowerBound(
 			return 0, nil, err
 		}
 
-		// L(π) = cost_c'(T) − 2·Σπ (classical Held–Karp dual objective).
+		// L(π) = cost_c'(T) − 2*Σπ (classical Held–Karp dual objective).
 		sumPi = 0
 		for i = 0; i < n; i++ {
 			sumPi += eng.pi[i] // accumulate Σ π_i over all vertices
@@ -209,7 +209,7 @@ func OneTreeLowerBound(
 		}
 
 		// Step size policy:
-		//  - With UB:  t = α · (UB − L) / ||s||²  (standard Held–Karp recipe),
+		//  - With UB:  t = α * (UB − L) / ||s||²  (standard Held–Karp recipe),
 		//    clamped to a non-negative value to avoid moving in the wrong direction.
 		//  - Without UB: monotone decreasing schedule t = α / (1 + iter).
 		if haveUB {
@@ -226,7 +226,7 @@ func OneTreeLowerBound(
 			break
 		}
 
-		// π_i ← π_i + t · (deg(i) − 2) for all i (plain subgradient ascent on the dual).
+		// π_i ← π_i + t * (deg(i) − 2) for all i (plain subgradient ascent on the dual).
 		for i = 0; i < n; i++ {
 			eng.pi[i] += step * float64(eng.deg[i]-2)
 		}

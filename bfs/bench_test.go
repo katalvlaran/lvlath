@@ -17,7 +17,7 @@ func BenchmarkBFS_Chain(b *testing.B) {
 	for i := 0; i < N; i++ {
 		u := fmt.Sprintf("v%d", i)
 		v := fmt.Sprintf("v%d", i+1)
-		g.AddEdge(u, v, 0)
+		_, _ = g.AddEdge(u, v, 0)
 	}
 	V := N + 1
 	E := N
@@ -40,13 +40,13 @@ func BenchmarkBFS_BinaryTree(b *testing.B) {
 	g := core.NewGraph()
 	// create vertices
 	for i := 1; i <= nodeCount; i++ {
-		g.AddVertex(fmt.Sprintf("%d", i))
+		_ = g.AddVertex(fmt.Sprintf("%d", i))
 	}
 	// connect parent → children
 	for i := 1; i <= (nodeCount-1)/2; i++ {
 		p := fmt.Sprintf("%d", i)
-		g.AddEdge(p, fmt.Sprintf("%d", 2*i), 0)
-		g.AddEdge(p, fmt.Sprintf("%d", 2*i+1), 0)
+		_, _ = g.AddEdge(p, fmt.Sprintf("%d", 2*i), 0)
+		_, _ = g.AddEdge(p, fmt.Sprintf("%d", 2*i+1), 0)
 	}
 
 	b.ReportAllocs()
@@ -58,7 +58,7 @@ func BenchmarkBFS_BinaryTree(b *testing.B) {
 	}
 }
 
-// BenchmarkBFS_Grid runs BFS on an M×M grid (M² nodes, ≈2·M·(M−1) edges).
+// BenchmarkBFS_Grid runs BFS on an M×M grid (M² nodes, ≈2*M*(M−1) edges).
 func BenchmarkBFS_Grid(b *testing.B) {
 	const M = 100
 	V := M * M
@@ -69,7 +69,7 @@ func BenchmarkBFS_Grid(b *testing.B) {
 	// build vertices
 	for i := 0; i < M; i++ {
 		for j := 0; j < M; j++ {
-			g.AddVertex(fmt.Sprintf("%d_%d", i, j))
+			_ = g.AddVertex(fmt.Sprintf("%d_%d", i, j))
 		}
 	}
 	// add grid edges
@@ -77,10 +77,10 @@ func BenchmarkBFS_Grid(b *testing.B) {
 		for j := 0; j < M; j++ {
 			id := fmt.Sprintf("%d_%d", i, j)
 			if i+1 < M {
-				g.AddEdge(id, fmt.Sprintf("%d_%d", i+1, j), 0)
+				_, _ = g.AddEdge(id, fmt.Sprintf("%d_%d", i+1, j), 0)
 			}
 			if j+1 < M {
-				g.AddEdge(id, fmt.Sprintf("%d_%d", i, j+1), 0)
+				_, _ = g.AddEdge(id, fmt.Sprintf("%d_%d", i, j+1), 0)
 			}
 		}
 	}
@@ -103,13 +103,13 @@ func BenchmarkBFS_RandomSparse(b *testing.B) {
 	g := core.NewGraph()
 	// add vertices
 	for i := 0; i < V; i++ {
-		g.AddVertex(fmt.Sprintf("n%d", i))
+		_ = g.AddVertex(fmt.Sprintf("n%d", i))
 	}
 	// random edges (may include duplicates, but BFS logic ignores repeats)
 	for k := 0; k < E; k++ {
 		u := fmt.Sprintf("n%d", rnd.Intn(V))
 		v := fmt.Sprintf("n%d", rnd.Intn(V))
-		g.AddEdge(u, v, 0)
+		_, _ = g.AddEdge(u, v, 0)
 	}
 
 	b.ReportAllocs()
@@ -129,7 +129,7 @@ func BenchmarkBFS_HookOverhead(b *testing.B) {
 
 	g := core.NewGraph()
 	for i := 0; i < N; i++ {
-		g.AddEdge(fmt.Sprintf("v%d", i), fmt.Sprintf("v%d", i+1), 0)
+		_, _ = g.AddEdge(fmt.Sprintf("v%d", i), fmt.Sprintf("v%d", i+1), 0)
 	}
 
 	// No-op hook variant

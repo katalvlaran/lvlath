@@ -35,7 +35,7 @@ const MethodKruskal = "kruskal"
 //	Root   string - start vertex ID for Prim; ignored when Method == MethodKruskal.
 //
 // See: prim_kruskal.Prim, prim_kruskal.Kruskal
-// Complexity: O(E log V) for Prim, O(E log E + α(V)·E) for Kruskal.
+// Complexity: O(E log V) for Prim, O(E log E + α(V)*E) for Kruskal.
 type MSTOptions struct {
 	// Method to use: MethodPrim or MethodKruskal.
 	Method string
@@ -84,11 +84,11 @@ func DefaultOptions() MSTOptions {
 // Returns:
 //
 //	[]core.Edge - slice of edges in MST (empty if graph has single vertex).
-//	int64       - total weight of MST (zero if no edges).
+//	float64     - total weight of MST (zero if no edges).
 //	error       - non-nil if computation cannot proceed.
 //
 // Note: this is optional scaffolding-methods Prim and Kruskal can still be called directly.
-func Compute(graph *core.Graph, opts MSTOptions) ([]core.Edge, int64, error) {
+func Compute(graph *core.Graph, opts MSTOptions) ([]core.Edge, float64, error) {
 	// Dispatch by method name
 	switch opts.Method {
 	case MethodKruskal:

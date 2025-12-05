@@ -18,7 +18,7 @@ import (
 //  2. Initialize capMap with one inner map per vertex (O(V)).
 //  3. For each vertex u in sorted order (O(V)):
 //     a. Check ctx.Err() for early cancellation.
-//     b. For each outgoing *Edge e := g.Neighbors(u) (O(deg(u)·log deg(u))):
+//     b. For each outgoing *Edge e := g.Neighbors(u) (O(deg(u)*log deg(u))):
 //     If e.From == e.To (self-loop), skip immediately.
 //     c := float64(e.Weight).
 //     If c < -opts.Epsilon, return EdgeError (negative capacity).
@@ -27,9 +27,9 @@ import (
 //
 // Complexity:
 //
-//	Time:   O(V + E·log d_max) where d_max is max degree (for sorting neighbors).
+//	Time:   O(V + E*log d_max) where d_max is max degree (for sorting neighbors).
 //	Memory: O(V + E) for storing all capacities in capMap.
-func buildCapMap(g *core.Graph, opts FlowOptions) (map[string]map[string]int64, error) {
+func buildCapMap(g *core.Graph, opts FlowOptions) (map[string]map[string]float64, error) {
 	// Prepare context: default to Background if nil
 	ctx := opts.Ctx
 	if ctx == nil {
@@ -42,10 +42,10 @@ func buildCapMap(g *core.Graph, opts FlowOptions) (map[string]map[string]int64, 
 
 	// Initialize capMap: outer map sized to number of vertices
 	vertices := g.Vertices()
-	capMap := make(map[string]map[string]int64, len(vertices))
+	capMap := make(map[string]map[string]float64, len(vertices))
 	for _, u := range vertices {
 		// Create inner map for each vertex
-		capMap[u] = make(map[string]int64)
+		capMap[u] = make(map[string]float64)
 	}
 
 	// Iterate through each vertex u in sorted order
@@ -103,7 +103,7 @@ func buildCapMap(g *core.Graph, opts FlowOptions) (map[string]map[string]int64, 
 //	Time:   O(V + E_res) where E_res is number of residual edges after filtering.
 //	Memory: O(V + E_res).
 func buildCoreResidualFromCapMap(
-	capMap map[string]map[string]int64,
+	capMap map[string]map[string]float64,
 	g *core.Graph,
 	opts FlowOptions,
 ) (*core.Graph, error) {
@@ -115,7 +115,7 @@ func buildCoreResidualFromCapMap(
 	for u, inner := range capMap {
 		for v, capUV := range inner {
 			// Only add edges with capacity strictly greater than Epsilon
-			if float64(capUV) > opts.Epsilon {
+			if capUV > opts.Epsilon {
 				// AddEdge preserves multi-edge & loop handling according to graph flags
 				if _, err := residual.AddEdge(u, v, capUV); err != nil {
 					return nil, err

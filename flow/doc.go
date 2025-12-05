@@ -9,7 +9,7 @@
 //
 //   - Method: depth-first search to find any augmenting path.
 //
-//   - Time:   O(E · F), where F is the total flow pushed (integral networks).
+//   - Time:   O(E * F), where F is the total flow pushed (integral networks).
 //
 //   - Memory: O(V + E) for the residual capacity map and DFS stack.
 //
@@ -19,7 +19,7 @@
 //
 //   - Method: breadth-first search for shortest (fewest-edge) augmenting paths.
 //
-//   - Time:   O(V · E²) in the worst case with integer capacities.
+//   - Time:   O(V * E²) in the worst case with integer capacities.
 //
 //   - Memory: O(V + E) for residual map and BFS queues.
 //
@@ -29,7 +29,7 @@
 //
 //   - Method: level graph construction + blocking-flow via DFS.
 //
-//   - Time:   O(E · √V) on unit-capacity networks (general networks often near O(E·√V)).
+//   - Time:   O(E * √V) on unit-capacity networks (general networks often near O(E*√V)).
 //
 //   - Memory: O(V + E) for level map, adjacency slices, and recursion state.
 //
@@ -72,19 +72,19 @@
 //	    g *core.Graph,
 //	    source, sink string,
 //	    opts FlowOptions,
-//	) (maxFlow int64, residual *core.Graph, err error)
+//	) (maxFlow float64, residual *core.Graph, err error)
 //
 //	func EdmondsKarp(
 //	    g *core.Graph,
 //	    source, sink string,
 //	    opts FlowOptions,
-//	) (maxFlow int64, residual *core.Graph, err error)
+//	) (maxFlow float64, residual *core.Graph, err error)
 //
 //	func Dinic(
 //	    g *core.Graph,
 //	    source, sink string,
 //	    opts FlowOptions,
-//	) (maxFlow int64, residual *core.Graph, err error)
+//	) (maxFlow float64, residual *core.Graph, err error)
 //
 // Each returns the computed maximum flow value and a **residual graph**
 // that preserves all original configuration flags (directedness, weighting,

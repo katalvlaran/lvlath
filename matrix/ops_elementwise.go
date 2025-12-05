@@ -535,76 +535,7 @@ func ewAllClose(a, b Matrix, rtol, atol float64) (bool, error) {
 			return true, nil // all ok
 		}
 	}
-	/*
-		Hi Alexandre,
 
-		Thanks a lot for reaching out and for the context about OTO – the idea of a “script scheduler with argument constraints” sounds very practical and I can immediately see why you ended up thinking about graphs.
-
-		From what you described, your core problem can be seen like this:
-		- You have a set of arguments A = {a1, a2, …, an}.
-		- Some arguments require other arguments (dependencies).
-		- Some pairs of arguments must never appear together (conflicts).
-		- Given a user selection S ⊆ A, you want to:
-		  - automatically derive all transitive dependencies, and
-		  - refuse any selection that contains a forbidden pair.
-
-		This maps very naturally to a small directed graph plus a conflict relation.
-
-		In my library `lvlath` (github.com/katalvlaran/lvlath, current master branch), I would model it as:
-		- A directed graph G over your argument IDs using the `core` package:
-		  - each argument is a vertex;
-		  - for every “A requires B” I add a directed edge A → B with weight 0 (unweighted logic).
-		- A side structure for conflicts (a symmetric map of sets), which is cheaper and simpler than trying to encode conflicts into the same graph.
-
-		Then the algorithm is straightforward:
-
-		1) Schema validation at startup
-
-		   Before executing anything, I would validate the constraint schema itself:
-
-		   - Use the DFS helper from `lvlath/dfs` (it supports cycle detection and topological analysis) to detect cycles in the “requires” graph. A cycle usually means the schema is either misconfigured or describing a tightly coupled group of arguments that should be treated as one unit. For a CLI-style API, I would normally treat such cycles as an error.
-
-		   - For each conflict pair (A, B), I would run a BFS from A and from B on the `core.Graph` using `lvlath/bfs`. If B is reachable from A (or A is reachable from B) through “requires” edges, then any selection that includes one of them is forced to include the other, which contradicts the conflict rule. That is a schema-level inconsistency I would rather reject early instead of letting it leak into runtime.
-
-		   This phase runs once at startup and keeps your rules self-consistent.
-
-		2) Validating a concrete selection
-
-		   For a given user selection S:
-		   - I put all selected arguments into a map `selected`.
-		   - For each argument a in S, I run a BFS on the dependency graph starting from a (`bfs.BFS` in lvlath). The BFS result gives me all vertices reachable from a, which are exactly the direct and transitive dependencies of a.
-		   - I insert all those reachable arguments into `selected` as well. At this point `selected` contains S plus all its transitive requirements.
-
-		   Then I check conflicts:
-		   - For every conflict pair (A, B), if both A and B are present in `selected`, I reject this particular selection and return a clear error explaining which arguments cannot be used together and why.
-
-		   For the scale you described (not huge numbers of arguments), this approach is more than fast enough. BFS on a small graph is O(V + E), and in practice the overhead is negligible compared to I/O and process execution.
-
-		Why bother with a graph when the number of arguments is small?
-
-		For me the main advantages are not performance but clarity and future-proofing:
-		- The dependency rules are explicit and visualizable as a graph instead of being scattered across ad-hoc if/else logic.
-		- Transitive dependencies “just work” because BFS/DFS traverse the graph naturally; there is no need to manually chase chains like A → B → C.
-		- The same graph can later be reused for more advanced analyses (e.g., finding unreachable arguments, explaining “why” a certain argument was auto-added, or even computing an execution order if you ever want to order phases).
-
-		In other words, even for small argument sets, having a tiny, deterministic graph layer pays off in correctness and in the ability to extend the rules without rewriting the validator.
-
-		About lvlath itself
-
-		Right now the `master` branch already reflects the architecture I am about to tag as v1.0.0. The focus is on:
-		- `core`: a thread-safe graph type with predictable iteration order and options for directed/undirected and weighted/unweighted graphs;
-		- `bfs`: breadth-first search with a stable `Order` and `Depth` map (great for reachability and layers);
-		- `dfs`: depth-first traversal with cycle detection and topological helpers.
-
-		On top of that there are other algorithms (Dijkstra, MST, max-flow, TSP, DTW, matrix utilities), but for your use-case the `core` + `bfs` + `dfs` trio is already enough to model dependencies and conflicts cleanly.
-
-		I am currently preparing more focused documentation and examples, and an “argument constraints / scheduler” scenario is one of the examples I plan to include. If you are interested, I can sketch a small prototype that mirrors your OTO use-case with a few sample arguments (`--cron`, `--at`, `--now`, `--dry-run`, `--force`, etc.) using lvlath, so you can see the full picture end to end.
-
-		If you have any concrete rule patterns (e.g. “exactly one of this group”, “at most one of that group”) or edge cases you care about, I would be very interested to hear them – that feedback helps me refine both the library and the examples.
-
-		Best regards,
-		Kyrylo
-	*/
 	// Generic fallback via At (bounds-safe; still deterministic).
 	var i, j int
 	var av, bv, diff, absb float64

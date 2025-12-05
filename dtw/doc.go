@@ -5,10 +5,10 @@
 //
 //	DTW measures similarity by warping the time axis to minimize cumulative distance between series.
 //	Commonly used in:
-//	  • Speech/audio alignment
-//	  • Gesture and motion matching
-//	  • Time-series clustering and anomaly detection
-//	  • Signature/handwriting verification
+//	  - Speech/audio alignment
+//	  - Gesture and motion matching
+//	  - Time-series clustering and anomaly detection
+//	  - Signature/handwriting verification
 //
 // Why:
 //   - Handles sequences of unequal lengths or variable speed.
@@ -16,19 +16,19 @@
 //   - Flexible memory usage for large-scale data.
 //
 // Complexity:
-//   - Time:   O(N·M)  (N = len(a), M = len(b))
+//   - Time:   O(N*M)  (N = len(a), M = len(b))
 //   - Memory:
-//   - FullMatrix: O(N·M) - exact distance + path
+//   - FullMatrix: O(N*M) - exact distance + path
 //   - TwoRows:    O(min(N, M)) - distance only
 //   - None:       O(1)        - minimal overhead
 //
 // Options:
 //
 //	Options struct with fields:
-//	  • Window       int         // Sakoe-Chiba band: max |i-j| allowed (<=0 = no constraint)
-//	  • SlopePenalty float64     // cost for insertion/deletion steps; controls stretch bias
-//	  • ReturnPath   bool        // include optimal path; requires MemoryMode=FullMatrix
-//	  • MemoryMode   MemoryMode  // select None, TwoRows, or FullMatrix storage
+//	  - Window       int         // Sakoe-Chiba band: max |i-j| allowed (<=0 = no constraint)
+//	  - SlopePenalty float64     // cost for insertion/deletion steps; controls stretch bias
+//	  - ReturnPath   bool        // include optimal path; requires MemoryMode=FullMatrix
+//	  - MemoryMode   MemoryMode  // select None, TwoRows, or FullMatrix storage
 //	Use DefaultOptions() for sensible defaults.
 //
 // Errors:

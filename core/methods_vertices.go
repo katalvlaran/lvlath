@@ -165,9 +165,9 @@ func (g *Graph) InternalVertices() map[string]*Vertex {
 
 // Degree returns the degree components of the given vertex ID:
 //
-//	in         — number of incoming directed edges (e.To == id)
-//	out        — number of outgoing directed edges (e.From == id)
-//	undirected — contribution from undirected edges
+//	in         - number of incoming directed edges (e.To == id)
+//	out        - number of outgoing directed edges (e.From == id)
+//	undirected - contribution from undirected edges
 //
 // Academic policy (documented in doc.go):
 //   - Directed edges contribute to in/out only.

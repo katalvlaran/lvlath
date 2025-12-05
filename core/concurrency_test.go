@@ -51,7 +51,7 @@ func TestConcurrentAddRemoveEdge(t *testing.T) {
 		// Concurrent edge addition
 		go func(id int) {
 			defer wg.Done()
-			_, _ = g.AddEdge("Base", fmt.Sprintf("V%d", id), int64(id))
+			_, _ = g.AddEdge("Base", fmt.Sprintf("V%d", id), float64(id))
 		}(i)
 
 		// Concurrent edge removal
@@ -74,7 +74,7 @@ func TestConcurrentNeighborsAndClone(t *testing.T) {
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 	// Prepare 50 self-loops on A
 	for i := 0; i < 50; i++ {
-		_, _ = g.AddEdge("A", "A", int64(i))
+		_, _ = g.AddEdge("A", "A", float64(i))
 	}
 
 	const readers = 50 // number of concurrent readers

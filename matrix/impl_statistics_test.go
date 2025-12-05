@@ -89,7 +89,7 @@ func TestCenterRows_SmallAndFallback(t *testing.T) {
 func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 	t.Parallel()
 	// 0×3 and 2×0
-	X1, _ := matrix.NewDense(0, 3)
+	X1, _ := matrix.NewDenseZeroOK(0, 3)
 	Y1, m1, err := matrix.CenterColumns(X1)
 	if err != nil {
 		t.Fatalf("0x3: %v", err)
@@ -98,7 +98,7 @@ func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 		t.Fatalf("shape mismatch 0x3")
 	}
 
-	X2, _ := matrix.NewDense(2, 0)
+	X2, _ := matrix.NewDenseZeroOK(2, 0)
 	Y2, m2, err := matrix.CenterColumns(X2)
 	if err != nil {
 		t.Fatalf("2x0: %v", err)

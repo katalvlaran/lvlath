@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_chirp.go — deterministic linear audio chirp generator.
+// impl_chirp.go - deterministic linear audio chirp generator.
 //
 // Purpose:
-//   • Produce a 1-D linear chirp (frequency sweep from f0 to f1) for tests/demos.
-//   • Optional linear trend and Gaussian noise.
-//   • Strict determinism with the same policy as BuildPulse.
+//   - Produce a 1-D linear chirp (frequency sweep from f0 to f1) for tests/demos.
+//   - Optional linear trend and Gaussian noise.
+//   - Strict determinism with the same policy as BuildPulse.
 //
 // Contract:
-//   • BuildAudioChirp(n, seed, opts...) returns a slice of length n (or nil).
-//   • O(n) time, O(n) memory. No panics. No global state.
+//   - BuildAudioChirp(n, seed, opts...) returns a slice of length n (or nil).
+//   - O(n) time, O(n) memory. No panics. No global state.
 //
 // Determinism policy (aligned with builders):
-//   • If cfg.rng != nil → use cfg.rng (shared stream via WithSeed(...)).
-//   • Else → rng := rand.New(rand.NewSource(seed)).
+//   - If cfg.rng != nil → use cfg.rng (shared stream via WithSeed(...)).
+//   - Else → rng := rand.New(rand.NewSource(seed)).
 //
 // AI-Hints:
-//   • Need exponential sweep? Swap linear fi with geometric interpolation.
-//   • Want phase-continuous multi-chirp sequences? Reuse the same theta accumulator.
+//   - Need exponential sweep? Swap linear fi with geometric interpolation.
+//   - Want phase-continuous multi-chirp sequences? Reuse the same theta accumulator.
 
 package builder
 

@@ -106,7 +106,7 @@ const (
 	// Christofides: 1.5-approx for metric symmetric TSP (MST + perfect matching + Euler + shortcut).
 	Christofides Algorithm = iota
 
-	// ExactHeldKarp: Held–Karp DP, O(n²·2ⁿ) time, O(n·2ⁿ) memory.
+	// ExactHeldKarp: Held–Karp DP, O(n²*2ⁿ) time, O(n*2ⁿ) memory.
 	ExactHeldKarp
 
 	// TwoOptOnly: local improvement on a seed tour (internal seed tour generator will be used).

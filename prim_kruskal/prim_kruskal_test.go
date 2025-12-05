@@ -19,9 +19,9 @@ func buildTriangle() *core.Graph {
 	// Create a new weighted, undirected graph.
 	g := core.NewGraph(core.WithWeighted())
 	// Add edges: A<->B(1), B<->C(2), A<->C(3).
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 2)
-	g.AddEdge("A", "C", 3)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 2)
+	_, _ = g.AddEdge("A", "C", 3)
 
 	return g
 }
@@ -36,7 +36,7 @@ func buildMediumGraph(n, edgesCount int) *core.Graph {
 
 	// 1. Add n vertices named "V0", "V1", ..., "V(n-1)".
 	for i := 0; i < n; i++ {
-		g.AddVertex(fmt.Sprintf("V%d", i))
+		_ = g.AddVertex(fmt.Sprintf("V%d", i))
 	}
 
 	// 2. Use a new rand.Rand with a fixed seed so that generated edges are always the same.
@@ -45,8 +45,8 @@ func buildMediumGraph(n, edgesCount int) *core.Graph {
 	// 3. Ensure basic connectivity by chaining vertices in a line.
 	//    For i = 1..n-1, connect V(i-1) to V(i) with a weight in [1..10].
 	for i := 1; i < n; i++ {
-		weight := int64(r.Intn(10) + 1) // random weight between 1 and 10
-		g.AddEdge(fmt.Sprintf("V%d", i-1), fmt.Sprintf("V%d", i), weight)
+		weight := 1.0 + r.Float64() + float64(r.Intn(10)) // random weight between 1.0 and 10.0
+		_, _ = g.AddEdge(fmt.Sprintf("V%d", i-1), fmt.Sprintf("V%d", i), weight)
 	}
 
 	// 4. Add extra random edges to reach edgesCount total edges.
@@ -59,7 +59,8 @@ func buildMediumGraph(n, edgesCount int) *core.Graph {
 			// skip loops
 			continue
 		}
-		weight := int64(r.Intn(100) + 1) // random weight between 1 and 100
+		weight := 1.0 + r.Float64() + float64(r.Intn(100)) // random weight between 1.0 and 100.0
+
 		// AddEdge will fail if multi-edges are disallowed; but default Graph allows only one edge per pair.
 		// We do not check the error here since duplicates may be skipped by core.Graph.
 		// If duplicate, error is ErrMultiEdgeNotAllowed, and that iteration won’t increase i.
@@ -132,9 +133,9 @@ func TestPrim_Triangle(t *testing.T) {
 
 	// Compute MST via Prim, rooted at "A".
 	mst, total, err := prim_kruskal.Prim(g, "A")
-	assert.NoError(t, err)           // no error expected
-	assert.Equal(t, int64(3), total) // MST weight should be 1 + 2 = 3
-	assert.Len(t, mst, 2)            // MST must contain exactly 2 edges
+	assert.NoError(t, err)      // no error expected
+	assert.Equal(t, 3.0, total) // MST weight should be 1 + 2 = 3
+	assert.Len(t, mst, 2)       // MST must contain exactly 2 edges
 
 	// Verify that edges {A—B, B—C} appear (undirected so order doesn’t matter).
 	names := make(map[string]bool, 2)
@@ -156,9 +157,9 @@ func TestKruskal_Triangle(t *testing.T) {
 
 	// Compute MST via Kruskal.
 	mst, total, err := prim_kruskal.Kruskal(g)
-	assert.NoError(t, err)           // no error expected
-	assert.Equal(t, int64(3), total) // MST weight should be 1 + 2 = 3
-	assert.Len(t, mst, 2)            // MST must contain exactly 2 edges
+	assert.NoError(t, err)      // no error expected
+	assert.Equal(t, 3.0, total) // MST weight should be 1 + 2 = 3
+	assert.Len(t, mst, 2)       // MST must contain exactly 2 edges
 
 	// Verify that edges {A—B, B—C} appear.
 	names := make(map[string]bool, 2)
@@ -226,13 +227,13 @@ func TestParallelEdgesSelection(t *testing.T) {
 	// Kruskal should choose only the weight‐1 edge: total = 1, MST size = 1.
 	mstK, totalK, errK := prim_kruskal.Kruskal(g)
 	assert.NoError(t, errK)
-	assert.Equal(t, int64(1), totalK)
+	assert.Equal(t, 1.0, totalK)
 	assert.Len(t, mstK, 1)
 
 	// Prim from root "A" should also pick the weight‐1 edge: total = 1, MST size = 1.
 	mstP, totalP, errP := prim_kruskal.Prim(g, "A")
 	assert.NoError(t, errP)
-	assert.Equal(t, int64(1), totalP)
+	assert.Equal(t, 1.0, totalP)
 	assert.Len(t, mstP, 1)
 }
 
@@ -271,7 +272,9 @@ func TestComparison_MediumGraph(t *testing.T) {
 	mstP, totalP, errP := prim_kruskal.Prim(g, "V0")
 	assert.NoError(t, errP)                  // no error expected
 	assert.Len(t, mstP, len(g.Vertices())-1) // MST size must be |V|-1
+	const tolerance = 1e-10
 
 	// The total weights produced by both methods must match.
-	assert.Equal(t, totalK, totalP)
+	//assert.Equal(t, totalK, totalP)
+	assert.InDelta(t, totalK, totalP, tolerance)
 }

@@ -13,12 +13,12 @@ import (
 // buildRandomGraph constructs a directed, weighted graph with V vertices and
 // roughly p probability of an edge between any ordered pair u→v.
 // Edge weights are uniform in [1, maxWeight].
-func buildRandomGraph(V int, p float64, maxWeight int64, seed int64) *core.Graph {
+func buildRandomGraph(V int, p float64, maxWeight float64, seed int64) *core.Graph {
 	r := rand.New(rand.NewSource(seed)) // deterministic seed for reproducibility
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Add all vertices
 	for i := 0; i < V; i++ {
-		g.AddVertex(strconv.Itoa(i))
+		_ = g.AddVertex(strconv.Itoa(i))
 	}
 	// Add edges with probability p
 	for u := 0; u < V; u++ {
@@ -27,8 +27,8 @@ func buildRandomGraph(V int, p float64, maxWeight int64, seed int64) *core.Graph
 				continue // skip self-loops
 			}
 			if r.Float64() < p {
-				w := r.Int63n(maxWeight) + 1
-				g.AddEdge(strconv.Itoa(u), strconv.Itoa(v), w)
+				w := r.Float64()*maxWeight + 1.0
+				_, _ = g.AddEdge(strconv.Itoa(u), strconv.Itoa(v), w)
 			}
 		}
 	}
@@ -44,12 +44,12 @@ func BenchmarkFlowAlgorithms(b *testing.B) {
 		name      string
 		vertices  int
 		edgeProb  float64
-		maxWeight int64
+		maxWeight float64
 		seed      int64
 	}{
-		{"Small", 200, 0.05, 10, 42},
-		{"Medium", 500, 0.02, 20, 4242},
-		{"Large", 1000, 0.01, 50, 424242},
+		{"Small", 200, 0.05, 10.0, 42},
+		{"Medium", 500, 0.02, 20.0, 4242},
+		{"Large", 1000, 0.01, 50.0, 424242},
 	}
 
 	for _, tc := range cases {
@@ -65,7 +65,7 @@ func BenchmarkFlowAlgorithms(b *testing.B) {
 			opts := flow.DefaultOptions()
 			opts.Ctx = context.Background()
 
-			// Sub-benchmark for Ford–Fulkerson (O(E·F), not suitable for large F).
+			// Sub-benchmark for Ford–Fulkerson (O(E*F), not suitable for large F).
 			b.Run("FordFulkerson", func(b *testing.B) {
 				// We reset the timer after graph construction.
 				b.ResetTimer()
@@ -74,7 +74,7 @@ func BenchmarkFlowAlgorithms(b *testing.B) {
 				}
 			})
 
-			// Sub-benchmark for Edmonds–Karp (O(V·E²) worst-case).
+			// Sub-benchmark for Edmonds–Karp (O(V*E²) worst-case).
 			b.Run("EdmondsKarp", func(b *testing.B) {
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {
@@ -82,7 +82,7 @@ func BenchmarkFlowAlgorithms(b *testing.B) {
 				}
 			})
 
-			// Sub-benchmark for Dinic (O(E·√V) on unit networks, high practical performance).
+			// Sub-benchmark for Dinic (O(E*√V) on unit networks, high practical performance).
 			b.Run("Dinic", func(b *testing.B) {
 				b.ResetTimer()
 				for i := 0; i < b.N; i++ {

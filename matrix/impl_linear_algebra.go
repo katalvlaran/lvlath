@@ -87,7 +87,7 @@ func matrixErrorf(tag string, err error) error {
 //
 // Implementation:
 //   - Stage 1: ValidateBinarySameShape(a, b). Allocate result Dense(rows, cols).
-//   - Stage 2: Fast-path if both are *Dense — single flat loop 0..n-1.
+//   - Stage 2: Fast-path if both are *Dense - single flat loop 0..n-1.
 //     Otherwise, fallback At/Set with fixed i→j order.
 //
 // Behavior highlights:
@@ -361,7 +361,7 @@ func Mul(a, b Matrix) (Matrix, error) {
 //
 // AI-Hints:
 //   - Keep operands as *Dense to unlock the flat-copy fast-path.
-//   - If you only need Aᵀ·x, prefer MatVec on A with indices swapped instead of forming Aᵀ.
+//   - If you only need Aᵀ*x, prefer MatVec on A with indices swapped instead of forming Aᵀ.
 //   - Avoid transposing repeatedly in tight loops; hoist and reuse the result where possible.
 func Transpose(m Matrix) (Matrix, error) {
 	// Validate input non-nil
@@ -851,8 +851,8 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 //   - Stage 1: ValidateNotNil(m) and ValidateSquare(m). Factorize via LU(m) → L (unit lower), U (upper).
 //     Allocate invDense(n×n) and workspace vectors y, x of length n.
 //   - Stage 2: For each canonical basis column e_col:
-//   - Forward solve L·y = e_col (top-down).
-//   - Backward solve U·x = y    (bottom-up; check nonzero pivots).
+//   - Forward solve L*y = e_col (top-down).
+//   - Backward solve U*x = y    (bottom-up; check nonzero pivots).
 //   - Write x into column `col` of invDense.
 //     Dense fast-path uses flat indexing; generic fallback uses At/Set.
 //
@@ -886,7 +886,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 //   - Numerical stability: no partial/complete pivoting. Upstream callers should avoid
 //     ill-conditioned matrices or apply scaling/preconditioning if stability matters.
 //   - For SPD matrices, prefer Cholesky-based inversion outside this package.
-//   - If you only need A^{-1}·b, solve via LU once and apply triangular solves (cheaper than forming A^{-1}).
+//   - If you only need A^{-1}*b, solve via LU once and apply triangular solves (cheaper than forming A^{-1}).
 //
 // AI-Hints:
 //   - Reuse LU(m) if multiple solves are needed; forming A^{-1} is typically a last resort.

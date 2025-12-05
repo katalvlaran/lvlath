@@ -1,29 +1,29 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_random_regular.go — implementation of RandomRegular(n, d) constructor.
+// impl_random_regular.go - implementation of RandomRegular(n, d) constructor.
 //
 // Canonical model (Ta-builder V1):
-//   • Undirected d-regular simple graph via stub-matching with bounded retries.
-//   • Pairs stubs after a deterministic shuffle (per seed). Validates a pairing
+//   - Undirected d-regular simple graph via stub-matching with bounded retries.
+//   - Pairs stubs after a deterministic shuffle (per seed). Validates a pairing
 //     against graph-mode constraints (no loops if !Looped, no multiedges if !Multigraph)
 //     before mutating the graph; on invalid pairing, reshuffles up to a small limit.
 //
 // Contract:
-//   • Only UNDIRECTED graphs are supported (else ErrUnsupportedGraphMode).
-//   • n ≥ 1; 0 ≤ d < n; (n*d) must be even (else ErrTooFewVertices).
-//   • cfg.rng must be non-nil (else ErrNeedRandSource).
-//   • Adds vertices via cfg.idFn in ascending index order (0..n-1).
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - Only UNDIRECTED graphs are supported (else ErrUnsupportedGraphMode).
+//   - n ≥ 1; 0 ≤ d < n; (n*d) must be even (else ErrTooFewVertices).
+//   - cfg.rng must be non-nil (else ErrNeedRandSource).
+//   - Adds vertices via cfg.idFn in ascending index order (0..n-1).
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Per attempt ~O(n·d) time to validate + apply; O(n·d) temporary space for stubs.
-//   • Attempts are constant-bounded → overall expected ~O(n·d).
+//   - Per attempt ~O(n*d) time to validate + apply; O(n*d) temporary space for stubs.
+//   - Attempts are constant-bounded → overall expected ~O(n*d).
 //
 // Determinism:
-//   • Fixed attempt limit and fixed trial order → identical outcomes for same seed.
-//   • Either a valid realization is produced, or ErrConstructFailed after N attempts.
+//   - Fixed attempt limit and fixed trial order → identical outcomes for same seed.
+//   - Either a valid realization is produced, or ErrConstructFailed after N attempts.
 
 package builder
 
@@ -99,8 +99,14 @@ func RandomRegular(n, d int) Constructor {
 		allowMulti := g.Multigraph() // allow multiple edges between same pair if true
 		rng := cfg.rng               // local alias (already validated non-nil)
 
+		var (
+			attempt, i int     // loop iterators
+			w          float64 // decide weight once per cross pair.
+			uIdx, vIdx int     // endpoint indexes
+		)
+
 		// 7) Attempt bounded reshuffles until we get a valid pairing or give up.
-		for attempt := 1; attempt <= maxStubMatchingAttempts; attempt++ {
+		for attempt = 1; attempt <= maxStubMatchingAttempts; attempt++ {
 			// 7.1) Shuffle stubs in-place using the provided RNG (deterministic per seed).
 			rng.Shuffle(stubCount, func(i, j int) { stubs[i], stubs[j] = stubs[j], stubs[i] })
 
@@ -111,9 +117,9 @@ func RandomRegular(n, d int) Constructor {
 			if !allowMulti {             // track existing simple pairs when multiedges are forbidden
 				seen = make(map[[2]int]struct{}, stubCount/2) // capacity hint
 			}
-			for i := 0; i < stubCount; i += 2 {
-				uIdx := stubs[i]   // left endpoint index
-				vIdx := stubs[i+1] // right endpoint index
+			for i = 0; i < stubCount; i += 2 {
+				uIdx = stubs[i]   // left endpoint index
+				vIdx = stubs[i+1] // right endpoint index
 
 				// Disallow self-loops if loops are not allowed by mode.
 				if !allowLoops && uIdx == vIdx {
@@ -142,14 +148,12 @@ func RandomRegular(n, d int) Constructor {
 			}
 
 			// 7.4) Pairing is valid under current mode constraints → apply edges.
-			for i := 0; i < stubCount; i += 2 {
-				uIdx := stubs[i]    // left endpoint index
-				vIdx := stubs[i+1]  // right endpoint index
+			for i = 0; i < stubCount; i += 2 {
+				uIdx = stubs[i]     // left endpoint index
+				vIdx = stubs[i+1]   // right endpoint index
 				u := cfg.idFn(uIdx) // map to vertex ID via cfg.idFn
 				v := cfg.idFn(vIdx) // map to vertex ID via cfg.idFn
 
-				// Decide weight exactly once per realized edge (deterministic per RNG state).
-				var w int64
 				if useWeight {
 					w = cfg.weightFn(rng)
 				} else {
@@ -158,7 +162,7 @@ func RandomRegular(n, d int) Constructor {
 
 				// Add edge u—v (undirected semantics handled by core).
 				if _, err := g.AddEdge(u, v, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w",
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w",
 						methodRandomRegular, u, v, w, err)
 				}
 			}

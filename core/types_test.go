@@ -93,7 +93,7 @@ func (s *TypesSuite) TestAtomicEdgeIDs() {
 	for i := 0; i < N; i++ {
 		go func(i int) {
 			defer wg.Done()
-			eid, err := s.g.AddEdge("A", "B", int64(i))
+			eid, err := s.g.AddEdge("A", "B", float64(i))
 			req.NoError(err, "AddEdge must not error")
 			idCh <- eid // send ID into channel
 		}(i)

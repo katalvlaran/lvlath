@@ -12,7 +12,7 @@ import (
 // directed, weighted graph `g` using Dinic’s algorithm (level graph + blocking flows).
 //
 // It returns:
-//   - maxFlow       : the total flow value (int64)
+//   - maxFlow       : the total flow value (float64)
 //   - residualGraph : a *core.Graph of remaining capacities, preserving
 //     all original graph options (directed, weighted,
 //     multi-edges, loops, mixed)
@@ -23,7 +23,7 @@ import (
 //  1. Normalize options and capture context (O(1)).
 //  2. Validate that `source` and `sink` exist in `g` (O(1)).
 //  3. Build initial capacity map via buildCapMap
-//     (O(V + E·log d_max) due to neighbor sorting).
+//     (O(V + E*log d_max) due to neighbor sorting).
 //  4. Repeat until no more augmenting paths:
 //     a. Check for cancellation (O(1)).
 //     b. BFS to build the level graph: distance from source for each vertex (O(V + E)).
@@ -36,13 +36,13 @@ import (
 //
 // Complexity:
 //
-//	Time:   O(min(V^(2/3), √E) · E) in general; O(E·√V) on unit‐capacity networks.
+//	Time:   O(min(V^(2/3), √E) * E) in general; O(E*√V) on unit‐capacity networks.
 //	Memory: O(V + E) for capMap and auxiliary maps (level, next, iter).
 func Dinic(
 	g *core.Graph,
 	source, sink string,
 	opts FlowOptions,
-) (maxFlow int64, residualGraph *core.Graph, err error) {
+) (maxFlow float64, residualGraph *core.Graph, err error) {
 	// 1) Normalize options (set default Ctx and Epsilon if needed)
 	opts.normalize()
 	ctx := opts.Ctx
@@ -55,7 +55,7 @@ func Dinic(
 		return 0, nil, ErrSinkNotFound
 	}
 
-	// 3) Build initial capacity map: capMap[u][v] = total int64 capacity from u→v
+	// 3) Build initial capacity map: capMap[u][v] = total float64 capacity from u→v
 	capMap, err := buildCapMap(g, opts)
 	if err != nil {
 		return 0, nil, err
@@ -114,7 +114,7 @@ func Dinic(
 			maxFlow += pushed
 			augmentCount++
 			if opts.Verbose {
-				fmt.Printf("Dinic: pushed %d, total %d\n", pushed, maxFlow)
+				fmt.Printf("Dinic: pushed %g, total %g\n", pushed, maxFlow)
 			}
 			// 4e.ii) Optionally rebuild level graph
 			if opts.LevelRebuildInterval > 0 && augmentCount%opts.LevelRebuildInterval == 0 {
@@ -138,12 +138,12 @@ func Dinic(
 // and returns the amount actually sent.
 func dfsDinicPush(
 	ctx context.Context,
-	capMap map[string]map[string]int64,
+	capMap map[string]map[string]float64,
 	next map[string][]string,
 	iter map[string]int,
 	u, sink string,
-	available int64,
-) int64 {
+	available float64,
+) float64 {
 	// Check for cancellation at DFS entry
 	if err := ctx.Err(); err != nil {
 		return 0

@@ -1,32 +1,32 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_pulse.go — deterministic rectangular/triangular pulse generator.
+// impl_pulse.go - deterministic rectangular/triangular pulse generator.
 //
 // Purpose (single responsibility):
-//   • Provide a reproducible 1-D pulse sequence for tests, demos and fixtures.
-//   • Shape controls: rectangular (duty ∈ [0,1]) or triangular (0..A envelope).
-//   • Optional linear trend and additive Gaussian noise, both deterministic.
+//   - Provide a reproducible 1-D pulse sequence for tests, demos and fixtures.
+//   - Shape controls: rectangular (duty ∈ [0,1]) or triangular (0..A envelope).
+//   - Optional linear trend and additive Gaussian noise, both deterministic.
 //
 // Contract:
-//   • BuildPulse(n, seed, opts...) returns a slice of length n (or nil on invalid input).
-//   • Strict determinism per (n, seed, options); no panics; no global state.
-//   • O(n) time and O(n) memory; tiny constant factors.
+//   - BuildPulse(n, seed, opts...) returns a slice of length n (or nil on invalid input).
+//   - Strict determinism per (n, seed, options); no panics; no global state.
+//   - O(n) time and O(n) memory; tiny constant factors.
 //
 // Options & policy (kept minimal, extension-ready):
-//   • Options are resolved via newBuilderConfig(opts...).
-//   • extractPulseParams(cfg) centralizes parameter sourcing (defaults for now).
-//   • Noise via rng.NormFloat64()*sigma; sigma≥0 is required.
+//   - Options are resolved via newBuilderConfig(opts...).
+//   - extractPulseParams(cfg) centralizes parameter sourcing (defaults for now).
+//   - Noise via rng.NormFloat64()*sigma; sigma≥0 is required.
 //
 // Determinism & testing:
-//   • For a fixed seed and defaults, the first K samples are stable (golden-friendly).
-//   • Duty=0.5 uses the same branchless comparison as general duty (via frac<duty).
+//   - For a fixed seed and defaults, the first K samples are stable (golden-friendly).
+//   - Duty=0.5 uses the same branchless comparison as general duty (via frac<duty).
 //
 // AI-Hints (practical):
-//   • To expose user-facing knobs (A/f0/duty/triangular/sigma/trend), add WithPulse(...)
+//   - To expose user-facing knobs (A/f0/duty/triangular/sigma/trend), add WithPulse(...)
 //     that populates builderConfig; then wire it in extractPulseParams.
-//   • For DC offsets or piecewise trends, stack them after base and before noise.
-//   • For rectangular waveforms, frac := mod(i*f0,1) is faster than trig checks.
+//   - For DC offsets or piecewise trends, stack them after base and before noise.
+//   - For rectangular waveforms, frac := mod(i*f0,1) is faster than trig checks.
 
 package builder
 
@@ -74,7 +74,7 @@ func extractPulseParams(_ builderConfig) seqPulseParams {
 }
 
 // -----------------------------------------------------------------------------
-// Public API — deterministic pulse generator
+// Public API - deterministic pulse generator
 // -----------------------------------------------------------------------------
 
 // BuildPulse returns a length-n pulse sequence with optional trend and noise.
@@ -125,13 +125,13 @@ func BuildPulse(n int, seed int64, opts ...BuilderOption) []float64 {
 		tri  float64 // triangular [0,1] envelope
 	)
 
-	// Fill all samples in a single pass — O(n) time.
+	// Fill all samples in a single pass - O(n) time.
 	for i := 0; i < n; i++ {
 		// Compute phase fraction in [0,1): frac = (i*f0) mod 1.
 		// Using Mod avoids trig overhead and keeps rectangular/triangular unified.
 		frac = math.Mod(float64(i)*periodFrac, unitOne)
 
-		// Branch on shape — keep the math simple and branchless within each case.
+		// Branch on shape - keep the math simple and branchless within each case.
 		if p.triangular {
 			// Triangle in [0,1]: 1 − |2*frac − 1|.
 			tri = unitOne - math.Abs(triDouble*frac-triCenter) // Normalized triangular envelope.

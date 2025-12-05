@@ -31,8 +31,8 @@ func mstWeight(t *testing.T, m matrix.Matrix) float64 {
 }
 
 //  1. Christofides on a regular hexagon - valid tour and cost ≤ 1.5×MST.
-//     This is a robust sanity since for a convex regular polygon: perimeter ~ 6·s,
-//     MST ~ 5·s, hence perimeter ≤ 1.5·MST holds with margin.
+//     This is a robust sanity since for a convex regular polygon: perimeter ~ 6*s,
+//     MST ~ 5*s, hence perimeter ≤ 1.5*MST holds with margin.
 func TestTSPApprox_Hexagon_Valid_Le15xMST(t *testing.T) {
 	// Regular hexagon on the unit circle.
 	const n = 6

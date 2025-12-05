@@ -2,8 +2,8 @@
 // Package matrix_test contains test helpers
 //
 // Purpose:
-//   • Provide small, deterministic test fixtures and utilities for builders/kernels.
-//   • Keep all data finite and well-formed to avoid numeric-policy interference.
+//   - Provide small, deterministic test fixtures and utilities for builders/kernels.
+//   - Keep all data finite and well-formed to avoid numeric-policy interference.
 
 package matrix_test
 

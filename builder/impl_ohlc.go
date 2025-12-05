@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_ohlc.go — deterministic OHLC series via discrete-time GBM with intraday steps.
+// impl_ohlc.go - deterministic OHLC series via discrete-time GBM with intraday steps.
 //
 // Purpose:
 //   - Emit reproducible OHLC arrays for 'days' trading days using a GBM-like path.

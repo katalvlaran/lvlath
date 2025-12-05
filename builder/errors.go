@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// errors.go — sentinel errors for the builder package.
+// errors.go - sentinel errors for the builder package.
 //
 // Error policy (explicit and strict):
-//   • Only sentinel variables (package-level) are exposed.
-//   • Callers MUST use errors.Is(err, ErrX) to branch on semantics.
-//   • Sentinels are NEVER wrapped with formatted strings at definition site.
-//   • Implementations SHOULD attach context using `%w` (see AI-Hints below).
-//   • Algorithms MUST NOT panic at runtime; validation panics are confined to
+//   - Only sentinel variables (package-level) are exposed.
+//   - Callers MUST use errors.Is(err, ErrX) to branch on semantics.
+//   - Sentinels are NEVER wrapped with formatted strings at definition site.
+//   - Implementations SHOULD attach context using `%w` (see AI-Hints below).
+//   - Algorithms MUST NOT panic at runtime; validation panics are confined to
 //     option constructor functions (WithX...), per lvlath 99-rules.
 //
 // AI-Hints (practical guidance for implementers and LLMs):
-//   • Wrap lower-level errors with method context: wrapf(MethodCycle, "AddEdge(u,v)", err).
-//   • Return ONLY these sentinels for validation classes (size/probability/rng/mode).
-//   • Do NOT stringify parameters into sentinel definitions; use %w wrapping instead.
-//   • Check with errors.Is in tests and production code; avoid string comparisons.
+//   - Wrap lower-level errors with method context: wrapf(MethodCycle, "AddEdge(u,v)", err).
+//   - Return ONLY these sentinels for validation classes (size/probability/rng/mode).
+//   - Do NOT stringify parameters into sentinel definitions; use %w wrapping instead.
+//   - Check with errors.Is in tests and production code; avoid string comparisons.
 
 package builder
 
@@ -98,12 +98,12 @@ func builderErrorf(method, format string, args ...interface{}) error {
 //    a deterministic context prefix "RandomSparse: rng is required".
 //
 // 2) Priority (tie-break guidance when multiple validations fail):
-//    • ErrTooFewVertices       — size/domain checks first (n, rows, cols, degree).
-//    • ErrInvalidProbability   — then probability ranges.
-//    • ErrNeedRandSource       — then RNG presence for stochastic builders.
-//    • ErrUnsupportedGraphMode — then mode compatibility (directed/loops/multi).
-//    • ErrConstructFailed      — only after all retries/strategies are exhausted.
-//    • Letters/Datasets (ErrUnknownLetter / ErrBadSize / ErrOptionViolation) —
+//    - ErrTooFewVertices       - size/domain checks first (n, rows, cols, degree).
+//    - ErrInvalidProbability   - then probability ranges.
+//    - ErrNeedRandSource       - then RNG presence for stochastic builders.
+//    - ErrUnsupportedGraphMode - then mode compatibility (directed/loops/multi).
+//    - ErrConstructFailed      - only after all retries/strategies are exhausted.
+//    - Letters/Datasets (ErrUnknownLetter / ErrBadSize / ErrOptionViolation) -
 //      apply in their respective subsystems (letters_spec / sequences).
 //
 // 3) Testing guidance:

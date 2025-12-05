@@ -28,15 +28,15 @@ func ExampleFordFulkerson_complex() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	// 2. Add all edges with their capacities.
-	g.AddEdge("S", "A", 5)  // from source to A
-	g.AddEdge("S", "C", 15) // from source to C
-	g.AddEdge("A", "B", 8)  // A to B
-	g.AddEdge("B", "D", 10) // B to D
-	g.AddEdge("C", "D", 5)  // C to D
-	g.AddEdge("C", "E", 10) // C to E
-	g.AddEdge("E", "D", 10) // E to D
-	g.AddEdge("D", "T", 10) // D to sink
-	g.AddEdge("E", "T", 5)  // E to sink
+	_, _ = g.AddEdge("S", "A", 5)  // from source to A
+	_, _ = g.AddEdge("S", "C", 15) // from source to C
+	_, _ = g.AddEdge("A", "B", 8)  // A to B
+	_, _ = g.AddEdge("B", "D", 10) // B to D
+	_, _ = g.AddEdge("C", "D", 5)  // C to D
+	_, _ = g.AddEdge("C", "E", 10) // C to E
+	_, _ = g.AddEdge("E", "D", 10) // E to D
+	_, _ = g.AddEdge("D", "T", 10) // D to sink
+	_, _ = g.AddEdge("E", "T", 5)  // E to sink
 
 	// 3. Configure options: use default Epsilon, non-verbose, background context.
 	opts := flow.DefaultOptions()
@@ -56,21 +56,21 @@ func ExampleFordFulkerson_complex() {
 
 // //////////////////////////////////////////////////////////////////////////////
 // ExampleEdmondsKarp_complex demonstrates Edmonds–Karp on the same network.
-// It uses BFS to find shortest augmenting paths, guaranteeing O(V·E²) worst‐case.
+// It uses BFS to find shortest augmenting paths, guaranteeing O(V*E²) worst‐case.
 // //////////////////////////////////////////////////////////////////////////////
 // Playground: [![Playground - EdmondsKarp](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/hgGauPZZOcV)
 func ExampleEdmondsKarp_complex() {
 	// Build the identical graph as above.
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("S", "A", 5)
-	g.AddEdge("S", "C", 15)
-	g.AddEdge("A", "B", 8)
-	g.AddEdge("B", "D", 10)
-	g.AddEdge("C", "D", 5)
-	g.AddEdge("C", "E", 10)
-	g.AddEdge("E", "D", 10)
-	g.AddEdge("D", "T", 10)
-	g.AddEdge("E", "T", 5)
+	_, _ = g.AddEdge("S", "A", 5)
+	_, _ = g.AddEdge("S", "C", 15)
+	_, _ = g.AddEdge("A", "B", 8)
+	_, _ = g.AddEdge("B", "D", 10)
+	_, _ = g.AddEdge("C", "D", 5)
+	_, _ = g.AddEdge("C", "E", 10)
+	_, _ = g.AddEdge("E", "D", 10)
+	_, _ = g.AddEdge("D", "T", 10)
+	_, _ = g.AddEdge("E", "T", 5)
 
 	// Default options: background context, Epsilon=1e-9, no logging.
 	opts := flow.DefaultOptions()
@@ -90,21 +90,21 @@ func ExampleEdmondsKarp_complex() {
 
 // //////////////////////////////////////////////////////////////////////////////
 // ExampleDinic_complex demonstrates Dinic on the same network.
-// It builds a level graph and pushes blocking flows, achieving O(E·√V) on unit networks.
+// It builds a level graph and pushes blocking flows, achieving O(E*√V) on unit networks.
 // //////////////////////////////////////////////////////////////////////////////
 // Playground: [![Playground - Dinic](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/lnq6XOgGUBn)
 func ExampleDinic_complex() {
 	// Construct the same directed, weighted graph.
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("S", "A", 5)
-	g.AddEdge("S", "C", 15)
-	g.AddEdge("A", "B", 8)
-	g.AddEdge("B", "D", 10)
-	g.AddEdge("C", "D", 5)
-	g.AddEdge("C", "E", 10)
-	g.AddEdge("E", "D", 10)
-	g.AddEdge("D", "T", 10)
-	g.AddEdge("E", "T", 5)
+	_, _ = g.AddEdge("S", "A", 5)
+	_, _ = g.AddEdge("S", "C", 15)
+	_, _ = g.AddEdge("A", "B", 8)
+	_, _ = g.AddEdge("B", "D", 10)
+	_, _ = g.AddEdge("C", "D", 5)
+	_, _ = g.AddEdge("C", "E", 10)
+	_, _ = g.AddEdge("E", "D", 10)
+	_, _ = g.AddEdge("D", "T", 10)
+	_, _ = g.AddEdge("E", "T", 5)
 
 	// Prepare options: background context, use default Epsilon, no verbosity.
 	opts := flow.DefaultOptions()

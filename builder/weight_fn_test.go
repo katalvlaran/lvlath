@@ -53,59 +53,59 @@ func TestWeightFnBehavior(t *testing.T) {
 
 	// DefaultWeightFn: always DefaultEdgeWeight
 	if w := builder.DefaultWeightFn(nil); w != builder.DefaultEdgeWeight {
-		t.Errorf("DefaultWeightFn(nil): expected %d, got %d", builder.DefaultEdgeWeight, w)
+		t.Errorf("DefaultWeightFn(nil): expected %g, got %g", builder.DefaultEdgeWeight, w)
 	}
 	if w := builder.DefaultWeightFn(rng); w != builder.DefaultEdgeWeight {
-		t.Errorf("DefaultWeightFn(rng): expected %d, got %d", builder.DefaultEdgeWeight, w)
+		t.Errorf("DefaultWeightFn(rng): expected %g, got %g", builder.DefaultEdgeWeight, w)
 	}
 
 	// ConstantWeightFn: always fixed value
-	const constVal = 7
+	const constVal = 7.0
 	wfnConst := builder.ConstantWeightFn(constVal)
 	if w := wfnConst(nil); w != constVal {
-		t.Errorf("ConstantWeightFn(nil): expected %d, got %d", constVal, w)
+		t.Errorf("ConstantWeightFn(nil): expected %g, got %g", constVal, w)
 	}
 	if w := wfnConst(rng); w != constVal {
-		t.Errorf("ConstantWeightFn(rng): expected %d, got %d", constVal, w)
+		t.Errorf("ConstantWeightFn(rng): expected %g, got %g", constVal, w)
 	}
 
 	// UniformWeightFn: nil RNG -> default; equal min==max yields that value when RNG present
-	min, max := int64(3), int64(3)
+	min, max := 3.0, 3.0
 	wfnUni := builder.UniformWeightFn(min, max)
 	if w := wfnUni(nil); w != builder.DefaultEdgeWeight {
-		t.Errorf("UniformWeightFn(nil RNG): expected default %d, got %d", builder.DefaultEdgeWeight, w)
+		t.Errorf("UniformWeightFn(nil RNG): expected default %g, got %g", builder.DefaultEdgeWeight, w)
 	}
 	// with RNG and min==max, always min
 	if w := wfnUni(rng); w != min {
-		t.Errorf("UniformWeightFn(3,3): expected %d, got %d", min, w)
+		t.Errorf("UniformWeightFn(3,3): expected %g, got %g", min, w)
 	}
 
 	// From1To100WeightFn: always in [1,100]
 	rng = rand.New(rand.NewSource(seed))
 	w := builder.From1To100WeightFn(rng)
 	if w < 1 || w > 100 {
-		t.Errorf("From1To100WeightFn: expected in [1,100], got %d", w)
+		t.Errorf("From1To100WeightFn: expected in [1,100], got %g", w)
 	}
 
 	// NormalWeightFn: nil RNG -> default; RNG -> non-negative, clipped
 	wfnNorm := builder.NormalWeightFn(10, 2)
 	if w := wfnNorm(nil); w != builder.DefaultEdgeWeight {
-		t.Errorf("NormalWeightFn(nil RNG): expected default %d, got %d", builder.DefaultEdgeWeight, w)
+		t.Errorf("NormalWeightFn(nil RNG): expected default %g, got %g", builder.DefaultEdgeWeight, w)
 	}
 	rng = rand.New(rand.NewSource(seed))
 	w = wfnNorm(rng)
 	if w < 0 {
-		t.Errorf("NormalWeightFn: expected non-negative, got %d", w)
+		t.Errorf("NormalWeightFn: expected non-negative, got %g", w)
 	}
 
 	// ExponentialWeightFn: nil RNG -> default; RNG -> non-negative
 	wfnExp := builder.ExponentialWeightFn(1.5)
 	if w := wfnExp(nil); w != builder.DefaultEdgeWeight {
-		t.Errorf("ExponentialWeightFn(nil RNG): expected default %d, got %d", builder.DefaultEdgeWeight, w)
+		t.Errorf("ExponentialWeightFn(nil RNG): expected default %g, got %g", builder.DefaultEdgeWeight, w)
 	}
 	rng = rand.New(rand.NewSource(seed))
 	w = wfnExp(rng)
 	if w < 0 {
-		t.Errorf("ExponentialWeightFn: expected non-negative, got %d", w)
+		t.Errorf("ExponentialWeightFn: expected non-negative, got %g", w)
 	}
 }

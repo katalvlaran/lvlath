@@ -1,21 +1,21 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// api.go — thin public entry-points for the builder package.
+// api.go - thin public entry-points for the builder package.
 //
 // Design contract (strict):
-//   • One orchestrator: BuildGraph(gopts, bopts, cons...). Creates g, resolves cfg, runs cons in order.
-//   • All public factories are declared here, implemented in impl_*.go (single place to read docs).
-//   • Functional options (BuilderOption) resolve into an immutable builderConfig (no global state).
-//   • Determinism: same inputs/options/seed and constructor order ⇒ identical graphs/series.
-//   • Safety: never panic; return sentinel errors from constructors; data helpers return nil on invalid input.
+//   - One orchestrator: BuildGraph(gopts, bopts, cons...). Creates g, resolves cfg, runs cons in order.
+//   - All public factories are declared here, implemented in impl_*.go (single place to read docs).
+//   - Functional options (BuilderOption) resolve into an immutable builderConfig (no global state).
+//   - Determinism: same inputs/options/seed and constructor order ⇒ identical graphs/series.
+//   - Safety: never panic; return sentinel errors from constructors; data helpers return nil on invalid input.
 //
 // AI-Hints (practical):
-//   • Compose multiple constructors in BuildGraph to assemble complex fixtures deterministically.
-//   • Use WithSeed(...) to freeze stochastic paths (RandomSparse/Regular, sequence RNG via cfg.rng).
-//   • WithIDScheme(...) for human-readable vertex IDs (graphs only).
-//   • WithPartitionPrefix(left,right) for bipartite graphs (empty ⇒ defaults).
-//   • Sequences (impl_pulse.go / impl_chirp.go / impl_ohlc.go): options are resolved via newBuilderConfig(opts...).
+//   - Compose multiple constructors in BuildGraph to assemble complex fixtures deterministically.
+//   - Use WithSeed(...) to freeze stochastic paths (RandomSparse/Regular, sequence RNG via cfg.rng).
+//   - WithIDScheme(...) for human-readable vertex IDs (graphs only).
+//   - WithPartitionPrefix(left,right) for bipartite graphs (empty ⇒ defaults).
+//   - Sequences (impl_pulse.go / impl_chirp.go / impl_ohlc.go): options are resolved via newBuilderConfig(opts...).
 //     If you add knobs (Noise/Trend/Frequency/etc.), wire them in extract*Params and keep determinism stable.
 
 package builder
@@ -81,14 +81,14 @@ func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constru
 }
 
 // =============================================================================
-// Topology factories (declarations) — implemented in impl_*.go
+// Topology factories (declarations) - implemented in impl_*.go
 // =============================================================================
 //
 // Each factory returns a Constructor closure. The closure MUST:
-//   • Add vertices via cfg.idFn (except documented fixed IDs like "Center").
-//   • Emit edges in a stable, documented order.
-//   • Honor core flags (Directed/Weighted/Loops/Multigraph) without silent degrade.
-//   • Return only sentinel errors; NEVER panic at runtime.
+//   - Add vertices via cfg.idFn (except documented fixed IDs like "Center").
+//   - Emit edges in a stable, documented order.
+//   - Honor core flags (Directed/Weighted/Loops/Multigraph) without silent degrade.
+//   - Return only sentinel errors; NEVER panic at runtime.
 
 // Cycle builds an n-vertex simple cycle C_n (n ≥ 3).
 // Complexity: O(n) vertices + O(n) edges; O(1) extra space.
@@ -126,7 +126,7 @@ func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constru
 
 // RandomRegular builds a d-regular simple graph via stub-matching with bounded retries.
 // Only for undirected simple graphs; requires cfg.rng != nil.
-// Complexity: ~O(n·d) per attempt; attempts are constant-bounded. Deterministic per seed.
+// Complexity: ~O(n*d) per attempt; attempts are constant-bounded. Deterministic per seed.
 //func RandomRegular(n, d int) Constructor
 
 // PlatonicSolid builds a fixed Platonic topology; optionally adds a "Center" with spokes.
@@ -138,7 +138,7 @@ func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constru
 //func Hexagram(variant HexagramVariant) Constructor
 
 // =============================================================================
-// Letters/Word and Numbers/Digits (constructors + thin wrappers) — impl in impl_letters.go
+// Letters/Word and Numbers/Digits (constructors + thin wrappers) - impl in impl_letters.go
 // =============================================================================
 
 // Letters adds per-letter subgraphs using the canonical ID scheme
@@ -199,13 +199,13 @@ func BuildNumber(g *core.Graph, number float64, decimal bool, scope string, opts
 }
 
 // =============================================================================
-// Sequence datasets — impl in impl_pulse.go, impl_chirp.go and impl_ohlc.go
+// Sequence datasets - impl in impl_pulse.go, impl_chirp.go and impl_ohlc.go
 // =============================================================================
 //
 // Determinism policy (sequences):
-//   • RNG selection uses rngFrom(cfg, seed): if cfg.rng != nil → use shared stream; else a local rand.New(rand.NewSource(seed)).
-//   • Options (A/f0/duty/triangular/sigma/trend/GBM params) are resolved via newBuilderConfig(opts...) → extract*Params.
-//   • No NaN/Inf; OHLC invariants are guaranteed by implementation.
+//   - RNG selection uses rngFrom(cfg, seed): if cfg.rng != nil → use shared stream; else a local rand.New(rand.NewSource(seed)).
+//   - Options (A/f0/duty/triangular/sigma/trend/GBM params) are resolved via newBuilderConfig(opts...) → extract*Params.
+//   - No NaN/Inf; OHLC invariants are guaranteed by implementation.
 //
 // BuildPulse returns a deterministic pulse series of length n.
 // Validation: n ≥ 1 (else returns nil). Determinism per (n, seed, opts...).

@@ -121,7 +121,7 @@ var (
 //   - Time O(r*c), Space O(r*c).
 //
 // Notes:
-//   - Internal zero-sized cases use newDenseZeroOK.
+//   - Internal zero-sized cases use NewDenseZeroOK.
 //
 // AI-Hints:
 //   - Prefer this ctor for public creation. For subviews, use View().
@@ -141,7 +141,7 @@ func NewDense(rows, cols int) (*Dense, error) {
 	}, nil
 }
 
-// newDenseZeroOK is an internal constructor that allows rows==0 or cols==0.
+// NewDenseZeroOK is an internal constructor that allows rows==0 or cols==0.
 // MAIN DESCRIPTION:
 //   - Internal factory for legal 0×N or N×0 shapes used by builders.
 //
@@ -170,7 +170,7 @@ func NewDense(rows, cols int) (*Dense, error) {
 //
 // Complexity:
 //   - Time O(rows*cols), Space O(rows*cols).
-func newDenseZeroOK(rows, cols int) (*Dense, error) {
+func NewDenseZeroOK(rows, cols int) (*Dense, error) {
 	if rows < 0 || cols < 0 {
 		return nil, ErrInvalidDimensions
 	}
@@ -185,31 +185,59 @@ func newDenseZeroOK(rows, cols int) (*Dense, error) {
 	}, nil
 }
 
-// newDenseWithPolicy is a helper for tests/builders to override numeric policy.
-// MAIN DESCRIPTION:
-//   - Construct Dense with strict shape validation, then set validateNaNInf explicitly.
+// newDenseWithPolicy constructs a Dense matrix with an explicit NaN/Inf policy.
+// rows and cols must be strictly positive; zero-sized matrices are handled by
+// NewDense directly and are not used in this builder fast-path.
 //
 // Implementation:
-//   - Stage 1: call NewDense(rows, cols).
-//   - Stage 2: set policy flag.
+//   - Stage 1: validate dimensions.
+//   - Stage 2: allocate Dense via NewDense.
+//   - Stage 3: override validateNaNInf according to the requested policy.
 //
 // Behavior highlights:
-//   - Centralized creation semantics.
-//   - Intended for package internals and tests.
+//   - Used only for internal APSP / metric-closure code paths where we need
+//     to relax NaN/Inf checks for +Inf sentinel distances.
 //
 // Inputs:
-//   - rows, cols; validateNaNInf.
+//   - rows, cols: matrix dimensions, must be > 0.
+//   - validateNaNInf: whether Dense.Set should reject NaN/±Inf values.
 //
 // Returns:
-//   - *Dense or error from NewDense.
+//   - *Dense: newly allocated dense matrix with the requested policy.
+//   - error: ErrInvalidDimensions or propagated NewDense error.
+//
+// Errors:
+//   - ErrInvalidDimensions: rows <= 0 or cols <= 0.
+//   - Any error returned by NewDense.
+//
+// Determinism:
+//   - Always allocates a matrix of exactly rows×cols with zeroed data.
 //
 // Complexity:
-//   - Time O(rows*cols), Space O(rows*cols).
+//   - Time O(rows*cols) due to allocation and zeroing,
+//   - Space O(rows*cols) for the underlying buffer.
+//
+// Notes:
+//   - Zero-sized matrices (0×N, N×0, 0×0) are constructed via NewDense
+//     in other call sites; this helper is reserved for APSP paths only.
+//
+// AI-Hints:
+//   - Do not expose this helper in the public API.
+//   - Use it in APSP builders and tests via export_privates_for_test.go only.
 func newDenseWithPolicy(rows, cols int, validateNaNInf bool) (*Dense, error) {
+	if rows <= 0 || cols <= 0 {
+		// Use sentinel, not raw errors.New.
+		return nil, ErrInvalidDimensions
+	}
+
+	// Allocate a dense matrix with default options; options that affect
+	// validateNaNInf should be wired in NewDense / MatrixOptions.
 	m, err := NewDense(rows, cols)
 	if err != nil {
 		return nil, err
 	}
+
+	// Explicitly override the internal NaN/Inf policy for APSP use-cases.
 	m.validateNaNInf = validateNaNInf
 
 	return m, nil
@@ -398,18 +426,6 @@ func (m *Dense) Clone() Matrix {
 	}
 }
 
-// String provides a readable row-wise dump for diagnostics.
-// MAIN DESCRIPTION:
-//   - Render matrix rows as lines with comma-separated values.
-//
-// Implementation:
-//   - Stage 1: iterate rows/cols deterministically.
-//   - Stage 2: append values formatted with %g.
-//
-// Behavior highlights:
-//   - Intended for debugging; not for hot paths.
-//
-
 // String HUMAN-READABLE dump of rows for diagnostics.
 // Implementation:
 //   - Stage 1: iterate rows/cols deterministically.
@@ -445,51 +461,6 @@ func (m *Dense) String() string {
 	}
 
 	return b.String()
-}
-
-// View creates a no-copy window [r0:r0+rows, c0:c0+cols) over the same storage.
-// MAIN DESCRIPTION:
-//   - Lightweight submatrix referencing the base buffer (shared storage).
-//
-// Implementation:
-//   - Stage 1: validate window bounds; allow zero-area.
-//   - Stage 2: return MatrixView with offsets.
-//
-// Behavior highlights:
-//   - Writes via view reflect in base; policy is inherited.
-//
-// Inputs:
-//   - r0,c0: top-left offsets; rows, cols: window size (≥0).
-//
-// Returns:
-//   - *MatrixView or error.
-//
-// Errors:
-//   - ErrBadShape when the window is invalid.
-//
-// Determinism:
-//   - Constant-time creation; fixed access order in methods.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - View does not implement Matrix on purpose to avoid accidental copies in ops.
-//
-// AI-Hints:
-//   - Use for sliding-window ops; copy only when lifetime must be independent.
-func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
-	if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
-		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
-	}
-
-	return &MatrixView{
-		base: m,    // share storage
-		r0:   r0,   // top row in base
-		c0:   c0,   // left col in base
-		r:    rows, // view height
-		c:    cols, // view width
-	}, nil
 }
 
 // Induced materializes a copy submatrix using explicit index sets.
@@ -569,72 +540,6 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 	}
 
 	return res, nil
-}
-
-// MatrixView is a non-owning window into a Dense (shared storage).
-// Not implementing Matrix interface to avoid accidental copies in ops.
-type MatrixView struct {
-	base *Dense // underlying storage owner
-	r0   int    // top-left row offset in base
-	c0   int    // top-left col offset in base
-	r    int    // view height
-	c    int    // view width
-}
-
-// Rows returns the number of rows in the view.
-// Complexity: O(1).
-func (v *MatrixView) Rows() int { return v.r }
-
-// Cols returns the number of columns in the view.
-// Complexity: O(1).
-func (v *MatrixView) Cols() int { return v.c }
-
-// At reads element (i,j) in the view or returns ErrOutOfRange.
-// MAIN DESCRIPTION:
-//   - Safe read within the view bounds; translates to base coordinates.
-//
-// Implementation:
-//   - Stage 1: check 0≤i<r and 0≤j<c.
-//   - Stage 2: return base.data[(r0+i)*base.c + (c0+j)].
-//
-// Behavior highlights:
-//   - Never panics; returns sentinel on violation.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-func (v *MatrixView) At(i, j int) (float64, error) {
-	if i < 0 || i >= v.r || j < 0 || j >= v.c {
-		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrOutOfRange)
-	}
-
-	// Translate to base coordinates and load directly from the flat buffer.
-	return v.base.data[(v.r0+i)*v.base.c+(v.c0+j)], nil
-}
-
-// Set writes element (i,j) in the view, honoring the base numeric policy.
-// MAIN DESCRIPTION:
-//   - Safe write-through into the base buffer with policy enforcement.
-//
-// Implementation:
-//   - Stage 1: check bounds.
-//   - Stage 2: validate finite when base policy is enabled.
-//   - Stage 3: write-through into base.data.
-//
-// Behavior highlights:
-//   - Shares the base Dense policy; no separate flags in the view.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-func (v *MatrixView) Set(i, j int, val float64) error {
-	if i < 0 || i >= v.r || j < 0 || j >= v.c {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrOutOfRange)
-	}
-	if v.base.validateNaNInf && (math.IsNaN(val) || math.IsInf(val, 0)) {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNaNInf)
-	}
-	v.base.data[(v.r0+i)*v.base.c+(v.c0+j)] = val // write through
-
-	return nil
 }
 
 // Do visits each element (i,j) in row-major order and calls f(i,j,v).
@@ -723,4 +628,115 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 	}
 
 	return nil // success
+}
+
+// View creates a no-copy window [r0:r0+rows, c0:c0+cols) over the same storage.
+// MAIN DESCRIPTION:
+//   - Lightweight submatrix referencing the base buffer (shared storage).
+//
+// Implementation:
+//   - Stage 1: validate window bounds; allow zero-area.
+//   - Stage 2: return MatrixView with offsets.
+//
+// Behavior highlights:
+//   - Writes via view reflect in base; policy is inherited.
+//
+// Inputs:
+//   - r0,c0: top-left offsets; rows, cols: window size (≥0).
+//
+// Returns:
+//   - *MatrixView or error.
+//
+// Errors:
+//   - ErrBadShape when the window is invalid.
+//
+// Determinism:
+//   - Constant-time creation; fixed access order in methods.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - View does not implement Matrix on purpose to avoid accidental copies in ops.
+//
+// AI-Hints:
+//   - Use for sliding-window ops; copy only when lifetime must be independent.
+func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
+	if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
+	}
+
+	return &MatrixView{
+		base: m,    // share storage
+		r0:   r0,   // top row in base
+		c0:   c0,   // left col in base
+		r:    rows, // view height
+		c:    cols, // view width
+	}, nil
+}
+
+// MatrixView is a non-owning window into a Dense (shared storage).
+// Not implementing Matrix interface to avoid accidental copies in ops.
+type MatrixView struct {
+	base *Dense // underlying storage owner
+	r0   int    // top-left row offset in base
+	c0   int    // top-left col offset in base
+	r    int    // view height
+	c    int    // view width
+}
+
+// Rows returns the number of rows in the view.
+// Complexity: O(1).
+func (v *MatrixView) Rows() int { return v.r }
+
+// Cols returns the number of columns in the view.
+// Complexity: O(1).
+func (v *MatrixView) Cols() int { return v.c }
+
+// At reads element (i,j) in the view or returns ErrOutOfRange.
+// MAIN DESCRIPTION:
+//   - Safe read within the view bounds; translates to base coordinates.
+//
+// Implementation:
+//   - Stage 1: check 0≤i<r and 0≤j<c.
+//   - Stage 2: return base.data[(r0+i)*base.c + (c0+j)].
+//
+// Behavior highlights:
+//   - Never panics; returns sentinel on violation.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func (v *MatrixView) At(i, j int) (float64, error) {
+	if i < 0 || i >= v.r || j < 0 || j >= v.c {
+		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrOutOfRange)
+	}
+
+	// Translate to base coordinates and load directly from the flat buffer.
+	return v.base.data[(v.r0+i)*v.base.c+(v.c0+j)], nil
+}
+
+// Set writes element (i,j) in the view, honoring the base numeric policy.
+// MAIN DESCRIPTION:
+//   - Safe write-through into the base buffer with policy enforcement.
+//
+// Implementation:
+//   - Stage 1: check bounds.
+//   - Stage 2: validate finite when base policy is enabled.
+//   - Stage 3: write-through into base.data.
+//
+// Behavior highlights:
+//   - Shares the base Dense policy; no separate flags in the view.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func (v *MatrixView) Set(i, j int, val float64) error {
+	if i < 0 || i >= v.r || j < 0 || j >= v.c {
+		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrOutOfRange)
+	}
+	if v.base.validateNaNInf && (math.IsNaN(val) || math.IsInf(val, 0)) {
+		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNaNInf)
+	}
+	v.base.data[(v.r0+i)*v.base.c+(v.c0+j)] = val // write through
+
+	return nil
 }

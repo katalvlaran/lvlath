@@ -24,12 +24,11 @@ const defaultRNGSeed int64 = 1
 //
 // Complexity: O(1).
 func rngFromSeed(seed int64) *rand.Rand {
-	var s int64
-	s = seed
-	if s == 0 {
-		s = defaultRNGSeed
+	if seed == 0 {
+		seed = defaultRNGSeed
 	}
-	return rand.New(rand.NewSource(s))
+
+	return rand.New(rand.NewSource(seed))
 }
 
 // deriveSeed mixes a parent seed and a stream identifier into a new 64-bit seed.
@@ -51,6 +50,7 @@ func deriveSeed(parent int64, stream uint64) int64 {
 	x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9
 	x = (x ^ (x >> 27)) * 0x94d049bb133111eb
 	x ^= x >> 31
+
 	return int64(x)
 }
 
@@ -72,6 +72,7 @@ func deriveRNG(base *rand.Rand, stream uint64) *rand.Rand {
 		// children when the same stream id is reused by mistake.
 		parent = base.Int63()
 	}
+
 	return rand.New(rand.NewSource(deriveSeed(parent, stream)))
 }
 
@@ -118,5 +119,6 @@ func permRange(n int, rng *rand.Rand) ([]int, error) {
 		p[i] = i
 	}
 	shuffleIntsInPlace(p, rng)
+
 	return p, nil
 }

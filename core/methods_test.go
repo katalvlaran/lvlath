@@ -224,13 +224,13 @@ func (s *MethodsSuite) TestMultiEdges() {
 
 	// Check weights on each ID
 	ees := s.g.Edges()
-	weights := make(map[string]int64, 2)
+	weights := make(map[string]float64, 2)
 	for _, e := range ees {
 		if e.From == "A" && e.To == "B" {
 			weights[e.ID] = e.Weight
 		}
 	}
-	req.ElementsMatch([]int64{1, 2}, []int64{weights[e1], weights[e2]}, "Weights match original values")
+	req.ElementsMatch([]float64{1, 2}, []float64{weights[e1], weights[e2]}, "Weights match original values")
 }
 
 // Entry point for the test suite

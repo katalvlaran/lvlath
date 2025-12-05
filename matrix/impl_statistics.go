@@ -373,7 +373,7 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 	return Y, norms, nil
 }
 
-// Computes sample covariance of columns: Cov = (Xcᵀ · Xc)/(r-1).
+// Computes sample covariance of columns: Cov = (Xcᵀ * Xc)/(r-1).
 // Implementation:
 //   - Stage 1: Validate X, require r>=2 (sample denominator).
 //   - Stage 2: Center columns once; then accumulate outer-products with deterministic loops.
@@ -468,10 +468,10 @@ func covariance(X Matrix) (Matrix, []float64, error) {
 //   - Time O(r*c + r*c^2), Space O(c^2).
 //
 // Notes:
-//   - Scale-invariant: correlation(α·X) == correlation(X) for α>0.
+//   - Scale-invariant: correlation(α*X) == correlation(X) for α>0.
 //
 // AI-Hints:
-//   - correlation is scale-invariant: Corr(α·X) == Corr(X) for α>0 on non-degenerate columns.
+//   - correlation is scale-invariant: Corr(α*X) == Corr(X) for α>0 on non-degenerate columns.
 //   - Degenerate columns (std==0) become zero columns/rows in Corr by construction.
 func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 	// Validate presence.

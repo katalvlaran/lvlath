@@ -18,11 +18,11 @@ func ExampleBFS_GridTraversal() {
 		for j := 0; j < 3; j++ {
 			// connect to right neighbor
 			if j+1 < 3 {
-				g.AddEdge(fmt.Sprintf("%d_%d", i, j), fmt.Sprintf("%d_%d", i, j+1), 0)
+				_, _ = g.AddEdge(fmt.Sprintf("%d_%d", i, j), fmt.Sprintf("%d_%d", i, j+1), 0)
 			}
 			// connect to down neighbor
 			if i+1 < 3 {
-				g.AddEdge(fmt.Sprintf("%d_%d", i, j), fmt.Sprintf("%d_%d", i+1, j), 0)
+				_, _ = g.AddEdge(fmt.Sprintf("%d_%d", i, j), fmt.Sprintf("%d_%d", i+1, j), 0)
 			}
 		}
 	}
@@ -47,22 +47,22 @@ func ExampleBFS_ShortestPathNetwork() {
 	nodes := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K"}
 	g := core.NewGraph()
 	for _, u := range nodes {
-		g.AddVertex(u) // Not required, Vertices will be crete automatically
+		_ = g.AddVertex(u) // Not required, Vertices will be crete automatically
 	}
 	// Route1: A–B–C–D–K (4 hops)
-	g.AddEdge("A", "B", 0)
-	g.AddEdge("B", "C", 0)
-	g.AddEdge("C", "D", 0)
-	g.AddEdge("D", "K", 0)
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("B", "C", 0)
+	_, _ = g.AddEdge("C", "D", 0)
+	_, _ = g.AddEdge("D", "K", 0)
 	// Route2: A–E–F–K (3 hops)
-	g.AddEdge("A", "E", 0)
-	g.AddEdge("E", "F", 0)
-	g.AddEdge("F", "K", 0)
+	_, _ = g.AddEdge("A", "E", 0)
+	_, _ = g.AddEdge("E", "F", 0)
+	_, _ = g.AddEdge("F", "K", 0)
 	// Some extra branches to other nodes
-	g.AddEdge("C", "G", 0)
-	g.AddEdge("G", "H", 0)
-	g.AddEdge("D", "I", 0)
-	g.AddEdge("I", "J", 0)
+	_, _ = g.AddEdge("C", "G", 0)
+	_, _ = g.AddEdge("G", "H", 0)
+	_, _ = g.AddEdge("D", "I", 0)
+	_, _ = g.AddEdge("I", "J", 0)
 
 	// Run BFS and reconstruct path
 	res, err := bfs.BFS(g, "A")
@@ -88,7 +88,7 @@ func ExampleBFS_DepthLimitOnChain() {
 	for i := 0; i < 9; i++ {
 		u := fmt.Sprintf("v%d", i)
 		v := fmt.Sprintf("v%d", i+1)
-		g.AddEdge(u, v, 0)
+		_, _ = g.AddEdge(u, v, 0)
 	}
 
 	// Limit depth to 2: should see v0, v1, v2 only
@@ -108,13 +108,13 @@ func ExampleBFS_FilterAndMixed() {
 	// Mixed-mode graph
 	g := core.NewGraph(core.WithMixedEdges())
 	// U–V undirected
-	g.AddEdge("U", "V", 0, core.WithEdgeDirected(false))
+	_, _ = g.AddEdge("U", "V", 0, core.WithEdgeDirected(false))
 	// V→W directed
-	g.AddEdge("V", "W", 0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("V", "W", 0, core.WithEdgeDirected(true))
 	// W–X undirected
-	g.AddEdge("W", "X", 0, core.WithEdgeDirected(false))
+	_, _ = g.AddEdge("W", "X", 0, core.WithEdgeDirected(false))
 	// X→Y directed
-	g.AddEdge("X", "Y", 0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("X", "Y", 0, core.WithEdgeDirected(true))
 
 	// Filter to block traversal back to W from X
 	filter := func(curr, nbr string) bool {
@@ -138,7 +138,7 @@ func ExampleBFS_HooksAndCancellation() {
 	// Build chain of 7 vertices: n0→...→n6
 	g := core.NewGraph()
 	for i := 0; i < 6; i++ {
-		g.AddEdge(fmt.Sprintf("n%d", i), fmt.Sprintf("n%d", i+1), 0)
+		_, _ = g.AddEdge(fmt.Sprintf("n%d", i), fmt.Sprintf("n%d", i+1), 0)
 	}
 
 	// Cancel after visiting 4 nodes

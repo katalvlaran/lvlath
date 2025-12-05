@@ -1,28 +1,28 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_config.go — internal configuration and deterministic defaults.
+// impl_config.go - internal configuration and deterministic defaults.
 //
 // Design:
-//   • builderConfig is the single source of truth for all builder knobs.
-//   • Defaults are deterministic and documented; no globals.
-//   • newBuilderConfig applies options in-order (later overrides earlier).
+//   - builderConfig is the single source of truth for all builder knobs.
+//   - Defaults are deterministic and documented; no globals.
+//   - newBuilderConfig applies options in-order (later overrides earlier).
 //
 // Deterministic defaults (no surprises):
-//   • idFn        = decimalID          ("0","1","2",...)
-//   • rng         = nil                 (pure/deterministic unless seeded)
-//   • weightFn    = constWeight(defaultConstWeight)
-//   • left/right  = "L" / "R"
-//   • amplitude   = 1.0
-//   • frequency   = 1.0
-//   • trendK      = 0.0
-//   • noiseSigma  = 0.0
+//   - idFn        = decimalID          ("0","1","2",...)
+//   - rng         = nil                 (pure/deterministic unless seeded)
+//   - weightFn    = constWeight(defaultConstWeight)
+//   - left/right  = "L" / "R"
+//   - amplitude   = 1.0
+//   - frequency   = 1.0
+//   - trendK      = 0.0
+//   - noiseSigma  = 0.0
 //
 // AI-Hints:
-//   • Set WithSeed for reproducible RandomSparse/RandomRegular fixtures.
-//   • Override WithIDScheme for human-readable labels in examples/golden tests.
-//   • WithPartitionPrefix influences K_{m,n} side IDs only (bipartite).
-//   • Weight policy matters only if the core graph is weighted.
+//   - Set WithSeed for reproducible RandomSparse/RandomRegular fixtures.
+//   - Override WithIDScheme for human-readable labels in examples/golden tests.
+//   - WithPartitionPrefix influences K_{m,n} side IDs only (bipartite).
+//   - Weight policy matters only if the core graph is weighted.
 
 package builder
 
@@ -39,7 +39,7 @@ type builderConfig struct {
 	// RNG for stochastic choices; nil means “no randomness”.
 	rng *rand.Rand
 	// Weight generator for edges; used only for weighted graphs.
-	weightFn func(*rand.Rand) int64
+	weightFn func(*rand.Rand) float64
 
 	// Bipartite ID prefixes (left/right). Empty → defaults resolved below.
 	leftPrefix  string
@@ -54,13 +54,12 @@ type builderConfig struct {
 
 // Deterministic defaults (named, no magic numbers).
 const (
-	defaultLeftPrefix  = "L"      // bipartite left side label
-	defaultRightPrefix = "R"      // bipartite right side label
-	defaultAmplitude   = 1.0      // sequence amplitude
-	defaultFrequency   = 1.0      // base frequency
-	defaultTrend       = 0.0      // linear trend coefficient
-	defaultNoiseSigma  = 0.0      // Gaussian noise stdev
-	defaultConstWeight = int64(1) // constant edge weight when weighted
+	defaultLeftPrefix  = "L" // bipartite left side label
+	defaultRightPrefix = "R" // bipartite right side label
+	defaultAmplitude   = 1.0 // sequence amplitude
+	defaultFrequency   = 1.0 // base frequency
+	defaultTrend       = 0.0 // linear trend coefficient
+	defaultNoiseSigma  = 0.0 // Gaussian noise stdev
 )
 
 // newBuilderConfig constructs a config with deterministic defaults and applies
@@ -70,15 +69,15 @@ const (
 func newBuilderConfig(opts ...BuilderOption) builderConfig {
 	// Start with strict, deterministic defaults.
 	cfg := builderConfig{
-		idFn:        decimalID,                                            // "0","1","2",...
-		rng:         nil,                                                  // no RNG unless explicitly set
-		weightFn:    func(*rand.Rand) int64 { return defaultConstWeight }, // constant weight
-		leftPrefix:  defaultLeftPrefix,                                    // "L"
-		rightPrefix: defaultRightPrefix,                                   // "R"
-		amplitude:   defaultAmplitude,                                     // 1.0
-		frequency:   defaultFrequency,                                     // 1.0
-		trendK:      defaultTrend,                                         // 0.0
-		noiseSigma:  defaultNoiseSigma,                                    // 0.0
+		idFn:        decimalID,                                             // "0","1","2",...
+		rng:         nil,                                                   // no RNG unless explicitly set
+		weightFn:    func(*rand.Rand) float64 { return DefaultEdgeWeight }, // constant weight
+		leftPrefix:  defaultLeftPrefix,                                     // "L"
+		rightPrefix: defaultRightPrefix,                                    // "R"
+		amplitude:   defaultAmplitude,                                      // 1.0
+		frequency:   defaultFrequency,                                      // 1.0
+		trendK:      defaultTrend,                                          // 0.0
+		noiseSigma:  defaultNoiseSigma,                                     // 0.0
 	}
 
 	// Apply options in the given order; last-wins semantics.

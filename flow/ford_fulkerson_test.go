@@ -22,12 +22,12 @@ type FordFulkersonSuite struct {
 // and that the residual graph has no forward edge and a reverse edge of equal weight.
 func (s *FordFulkersonSuite) TestSimplePath() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("A", "B", 10)
+	_, _ = g.AddEdge("A", "B", 10)
 
 	opts := flow.DefaultOptions()
 	mf, res, err := flow.FordFulkerson(g, "A", "B", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(10), mf)
+	require.Equal(s.T(), 10.0, mf)
 
 	// after saturation, no forward capacity
 	require.False(s.T(), res.HasEdge("A", "B"))
@@ -39,33 +39,33 @@ func (s *FordFulkersonSuite) TestSimplePath() {
 func (s *FordFulkersonSuite) TestMultiPathGraph() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Path1: A→B cap=5
-	g.AddEdge("A", "B", 5)
+	_, _ = g.AddEdge("A", "B", 5)
 	// Path2: A→C cap=7 → C→B cap=4
-	g.AddEdge("A", "C", 7)
-	g.AddEdge("C", "B", 4)
+	_, _ = g.AddEdge("A", "C", 7)
+	_, _ = g.AddEdge("C", "B", 4)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.FordFulkerson(g, "A", "B", opts)
 	require.NoError(s.T(), err)
 	// Maximum should be 5 + 4 = 9
-	require.Equal(s.T(), int64(9), mf)
+	require.Equal(s.T(), 9.0, mf)
 }
 
 // TestZeroCapacity ensures that edges with zero capacity produce zero flow.
 func (s *FordFulkersonSuite) TestZeroCapacity() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("X", "Y", 0)
+	_, _ = g.AddEdge("X", "Y", 0)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.FordFulkerson(g, "X", "Y", opts)
 	require.NoError(s.T(), err)
-	require.Equal(s.T(), int64(0), mf)
+	require.Equal(s.T(), 0.0, mf)
 }
 
 // TestEpsilonEdgeCase verifies that Epsilon filtering treats small capacities as zero.
 func (s *FordFulkersonSuite) TestEpsilonEdgeCase() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddEdge("U", "V", 1)
+	_, _ = g.AddEdge("U", "V", 1)
 
 	opts := flow.DefaultOptions()
 	// set Epsilon > 1 so that capacity 1 is ignored
@@ -73,7 +73,7 @@ func (s *FordFulkersonSuite) TestEpsilonEdgeCase() {
 	mf, _, err := flow.FordFulkerson(g, "U", "V", opts)
 	require.NoError(s.T(), err)
 	// no path should be found
-	require.Equal(s.T(), int64(0), mf)
+	require.Equal(s.T(), 0.0, mf)
 }
 
 // TestMultiEdgeLoop checks multi-edge aggregation and loop-ignoring behavior.
@@ -86,16 +86,16 @@ func (s *FordFulkersonSuite) TestMultiEdgeLoop() {
 		core.WithLoops(),
 	)
 	// parallel edges U→V of 3 and 2 → total 5
-	g.AddEdge("U", "V", 3)
-	g.AddEdge("U", "V", 2)
+	_, _ = g.AddEdge("U", "V", 3)
+	_, _ = g.AddEdge("U", "V", 2)
 	// self-loop on W→W should be ignored entirely
-	g.AddEdge("W", "W", 5)
+	_, _ = g.AddEdge("W", "W", 5)
 
 	opts := flow.DefaultOptions()
 	mf, _, err := flow.FordFulkerson(g, "U", "V", opts)
 	require.NoError(s.T(), err)
 	// all parallel capacity summed
-	require.Equal(s.T(), int64(5), mf)
+	require.Equal(s.T(), 5.0, mf)
 }
 
 // TestResidualIntegrity constructs a small graph with multiple edges and
@@ -107,17 +107,17 @@ func (s *FordFulkersonSuite) TestResidualIntegrity() {
 	//   B→C (4)
 	//   C→D (2)
 	//   A→D (1)
-	g.AddEdge("A", "B", 5)
-	g.AddEdge("A", "B", 3)
-	g.AddEdge("B", "C", 4)
-	g.AddEdge("C", "D", 2)
-	g.AddEdge("A", "D", 1)
+	_, _ = g.AddEdge("A", "B", 5)
+	_, _ = g.AddEdge("A", "B", 3)
+	_, _ = g.AddEdge("B", "C", 4)
+	_, _ = g.AddEdge("C", "D", 2)
+	_, _ = g.AddEdge("A", "D", 1)
 
 	opts := flow.DefaultOptions()
 	mf, res, err := flow.FordFulkerson(g, "A", "D", opts)
 	require.NoError(s.T(), err)
 	// one direct unit A→D and two via A→B→C→D
-	require.Equal(s.T(), int64(3), mf)
+	require.Equal(s.T(), 3.0, mf)
 
 	// verify residual integrity across all edges
 	assertResidualIntegrity(s.T(), g, res)
@@ -126,7 +126,7 @@ func (s *FordFulkersonSuite) TestResidualIntegrity() {
 // TestSourceOrSinkNotFound covers missing source or sink error cases.
 func (s *FordFulkersonSuite) TestSourceOrSinkNotFound() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	g.AddVertex("A")
+	_ = g.AddVertex("A")
 
 	opts := flow.DefaultOptions()
 	// missing source
@@ -141,9 +141,9 @@ func (s *FordFulkersonSuite) TestSourceOrSinkNotFound() {
 func (s *FordFulkersonSuite) TestContextCancellation() {
 	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// chain graph A→B→C→D
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("B", "C", 1)
-	g.AddEdge("C", "D", 1)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("B", "C", 1)
+	_, _ = g.AddEdge("C", "D", 1)
 
 	// timeout almost immediately
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Nanosecond)
@@ -185,7 +185,7 @@ func assertResidualIntegrity(
 	result *core.Graph,
 ) {
 	// Build a map of initial capacities for each ordered pair (u, v).
-	initial := make(map[[2]string]int64)
+	initial := make(map[[2]string]float64)
 	for _, e := range original.Edges() {
 		// Sum together parallel edges
 		initial[[2]string{e.From, e.To}] += e.Weight
@@ -196,7 +196,7 @@ func assertResidualIntegrity(
 		u, v := uv[0], uv[1]
 
 		// Sum forward residual capacity on edges u→v in `result`.
-		var forwardRes int64
+		var forwardRes float64
 		if result.HasEdge(u, v) {
 			neighbors, err := result.Neighbors(u)
 			require.NoError(t, err, "failed to list neighbors of %s", u)
@@ -208,7 +208,7 @@ func assertResidualIntegrity(
 		}
 
 		// Sum backward residual capacity on edges v→u in `result`.
-		var backwardRes int64
+		var backwardRes float64
 		if result.HasEdge(v, u) {
 			neighbors, err := result.Neighbors(v)
 			require.NoError(t, err, "failed to list neighbors of %s", v)

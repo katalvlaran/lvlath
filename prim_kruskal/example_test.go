@@ -14,9 +14,9 @@ func ExampleKruskal_triangle() {
 	// 1. Construct a new weighted, undirected graph.
 	g := core.NewGraph(core.WithWeighted())
 	// 2. Add edges to form the triangle:
-	g.AddEdge("A", "B", 1) // A—B with weight 1
-	g.AddEdge("B", "C", 2) // B—C with weight 2
-	g.AddEdge("A", "C", 4) // A—C with weight 4
+	_, _ = g.AddEdge("A", "B", 1) // A—B with weight 1
+	_, _ = g.AddEdge("B", "C", 2) // B—C with weight 2
+	_, _ = g.AddEdge("A", "C", 4) // A—C with weight 4
 
 	// 3. Run Kruskal’s algorithm.
 	edges, total, err := prim_kruskal.Kruskal(g)
@@ -27,7 +27,7 @@ func ExampleKruskal_triangle() {
 	}
 
 	// 4. Print the total weight and the list of edges in the MST.
-	fmt.Printf("Total: %d, Edges: ", total)
+	fmt.Printf("Total: %g, Edges: ", total)
 	for i, e := range edges {
 		if i > 0 {
 			fmt.Print(" ")
@@ -44,11 +44,11 @@ func ExampleKruskal_triangle() {
 func ExamplePrim_Pentagon() {
 	// Construct triangle graph: A–B(1), B–C(2), C–D(3), D–E(5), A–E(12)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 1)
-	g.AddEdge("A", "E", 12)
-	g.AddEdge("B", "C", 2)
-	g.AddEdge("C", "D", 3)
-	g.AddEdge("D", "E", 5)
+	_, _ = g.AddEdge("A", "B", 1)
+	_, _ = g.AddEdge("A", "E", 12)
+	_, _ = g.AddEdge("B", "C", 2)
+	_, _ = g.AddEdge("C", "D", 3)
+	_, _ = g.AddEdge("D", "E", 5)
 
 	edges, total, err := prim_kruskal.Prim(g, "A")
 	if err != nil {
@@ -56,7 +56,7 @@ func ExamplePrim_Pentagon() {
 		return
 	}
 
-	fmt.Printf("Total: %d, Edges: ", total)
+	fmt.Printf("Total: %g, Edges: ", total)
 	for i, e := range edges {
 		if i > 0 {
 			fmt.Print(" ")
@@ -78,12 +78,12 @@ func ExamplePrim_Pentagon() {
 func ExampleKruskal_MediumGraph() {
 	// Medium graph: A–B(4), A–C(1), C–B(2), B–D(3), C–D(5), D–A(4)
 	g := core.NewGraph(core.WithWeighted())
-	g.AddEdge("A", "B", 4)
-	g.AddEdge("A", "C", 1)
-	g.AddEdge("C", "B", 2)
-	g.AddEdge("B", "D", 3)
-	g.AddEdge("C", "D", 5)
-	g.AddEdge("D", "A", 4)
+	_, _ = g.AddEdge("A", "B", 4)
+	_, _ = g.AddEdge("A", "C", 1)
+	_, _ = g.AddEdge("C", "B", 2)
+	_, _ = g.AddEdge("B", "D", 3)
+	_, _ = g.AddEdge("C", "D", 5)
+	_, _ = g.AddEdge("D", "A", 4)
 
 	edges, total, err := prim_kruskal.Kruskal(g)
 	if err != nil {
@@ -91,7 +91,7 @@ func ExampleKruskal_MediumGraph() {
 		return
 	}
 
-	fmt.Printf("Total: %d, Edges: ", total)
+	fmt.Printf("Total: %g, Edges: ", total)
 	for i, e := range edges {
 		if i > 0 {
 			fmt.Print(" ")
@@ -115,25 +115,25 @@ func ExamplePrim_LargeGraph() {
 	g := core.NewGraph(core.WithWeighted())
 
 	// 2. Add all vertices one by one.
-	g.AddVertex("A")
-	g.AddVertex("B")
-	g.AddVertex("C")
-	g.AddVertex("D")
-	g.AddVertex("E")
-	g.AddVertex("F")
-	g.AddVertex("G")
+	_ = g.AddVertex("A")
+	_ = g.AddVertex("B")
+	_ = g.AddVertex("C")
+	_ = g.AddVertex("D")
+	_ = g.AddVertex("E")
+	_ = g.AddVertex("F")
+	_ = g.AddVertex("G")
 
 	// 3. Add edges with the specified weights (alternative path, will be skipped by MST).
-	g.AddEdge("A", "B", 2)
-	g.AddEdge("B", "C", 1)
-	g.AddEdge("D", "E", 1)
-	g.AddEdge("E", "G", 2)
-	g.AddEdge("F", "G", 3)
-	g.AddEdge("A", "C", 3)
-	g.AddEdge("B", "D", 4)
-	g.AddEdge("C", "E", 5)
-	g.AddEdge("E", "F", 6)
-	g.AddEdge("D", "F", 7)
+	_, _ = g.AddEdge("A", "B", 2)
+	_, _ = g.AddEdge("B", "C", 1)
+	_, _ = g.AddEdge("D", "E", 1)
+	_, _ = g.AddEdge("E", "G", 2)
+	_, _ = g.AddEdge("F", "G", 3)
+	_, _ = g.AddEdge("A", "C", 3)
+	_, _ = g.AddEdge("B", "D", 4)
+	_, _ = g.AddEdge("C", "E", 5)
+	_, _ = g.AddEdge("E", "F", 6)
+	_, _ = g.AddEdge("D", "F", 7)
 
 	// 4. Run Prim’s algorithm, starting from vertex "A".
 	edges, total, err := prim_kruskal.Prim(g, "A")
@@ -144,7 +144,7 @@ func ExamplePrim_LargeGraph() {
 	}
 
 	// 5. Print the total weight and the list of edges in the MST, in the order Prim discovered them.
-	fmt.Printf("Total: %d, Edges: ", total)
+	fmt.Printf("Total: %g, Edges: ", total)
 	for i, e := range edges {
 		if i > 0 {
 			fmt.Print(" ")

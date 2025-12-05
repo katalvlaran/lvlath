@@ -1,26 +1,26 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_star.go — implementation of Star(n) constructor.
+// impl_star.go - implementation of Star(n) constructor.
 //
 // Contract:
-//   • n ≥ 2 (else ErrTooFewVertices).
-//   • Adds hub vertex with fixed ID "Center" (documented design choice).
-//   • Adds leaves via cfg.idFn in ascending index order for i = 1..n-1.
-//   • Emits spokes in stable order Center → leaf[i]. For directed graphs,
+//   - n ≥ 2 (else ErrTooFewVertices).
+//   - Adds hub vertex with fixed ID "Center" (documented design choice).
+//   - Adds leaves via cfg.idFn in ascending index order for i = 1..n-1.
+//   - Emits spokes in stable order Center → leaf[i]. For directed graphs,
 //     also emits leaf[i] → Center to preserve spoke symmetry.
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(n) vertices + O(n-1) edges (undirected) or O(2n-2) (directed).
-//   • Space: O(1) extra.
+//   - Time: O(n) vertices + O(n-1) edges (undirected) or O(2n-2) (directed).
+//   - Space: O(1) extra.
 //
 // Determinism:
-//   • Deterministic IDs via cfg.idFn and fixed hub ID.
-//   • Deterministic edge emission order by increasing leaf index.
-//   • Deterministic weights for fixed cfg.rng/weightFn.
+//   - Deterministic IDs via cfg.idFn and fixed hub ID.
+//   - Deterministic edge emission order by increasing leaf index.
+//   - Deterministic weights for fixed cfg.rng/weightFn.
 
 package builder
 
@@ -54,18 +54,21 @@ func Star(n int) Constructor {
 		// Precompute whether weights are observed by the graph.
 		useWeight := g.Weighted()
 
+		var (
+			i      int     // loop iterators
+			w      float64 // decide edge weight once per spoke.
+			leafID string  // edge key
+		)
 		// Add leaves in deterministic order and connect spokes.
-		for i := 1; i < n; i++ {
+		for i = 1; i < n; i++ {
 			// Compute deterministic leaf ID for index i.
-			leafID := cfg.idFn(i)
+			leafID = cfg.idFn(i)
 
 			// Add leaf vertex to the graph.
 			if err := g.AddVertex(leafID); err != nil {
 				return fmt.Errorf("%s: AddVertex(%s): %w", methodStar, leafID, err)
 			}
 
-			// Decide edge weight once per spoke.
-			var w int64
 			if useWeight {
 				w = cfg.weightFn(cfg.rng)
 			} else {
@@ -74,13 +77,13 @@ func Star(n int) Constructor {
 
 			// Add Center → leaf spoke (core decides directed/undirected semantics).
 			if _, err := g.AddEdge(centerVertexID, leafID, w); err != nil {
-				return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodStar, centerVertexID, leafID, w, err)
+				return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodStar, centerVertexID, leafID, w, err)
 			}
 
 			// For directed graphs, add the reverse spoke to keep symmetry explicit.
 			if g.Directed() {
 				if _, err := g.AddEdge(leafID, centerVertexID, w); err != nil {
-					return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodStar, leafID, centerVertexID, w, err)
+					return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodStar, leafID, centerVertexID, w, err)
 				}
 			}
 		}

@@ -32,7 +32,7 @@ func ExampleDFS() {
 		{"D", "E"}, {"D", "F"},
 	} {
 		// We ignore errors here for brevity; AddEdge creates the vertices if needed.
-		g.AddEdge(edge.U, edge.V, 0)
+		_, _ = g.AddEdge(edge.U, edge.V, 0)
 	}
 
 	// Perform DFS starting from vertex "A"
@@ -75,7 +75,7 @@ func ExampleTopologicalSort() {
 		{"D", "E"}, {"D", "F"}, {"G", "H"},
 	} {
 		// AddEdge will create missing vertices automatically.
-		g.AddEdge(edge.U, edge.V, 0)
+		_, _ = g.AddEdge(edge.U, edge.V, 0)
 	}
 
 	// Compute a topological sort of the entire graph
@@ -101,17 +101,17 @@ func ExampleDetectCycles() {
 
 	// Add directed edges, deliberately creating a cycle:
 	// A->B, B->C, B->D, C->E, E->F, F->G, D->H, H->I, I->J, J->K, K->B
-	g.AddEdge("A", "B", 0) // AddEdge creates vertices if they don’t exist yet
-	g.AddEdge("B", "C", 0)
-	g.AddEdge("B", "D", 0)
-	g.AddEdge("C", "E", 0)
-	g.AddEdge("E", "F", 0)
-	g.AddEdge("F", "G", 0)
-	g.AddEdge("D", "H", 0)
-	g.AddEdge("H", "I", 0)
-	g.AddEdge("I", "J", 0)
-	g.AddEdge("J", "K", 0)
-	g.AddEdge("K", "B", 0) // this edge closes the cycle back to B
+	_, _ = g.AddEdge("A", "B", 0) // AddEdge creates vertices if they don’t exist yet
+	_, _ = g.AddEdge("B", "C", 0)
+	_, _ = g.AddEdge("B", "D", 0)
+	_, _ = g.AddEdge("C", "E", 0)
+	_, _ = g.AddEdge("E", "F", 0)
+	_, _ = g.AddEdge("F", "G", 0)
+	_, _ = g.AddEdge("D", "H", 0)
+	_, _ = g.AddEdge("H", "I", 0)
+	_, _ = g.AddEdge("I", "J", 0)
+	_, _ = g.AddEdge("J", "K", 0)
+	_, _ = g.AddEdge("K", "B", 0) // this edge closes the cycle back to B
 
 	// Detect all simple cycles in the graph
 	has, cycles, err := dfs.DetectCycles(g)

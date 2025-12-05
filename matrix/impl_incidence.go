@@ -15,7 +15,7 @@
 // AI-Hints:
 //   - Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
 //   - Incidence ignores numeric weights by design; it captures topology only (sign/endpoint).
-//   - For undirected graphs, a self-loop appears as +2 in the single row — this is conventional in
+//   - For undirected graphs, a self-loop appears as +2 in the single row - this is conventional in
 //     incidence algebra; downstream tools that expect strictly {−1,0,+1} should normalize if needed.
 //   - Determinism is guaranteed if you pass a deterministic vertex order and core returns edges by ID.
 //

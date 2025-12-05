@@ -12,7 +12,7 @@ import (
 // augmenting paths).
 //
 // It returns:
-//   - maxFlow       : the total flow value (int64)
+//   - maxFlow       : the total flow value (float64)
 //   - residualGraph : a *core.Graph of remaining capacities, preserving
 //     all original graph options (directed, weighted,
 //     multi-edges, loops, mixed)
@@ -22,7 +22,7 @@ import (
 // Steps:
 //  1. Normalize options (O(1)).
 //  2. Validate source and sink exist (O(1)).
-//  3. Build initial capacity map via buildCapMap (O(V + E·log d_max)).
+//  3. Build initial capacity map via buildCapMap (O(V + E*log d_max)).
 //  4. Repeat until no augmenting path:
 //     a. Iteratively DFS to find any path s→t with positive capacity (O(E)).
 //     b. If none found, break.
@@ -33,7 +33,7 @@ import (
 //
 // Complexity:
 //
-//	Time:   O(E · F) where F = maxFlow (sum of all augmentations).
+//	Time:   O(E * F) where F = maxFlow (sum of all augmentations).
 //	Memory: O(V + E) for capMap and DFS stack.
 //
 // Suitable for small to moderate integral networks; for stronger guarantees,
@@ -42,7 +42,7 @@ func FordFulkerson(
 	g *core.Graph,
 	source, sink string,
 	opts FlowOptions,
-) (maxFlow int64, residualGraph *core.Graph, err error) {
+) (maxFlow float64, residualGraph *core.Graph, err error) {
 	// 1) Normalize options to ensure Ctx and Epsilon are set
 	opts.normalize()
 	// 1a) Capture context for cancellation checks
@@ -76,14 +76,14 @@ func FordFulkerson(
 		// parent[v] = preceding vertex on the augmenting path
 		parent := make(map[string]string, len(capMap))
 		// minCap[v] = bottleneck capacity from source to v along discovered path
-		minCap := make(map[string]int64, len(capMap))
+		minCap := make(map[string]float64, len(capMap))
 		// visited marks which vertices have been pushed onto the stack
 		visited := make(map[string]bool, len(capMap))
 
 		// stackEntry holds a node ID and the current bottleneck to that node
 		type stackEntry struct {
-			node string // current vertex ID
-			flow int64  // bottleneck capacity so far
+			node string  // current vertex ID
+			flow float64 // bottleneck capacity so far
 		}
 		// initialize DFS from source with infinite (MaxInt64) capacity
 		stack := []stackEntry{{node: source, flow: math.MaxInt64}}
@@ -141,7 +141,7 @@ func FordFulkerson(
 			for cur := sink; cur != source; cur = parent[cur] {
 				path = append([]string{parent[cur]}, path...)
 			}
-			fmt.Printf("augmenting path %v with flow %d\n", path, delta)
+			fmt.Printf("augmenting path %v with flow %g\n", path, delta)
 		}
 
 		// 4g) Accumulate total flow

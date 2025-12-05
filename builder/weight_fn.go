@@ -10,28 +10,28 @@ import (
 
 // DefaultEdgeWeight is the default weight assigned to each edge when no
 // custom WeightFn is provided.
-const DefaultEdgeWeight int64 = 1
+const DefaultEdgeWeight float64 = 1
 
 // WeightFn produces an edge weight given an optional *rand.Rand source.
 // It must be deterministic for a given RNG seed; panics in constructors
 // indicate programmer error in configuration.
-type WeightFn func(rng *rand.Rand) int64
+type WeightFn func(rng *rand.Rand) float64
 
 // DefaultWeightFn always returns the constant DefaultEdgeWeight.
 // Complexity: O(1) time, O(1) space. Never panics.
-func DefaultWeightFn(_ *rand.Rand) int64 {
+func DefaultWeightFn(_ *rand.Rand) float64 {
 	return DefaultEdgeWeight
 }
 
 // ConstantWeightFn returns a WeightFn that always yields the provided value.
 // Panics if value < 0.
 // Complexity: O(1) time, O(1) space.
-func ConstantWeightFn(value int64) WeightFn {
+func ConstantWeightFn(value float64) WeightFn {
 	if value < 0 {
-		panic(fmt.Sprintf("ConstantWeightFn: value must be ≥ 0, got %d", value))
+		panic(fmt.Sprintf("ConstantWeightFn: value must be ≥ 0, got %g", value))
 	}
 
-	return func(_ *rand.Rand) int64 {
+	return func(_ *rand.Rand) float64 {
 		return value
 	}
 }
@@ -40,17 +40,27 @@ func ConstantWeightFn(value int64) WeightFn {
 // Panics if min < 0 or max < min.
 // If rng is nil, yields DefaultEdgeWeight to maintain deterministic fallback.
 // Complexity: O(1) time, O(1) space.
-func UniformWeightFn(min, max int64) WeightFn {
+func UniformWeightFn(min, max float64) WeightFn {
 	if min < 0 || max < min {
-		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ min ≤ max, got min=%d, max=%d", min, max))
+		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ min ≤ max, got min=%g, max=%g", min, max))
 	}
-	span := max - min + 1
 
-	return func(rng *rand.Rand) int64 {
+	if min < 0 || max < min {
+		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ min ≤ max, got min=%g, max=%g", min, max))
+	}
+	return func(rng *rand.Rand) float64 {
 		if rng == nil {
 			return DefaultEdgeWeight
 		}
-		return rng.Int63n(span) + min
+
+		if max == min {
+			// Degenerate interval: constant
+			return min
+		}
+		// Continuous uniform on [min, max) (Float64() returns [0,1))
+		span := max - min
+
+		return min + rng.Float64()*span
 	}
 }
 
@@ -58,7 +68,7 @@ func UniformWeightFn(min, max int64) WeightFn {
 // Equivalent to UniformWeightFn(1,100).
 // Complexity: O(1) time, O(1) space.
 // Never panics.
-func From1To100WeightFn(rng *rand.Rand) int64 {
+func From1To100WeightFn(rng *rand.Rand) float64 {
 	return UniformWeightFn(1, 100)(rng)
 }
 
@@ -72,7 +82,8 @@ func NormalWeightFn(mean, stddev float64) WeightFn {
 		panic(fmt.Sprintf("NormalWeightFn: stddev must be ≥ 0, got %f", stddev))
 	}
 	maxVal := float64(math.MaxInt64)
-	return func(rng *rand.Rand) int64 {
+
+	return func(rng *rand.Rand) float64 {
 		if rng == nil {
 			return DefaultEdgeWeight
 		}
@@ -84,7 +95,7 @@ func NormalWeightFn(mean, stddev float64) WeightFn {
 			return math.MaxInt64
 		}
 
-		return int64(math.Round(sample))
+		return math.Round(sample)
 	}
 }
 
@@ -96,13 +107,13 @@ func ExponentialWeightFn(rate float64) WeightFn {
 	if rate <= 0 {
 		panic(fmt.Sprintf("ExponentialWeightFn: rate must be > 0, got %f", rate))
 	}
-	return func(rng *rand.Rand) int64 {
+	return func(rng *rand.Rand) float64 {
 		if rng == nil {
 			return DefaultEdgeWeight
 		}
 		// rng.ExpFloat64 gives mean 1/λ when scaled accordingly;
 		// dividing by rate yields mean 1/rate.
-		return int64(math.Round(rng.ExpFloat64() / rate))
+		return math.Round(rng.ExpFloat64() / rate)
 	}
 }
 
@@ -119,13 +130,13 @@ func resolveWeightFn(wfn ...WeightFn) WeightFn {
 
 // WithConstantWeight sets a fixed edge weight via ConstantWeightFn.
 // Complexity: O(1).
-func WithConstantWeight(w int64) BuilderOption {
+func WithConstantWeight(w float64) BuilderOption {
 	return WithWeightFn(ConstantWeightFn(w))
 }
 
 // WithUniformWeight sets weights ∼ U[min,max] via UniformWeightFn.
 // Complexity: O(1).
-func WithUniformWeight(min, max int64) BuilderOption {
+func WithUniformWeight(min, max float64) BuilderOption {
 	return WithWeightFn(UniformWeightFn(min, max))
 }
 

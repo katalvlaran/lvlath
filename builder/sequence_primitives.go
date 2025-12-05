@@ -1,15 +1,15 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_sequences_shared.go — shared defaults and helpers for sequence builders.
+// impl_sequences_shared.go - shared defaults and helpers for sequence builders.
 //
 // Purpose:
-//   • Hold cross-sequence defaults (amplitude/noise/trend).
-//   • Provide deterministic RNG selection with cfg.rng priority.
-//   • Provide small named numeric constants to avoid magic literals.
+//   - Hold cross-sequence defaults (amplitude/noise/trend).
+//   - Provide deterministic RNG selection with cfg.rng priority.
+//   - Provide small named numeric constants to avoid magic literals.
 //
 // Contract:
-//   • Pure helpers (no global state). Safe to import from impl_pulse.go / impl_chirp.go / impl_ohlc.go.
+//   - Pure helpers (no global state). Safe to import from impl_pulse.go / impl_chirp.go / impl_ohlc.go.
 
 package builder
 
@@ -57,5 +57,6 @@ func rngFrom(cfg builderConfig, seed int64) *rand.Rand {
 	if cfg.rng != nil {
 		return cfg.rng
 	}
+
 	return rand.New(rand.NewSource(seed))
 }

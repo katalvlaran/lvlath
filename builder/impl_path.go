@@ -1,24 +1,24 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// impl_path.go — implementation of Path(n) constructor.
+// impl_path.go - implementation of Path(n) constructor.
 //
 // Contract:
-//   • n ≥ 2 (else ErrTooFewVertices).
-//   • Adds vertices via cfg.idFn in ascending index order (0..n-1).
-//   • Emits edges (i-1) -> i for i=1..n-1 in stable increasing order.
-//   • Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
-//   • Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
-//   • Returns only sentinel errors; never panics at runtime.
+//   - n ≥ 2 (else ErrTooFewVertices).
+//   - Adds vertices via cfg.idFn in ascending index order (0..n-1).
+//   - Emits edges (i-1) -> i for i=1..n-1 in stable increasing order.
+//   - Weight policy: if g.Weighted() then cfg.weightFn(cfg.rng) else 0.
+//   - Honors core mode flags (Directed/Loops/Multigraph) without silent degrade.
+//   - Returns only sentinel errors; never panics at runtime.
 //
 // Complexity:
-//   • Time: O(n) vertices + O(n-1) edges.
-//   • Space: O(1) extra.
+//   - Time: O(n) vertices + O(n-1) edges.
+//   - Space: O(1) extra.
 //
 // Determinism:
-//   • Deterministic IDs via cfg.idFn.
-//   • Deterministic edge emission order by increasing i.
-//   • Deterministic weights given fixed cfg.rng/weightFn.
+//   - Deterministic IDs via cfg.idFn.
+//   - Deterministic edge emission order by increasing i.
+//   - Deterministic weights given fixed cfg.rng/weightFn.
 
 package builder
 
@@ -58,14 +58,17 @@ func Path(n int) Constructor {
 		// Precompute whether weights are observed by the core graph.
 		useWeight := g.Weighted()
 
+		var (
+			i        int     // loop iterator
+			w        float64 // choose edge weight based on graph weighting policy..
+			uID, vID string  // edges key
+		)
 		// Emit path edges from 0->1->2->...->(n-1) in stable order.
-		for i := 1; i < n; i++ {
+		for i = 1; i < n; i++ {
 			// Determine endpoints for the current segment.
-			uID := cfg.idFn(i - 1)
-			vID := cfg.idFn(i)
+			uID = cfg.idFn(i - 1)
+			vID = cfg.idFn(i)
 
-			// Choose edge weight based on graph weighting policy.
-			var w int64
 			if useWeight {
 				// Deterministic given cfg.rng seed.
 				w = cfg.weightFn(cfg.rng)
@@ -77,7 +80,7 @@ func Path(n int) Constructor {
 			// Add the path edge; core handles directedness.
 			if _, err := g.AddEdge(uID, vID, w); err != nil {
 				// Wrap context and surface the error.
-				return fmt.Errorf("%s: AddEdge(%s→%s, w=%d): %w", methodPath, uID, vID, w, err)
+				return fmt.Errorf("%s: AddEdge(%s→%s, w=%g): %w", methodPath, uID, vID, w, err)
 			}
 		}
 

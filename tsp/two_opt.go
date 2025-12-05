@@ -21,7 +21,7 @@
 // Complexity:
 //   - One pass: O(n²) candidate checks; first-improvement restarts after each accepted move.
 //   - Each accepted move costs O(1) (symmetric) or O(n) (asymmetric, rebuild successor list).
-//   - Overall: O(iter·n²) time typical; O(n) extra space on improvements only.
+//   - Overall: O(iter*n²) time typical; O(n) extra space on improvements only.
 package tsp
 
 import (

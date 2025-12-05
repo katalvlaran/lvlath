@@ -41,15 +41,47 @@ func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 		return TSResult{}, ErrDimensionMismatch
 	}
 
-	// Build matrix options from graph flags + dispatcher policy.
-	// AllowMulti=true is safe; the builder will collate according to MatrixOptions semantics.
-	var mopts = matrix.NewMatrixOptions(
-		matrix.WithDirected(g.Directed()),
-		matrix.WithWeighted(g.Weighted()),
-		matrix.WithAllowLoops(g.Looped()),
-		matrix.WithAllowMulti(true),
-		matrix.WithMetricClosure(opts.RunMetricClosure),
-	)
+	var mopts matrix.Options
+	var optsList []matrix.Option
+	st := g.Stats()
+
+	// Map core → matrix options (explicit, no booleans into WithX)
+	// Orientation: mixed OR directed-default ⇒ directed matrix (can encode both types of edges).
+	directed := st.MixedMode || st.DirectedDefault
+	if directed {
+		optsList = append(optsList, matrix.WithDirected())
+	} else {
+		optsList = append(optsList, matrix.WithUndirected())
+	}
+
+	// Multi-edges: matrix default = allowMulti=true; respect core policy explicitly.
+	if st.AllowsMulti {
+		optsList = append(optsList, matrix.WithAllowMulti())
+	} else {
+		optsList = append(optsList, matrix.WithDisallowMulti())
+	}
+
+	// Loops: matrix default = allowLoops=false.
+	if st.AllowsLoops {
+		optsList = append(optsList, matrix.WithAllowLoops())
+	} else {
+		optsList = append(optsList, matrix.WithDisallowLoops())
+	}
+
+	// Weights: matrix default = unweighted(false).
+	if st.Weighted {
+		optsList = append(optsList, matrix.WithWeighted())
+	} else {
+		optsList = append(optsList, matrix.WithUnweighted())
+	}
+
+	// Metric closure (APSP).
+	if opts.RunMetricClosure {
+		optsList = append(optsList, matrix.WithMetricClosure())
+	}
+
+	// Build matrix options from graph flags + dispatcher policy; «single source of truth».
+	mopts = matrix.NewMatrixOptions(optsList...)
 
 	am, err := matrix.NewAdjacencyMatrix(g, mopts)
 	if err != nil {
@@ -92,9 +124,9 @@ func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 // Complexity: validation O(n^2); the rest per algorithm:
 //   - Christofides: O(n^2) for Prim + O(k^2) greedy matching (or blossom when present) +
 //     O(E) Hierholzer + O(n) shortcut; typical dense cost bounded by O(n^2).
-//   - Held–Karp:   O(n^2·2^n).
-//   - TwoOptOnly:  O(iter·n^2) (see two_opt.go).
-//   - ThreeOptOnly: O(iter·n^3) (see three_opt.go).
+//   - Held–Karp:   O(n^2*2^n).
+//   - TwoOptOnly:  O(iter*n^2) (see two_opt.go).
+//   - ThreeOptOnly: O(iter*n^3) (see three_opt.go).
 func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, error) {
 	// Stage 1 - unified validation (Options + matrix + ids).
 	n, err := validateAll(dist, ids, opts)

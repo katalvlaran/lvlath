@@ -19,9 +19,9 @@ func buildChain(n int) *core.Graph {
 	for i := 0; i < n-1; i++ {
 		u := "N" + strconv.Itoa(i)
 		v := "N" + strconv.Itoa(i+1)
-		g.AddVertex(u)
-		g.AddVertex(v)
-		g.AddEdge(u, v, 0)
+		_ = g.AddVertex(u)
+		_ = g.AddVertex(v)
+		_, _ = g.AddEdge(u, v, 0)
 	}
 
 	return g
@@ -35,10 +35,10 @@ func buildBinaryTree(depth int) *core.Graph {
 	maxD := (1 << depth) - 1
 	for i := 1; i <= maxD; i++ {
 		id := fmt.Sprintf("T-%d", i)
-		g.AddVertex(id)
+		_ = g.AddVertex(id)
 		parent := fmt.Sprintf("T-%d", i/2)
 		if i > 1 {
-			g.AddEdge(parent, id, 0)
+			_, _ = g.AddEdge(parent, id, 0)
 		}
 	}
 
@@ -89,8 +89,8 @@ func TestDFS_SelfLoop(t *testing.T) {
 
 func TestDFS_ChainAndDepthParent(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	g.AddEdge("A", "B", 0)
-	g.AddEdge("B", "C", 0)
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("B", "C", 0)
 
 	res, err := dfs.DFS(g, "A")
 	assert.NoError(t, err)
@@ -102,7 +102,7 @@ func TestDFS_ChainAndDepthParent(t *testing.T) {
 
 func TestDFS_Disconnected(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("A", "B", 0)
 	err := g.AddVertex("C")
 	assert.NoError(t, err)
 
@@ -115,8 +115,8 @@ func TestDFS_Disconnected(t *testing.T) {
 
 func TestDFS_MaxDepth(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	g.AddEdge("A", "B", 0)
-	g.AddEdge("B", "C", 0)
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("B", "C", 0)
 
 	res, err := dfs.DFS(g, "A", dfs.WithMaxDepth(0))
 	assert.NoError(t, err)
@@ -127,8 +127,8 @@ func TestDFS_MaxDepth(t *testing.T) {
 
 func TestDFS_FilterNeighbor(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	g.AddEdge("A", "B", 0)
-	g.AddEdge("A", "C", 0)
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("A", "C", 0)
 
 	// Skip C
 	res, err := dfs.DFS(g, "A", dfs.WithFilterNeighbor(func(id string) bool {
@@ -142,7 +142,7 @@ func TestDFS_FilterNeighbor(t *testing.T) {
 
 func TestDFS_OnExitError(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("A", "B", 0)
 
 	res, err := dfs.DFS(g, "A", dfs.WithOnExit(func(id string) error {
 		if id == "B" {
@@ -163,9 +163,9 @@ func TestDFS_Cancellation(t *testing.T) {
 	for i := 0; i < 1000; i++ {
 		src := fmt.Sprintf("N%d", i)
 		dst := fmt.Sprintf("N%d", i+1)
-		g.AddVertex(src)
-		g.AddVertex(dst)
-		g.AddEdge(src, dst, 0)
+		_ = g.AddVertex(src)
+		_ = g.AddVertex(dst)
+		_, _ = g.AddEdge(src, dst, 0)
 	}
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
@@ -257,7 +257,7 @@ func TestDFS_DisconnectedComponent(t *testing.T) {
 	g := buildChain(5)
 	for i := 5; i < 10; i++ {
 		id := "M" + strconv.Itoa(i)
-		g.AddVertex(id)
+		_ = g.AddVertex(id)
 	}
 	res, err := dfs.DFS(g, "N0")
 	assert.NoError(t, err)

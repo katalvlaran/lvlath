@@ -142,37 +142,97 @@ func TestBuildDenseAdjacency_Loops(t *testing.T) {
 	}
 }
 
-// TestBuildDenseAdjacency_MetricClosure tests APSP metric closure.
+// TestBuildDenseAdjacency_MetricClosure verifies that metric-closure/APSP
+// builds a proper distance matrix using +Inf as "no path" and finite
+// distances for reachable pairs, without requiring callers to disable
+// NaN/Inf validation manually.
 func TestBuildDenseAdjacency_MetricClosure(t *testing.T) {
-	vertices := []string{"A", "B", "C"}
+	t.Parallel()
+
+	vertices := []string{"A", "B", "C", "D"}
 	edges := []*core.Edge{
 		{From: "A", To: "B", Weight: 1},
 		{From: "B", To: "C", Weight: 1},
+		// "D" is intentionally unreachable from "A", "B", "C".
 	}
-	opts := matrix.NewMatrixOptions(matrix.WithWeighted(), matrix.WithMetricClosure(), matrix.WithNoValidateNaNInf())
+
+	// Weighted + MetricClosure: APSP is computed over edge weights,
+	// +Inf is used for unreachable pairs, diag is forced to 0.
+	opts := matrix.NewMatrixOptions(
+		matrix.WithWeighted(),
+		matrix.WithMetricClosure(),
+	)
+
 	idx, mat, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency metric: %v", err)
 	}
-	iA, iC := idx["A"], idx["C"]
+
+	iA := idx["A"]
+	iC := idx["C"]
+	iD := idx["D"]
+
+	// A->C must have finite shortest-path distance 2.0 (A→B→C).
 	if got := MustAt(t, mat, iA, iC); got != 2.0 {
 		t.Fatalf("distance A->C: got %v, want 2", got)
 	}
+
+	// All diagonals must be 0 (self-distance).
+	for v, i := range idx {
+		if got := MustAt(t, mat, i, i); got != 0.0 {
+			t.Fatalf("diag %s->%s: got %v, want 0", v, v, got)
+		}
+	}
+
+	// Unreachable vertices must have +Inf distance from A.
+	if got := MustAt(t, mat, iA, iD); !math.IsInf(got, +1) {
+		t.Fatalf("distance A->D: got %v, want +Inf (unreachable)", got)
+	}
 }
 
+// TestBuildDenseAdjacency_InvalidWeight_NaNOrInf ensures that any attempt
+// to use NaN or ±Inf as an edge weight in weighted mode is rejected with
+// ErrInvalidWeight before the value ever reaches the Dense matrix.
 func TestBuildDenseAdjacency_InvalidWeight_NaNOrInf(t *testing.T) {
 	t.Parallel()
 
-	vs := []string{"A", "B"}
-	esNaN := []*core.Edge{{From: "A", To: "B", Weight: int64(math.NaN())}}
-	esInf := []*core.Edge{{From: "A", To: "B", Weight: int64(math.Inf(+1))}}
+	vertices := []string{"A", "B"}
 	opts := matrix.NewMatrixOptions(matrix.WithWeighted())
 
-	if _, _, err := matrix.BuildDenseAdjacency(vs, esNaN, opts); !errors.Is(err, matrix.ErrInvalidWeight) {
-		t.Fatalf("NaN weight: want ErrInvalidWeight, got %v", err)
+	cases := []struct {
+		name  string
+		edges []*core.Edge
+	}{
+		{
+			name: "NaN",
+			edges: []*core.Edge{
+				{From: "A", To: "B", Weight: math.NaN()},
+			},
+		},
+		{
+			name: "InfPos",
+			edges: []*core.Edge{
+				{From: "A", To: "B", Weight: math.Inf(+1)},
+			},
+		},
+		{
+			name: "InfNeg",
+			edges: []*core.Edge{
+				{From: "A", To: "B", Weight: math.Inf(-1)},
+			},
+		},
 	}
-	if _, _, err := matrix.BuildDenseAdjacency(vs, esInf, opts); !errors.Is(err, matrix.ErrInvalidWeight) {
-		t.Fatalf("Inf weight: want ErrInvalidWeight, got %v", err)
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, _, err := matrix.BuildDenseAdjacency(vertices, tc.edges, opts)
+			if !errors.Is(err, matrix.ErrInvalidWeight) {
+				t.Fatalf("%s: want ErrInvalidWeight, got %v", tc.name, err)
+			}
+		})
 	}
 }
 
@@ -183,16 +243,6 @@ func TestBuildDenseAdjacency_UnknownVertex(t *testing.T) {
 	_, _, err := matrix.BuildDenseAdjacency(vertices, edges, matrix.NewMatrixOptions(matrix.WithWeighted()))
 	if !errors.Is(err, matrix.ErrUnknownVertex) {
 		t.Fatalf("want ErrUnknownVertex, got %v", err)
-	}
-}
-
-// Weighted mode must reject NaN/Inf weights.
-func TestBuildDenseAdjacency_InvalidWeight(t *testing.T) {
-	vertices := []string{"A", "B"}
-	edges := []*core.Edge{{From: "A", To: "B", Weight: int64(math.NaN())}}
-	_, _, err := matrix.BuildDenseAdjacency(vertices, edges, matrix.NewMatrixOptions(matrix.WithWeighted()))
-	if !errors.Is(err, matrix.ErrInvalidWeight) {
-		t.Fatalf("want ErrInvalidWeight for NaN, got %v", err)
 	}
 }
 

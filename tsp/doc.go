@@ -16,7 +16,7 @@
 // # Algorithms & Complexity
 //
 //	ExactHeldKarp (Held–Karp DP) - supports TSP and ATSP
-//	  Time:   O(n²·2ⁿ)     Memory: O(n·2ⁿ)
+//	  Time:   O(n²*2ⁿ)     Memory: O(n*2ⁿ)
 //	  Guards: MaxExactN (=16) to bound resources.
 //
 //	BranchAndBound (exact DFS with pruning) - supports TSP and ATSP
@@ -47,9 +47,9 @@
 //	NaN is invalid.  +Inf denotes “missing edge” (allowed in most solvers; see below).
 //
 //	Symmetry (dist[i][j]==dist[j][i]) is required when:
-//	  • opts.Algo == Christofides
-//	  • opts.BoundAlgo == OneTreeBound
-//	  • or opts.Symmetric == true (explicit user request)
+//	  - opts.Algo == Christofides
+//	  - opts.BoundAlgo == OneTreeBound
+//	  - or opts.Symmetric == true (explicit user request)
 //
 //	If opts.RunMetricClosure==false the validator rejects +Inf off-diagonal entries.
 //	Otherwise, matrix-level metric closure (e.g., Floyd–Warshall) may be applied upstream.
@@ -94,7 +94,7 @@
 //
 //	2-opt Δ:  (a→c)+(b→d)−(a→b)−(c→d)
 //	1-tree dual bound (Held–Karp, symmetric):
-//	  L(π) = cost_{c'}(T(π)) − 2·Σ π_i,
+//	  L(π) = cost_{c'}(T(π)) − 2*Σ π_i,
 //	  c'_{ij} = c_{ij} + π_i + π_j.
 //	Costs are stabilized by round1e9 for cross-platform reproducibility.
 //

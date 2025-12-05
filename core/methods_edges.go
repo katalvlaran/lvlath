@@ -47,7 +47,7 @@ const edgeIDPrefix = 'e'
 // Complexity: O(1) amortized (hash-map + nested-map updates).
 // Concurrency:
 //   - Validates/creates vertices outside muEdgeAdj; adjacency and edge catalog under muEdgeAdj.
-func (g *Graph) AddEdge(from, to string, weight int64, opts ...EdgeOption) (string, error) {
+func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (string, error) {
 	// 1) Input validation
 	if from == "" || to == "" {
 		return "", ErrEmptyVertexID

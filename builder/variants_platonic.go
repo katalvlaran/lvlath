@@ -1,25 +1,25 @@
 // SPDX-License-Identifier: MIT
 // Package: lvlath/builder
 //
-// variants_platonic.go — canonical data & generators for Platonic solids.
+// variants_platonic.go - canonical data & generators for Platonic solids.
 //
 // Design:
-//   • Single source of truth for the 5 Platonic graphs (V counts and shell edges).
-//   • Public-neutral type PlatonicName and internal datasets.
-//   • Datasets are constructed deterministically at init() and kept immutable.
+//   - Single source of truth for the 5 Platonic graphs (V counts and shell edges).
+//   - Public-neutral type PlatonicName and internal datasets.
+//   - Datasets are constructed deterministically at init() and kept immutable.
 //
 // Determinism:
-//   • All generated edge sets are sorted lexicographically by (U,V) with U < V.
-//   • Icosahedron edges are derived from a canonical face list (stable).
-//   • Dodecahedron edges are derived as the dual (face adjacency graph of icosahedron),
+//   - All generated edge sets are sorted lexicographically by (U,V) with U < V.
+//   - Icosahedron edges are derived from a canonical face list (stable).
+//   - Dodecahedron edges are derived as the dual (face adjacency graph of icosahedron),
 //     yielding a 3-regular graph on 20 vertices; also sorted for stability.
 //
 // Complexity:
-//   • init(): O(1) constants; tiny O(F) work for icosa/dodeca (F=20 faces).
+//   - init(): O(1) constants; tiny O(F) work for icosa/dodeca (F=20 faces).
 //
 // AI-Hints:
-//   • Extend with alternative embeddings by adding new enums and datasets only;
-//     never mutate existing edge sets — they are part of the public contract.
+//   - Extend with alternative embeddings by adding new enums and datasets only;
+//     never mutate existing edge sets - they are part of the public contract.
 
 package builder
 
@@ -114,10 +114,10 @@ var platonicEdgeSets = map[PlatonicName][]chord{
 	// Dodecahedron: 20 vertices, 30 edges; 3-regular (each vertex degree 3).
 	//
 	// Canonical construction used here:
-	//   • Top pentagon:    0-1-2-3-4-0
-	//   • Bottom pentagon: 5-6-7-8-9-5
-	//   • Middle ring:     10-11-12-13-14-15-16-17-18-19-10  (10-cycle)
-	//   • Spokes:
+	//   - Top pentagon:    0-1-2-3-4-0
+	//   - Bottom pentagon: 5-6-7-8-9-5
+	//   - Middle ring:     10-11-12-13-14-15-16-17-18-19-10  (10-cycle)
+	//   - Spokes:
 	//       Top    0→10, 1→12, 2→14, 3→16, 4→18   (even middle indices)
 	//       Bottom 5→11, 6→13, 7→15, 8→17, 9→19   (odd  middle indices)
 	//
@@ -142,11 +142,11 @@ var platonicEdgeSets = map[PlatonicName][]chord{
 	// Icosahedron: 12 vertices, 30 edges; 5-regular (each vertex degree 5).
 	//
 	// Canonical construction used here (standard “two pentagon rings + poles”):
-	//   • Top pole:    0
-	//   • Top ring:    1-2-3-4-5-1
-	//   • Bottom ring: 6-7-8-9-10-6
-	//   • Bottom pole: 11
-	//   • Edges:
+	//   - Top pole:    0
+	//   - Top ring:    1-2-3-4-5-1
+	//   - Bottom ring: 6-7-8-9-10-6
+	//   - Bottom pole: 11
+	//   - Edges:
 	//       – Pole connections:   0 to {1..5}; 11 to {6..10}
 	//       – Ring cycles:        (top) 1-2-3-4-5-1; (bottom) 6-7-8-9-10-6
 	//       – Cross connections:  Ti connects to Bi and B(i+1 mod 5)

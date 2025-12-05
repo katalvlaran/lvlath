@@ -31,8 +31,8 @@
 //
 //	When core.WithMixedEdges is enabled on your Graph, individual edges may be
 //	marked Directed or undirected. BFS will:
-//	  • Follow directed edges only in their proper direction (edge.From→edge.To).
-//	  • For undirected edges, treat them bidirectionally.
+//	  - Follow directed edges only in their proper direction (edge.From→edge.To).
+//	  - For undirected edges, treat them bidirectionally.
 //	Use WithFilterNeighbor to prune specific directions or relationships.
 //
 // Complexity (V = |Vertices|, E = |Edges|)

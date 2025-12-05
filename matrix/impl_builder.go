@@ -94,8 +94,12 @@ func isLexSorted(s []string) bool {
 //   - Stage 4: optional metric-closure (distances via Floyd–Warshall).
 //
 // Behavior highlights:
-//   - First-edge-wins when AllowMulti=false (ordered for directed, unordered for undirected).
-//   - Stable order equals provided vertex order; edges are scanned in stable core order.
+//   - First-edge-wins when AllowMulti=false (directed uses ordered (u,v), undirected uses unordered {min,max} keys).
+//   - When AllowMulti=true, all parallel edges are materialized into the same adjacency cell
+//     and the LAST edge in the stable input sequence wins. This provides deterministic behavior without
+//     collapsing the input edge list itself.
+//   - Loops are ignored when AllowLoops=false and written on the diagonal
+//     when AllowLoops=true (1 in unweighted mode, raw weight in weighted mode).
 //
 // Inputs:
 //   - vertices: canonical vertex order (stable; caller decides lex order if needed).
@@ -146,7 +150,23 @@ func BuildDenseAdjacency(
 	}
 
 	// --- Stage 2: Allocate dense V×V and decide weight policy ---
-	mat, err := NewDense(V, V)
+	//
+	// For pure adjacency we keep the default strict NaN/Inf policy on Dense.
+	// For APSP/metric-closure we must allow +Inf as a sentinel for
+	// "no path", so we construct a Dense with validateNaNInf=false.
+	var (
+		mat *Dense
+		err error
+	)
+
+	if opts.metricClose {
+		// APSP / metric-closure path: +Inf must be allowed in the backing data.
+		mat, err = newDenseWithPolicy(V, V, false /* validateNaNInf */)
+	} else {
+		// Regular adjacency: keep strict NaN/Inf validation.
+		mat, err = NewDense(V, V)
+	}
+
 	if err != nil {
 		return nil, nil, fmt.Errorf("BuildDenseAdjacency: NewDense(%d,%d): %w", V, V, err)
 	}
@@ -207,14 +227,20 @@ func BuildDenseAdjacency(
 		}
 
 		// Decide adjacency cell value for this edge:
-		//   - if useWeight, we preserve float64(e.Weight);
-		//   - otherwise we write 1 (binary).
-		// NOTE: we do not reject zero-weight *edges* here; under "weighted mode"
-		// the earlier degradation logic switches us to binary if all were zero.
+		//   - in weighted mode we preserve the raw float64 edge weight,
+		//     rejecting NaN and ±Inf via ErrInvalidWeight;
+		//   - otherwise we write defaultWeight (binary adjacency).
+		// NOTE:
+		//   - zero-weight edges are allowed; the earlier degradation logic
+		//     can switch us to binary if all weights are effectively zero.
 		if useWeight {
 			w = float64(e.Weight)
+			// Reject NaN/±Inf *before* writing into the matrix; this keeps all
+			// Dense instances free from non-finite values, except for APSP
+			// matrices that explicitly allow +Inf as "no path".
 			if math.IsNaN(w) || math.IsInf(w, 0) {
-				return nil, nil, fmt.Errorf("BuildDenseAdjacency: invalid weight for %q->%q: %w", e.From, e.To, ErrInvalidWeight)
+				return nil, nil, fmt.Errorf("BuildDenseAdjacency: invalid weight for %q->%q: %w",
+					e.From, e.To, ErrInvalidWeight)
 			}
 		} else {
 			w = defaultWeight
@@ -287,7 +313,11 @@ func BuildDenseAdjacency(
 //   - Time O(V + E), Space O(V + E) plus V×E' for dense data.
 //
 // Notes:
-//   - Directed self-loop is algebraically zero; the column is skipped for a minimal basis.
+//   - Edge weights are intentionally ignored in incidence matrices; only the
+//     signed incidence pattern matters (-1, 0, +1, and +2 for undirected loops).
+//   - When AllowMulti=false, the first edge between a given pair of vertices
+//     wins and subsequent parallel edges are ignored at the column level.
+//   - When AllowMulti=true, each edge is assigned its own column.
 //
 // AI-Hints:
 //   - Use AllowMulti=false to get a canonical set of columns without duplicates.
@@ -378,8 +408,8 @@ func BuildDenseIncidence(
 	var err error
 	if Ep == 0 {
 		// allow zero-column incidence
-		if mat, err = newDenseZeroOK(V, 0); err != nil {
-			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: newDenseZeroOK(%d,0): %w", V, err)
+		if mat, err = NewDenseZeroOK(V, 0); err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDenseZeroOK(%d,0): %w", V, err)
 		}
 	} else {
 		if mat, err = NewDense(V, Ep); err != nil {

@@ -2,35 +2,11 @@
 package matrix_test
 
 import (
-	"fmt"
 	"sort"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/matrix"
 )
-
-func TestNewDenseDefaultZero(t *testing.T) {
-	for _, tc := range []struct{ rows, cols int }{
-		{3, 3},
-		{6, 6},
-	} {
-		name := fmt.Sprintf("%dx%d", tc.rows, tc.cols)
-		t.Run(name, func(t *testing.T) {
-			m := MustDense(t, tc.rows, tc.cols)
-			// immediately after creation all elements should be 0
-			var i, j int // loop iterators
-			var v float64
-			for i = 0; i < tc.rows; i++ {
-				for j = 0; j < tc.cols; j++ {
-					v = MustAt(t, m, i, j)
-					if v != 0.0 {
-						t.Fatalf("element [%d,%d] of a new Dense(%dx%d) must be 0", i, j, tc.rows, tc.cols)
-					}
-				}
-			}
-		})
-	}
-}
 
 // TestHelpers_InterfaceHiding_Fallback ensures that using a non-nil wrapper
 // (which hides the concrete type) forces the interface fallback path without panicking
@@ -1078,6 +1054,7 @@ func TestMatVec_FastPath_5x4_Correctness(t *testing.T) {
 
 	var sum float64
 	for i = 0; i < r; i++ {
+		sum = 0.0
 		for j = 0; j < c; j++ {
 			sum += float64(i-2*j) * x[j]
 		}
@@ -1167,7 +1144,7 @@ func TestEigen_Diagonal_NoRotation(t *testing.T) {
 	diagVals := []float64{1, -2, 5, 3}
 	A := MustDense(t, n, n)
 	for i = 0; i < n; i++ {
-		MustSet(t, A, i, j, diagVals[i])
+		MustSet(t, A, i, i, diagVals[i])
 	}
 
 	vals, Q, err := matrix.Eigen(A, 1e-12, 10)
@@ -1247,7 +1224,8 @@ func TestEigen_BlockDiagonal_Degenerate(t *testing.T) {
 	var err error
 	var got []float64
 
-	A := NewFilledDense(t, n, n, []float64{0, 0, 2, 0, 3, 1, 0, 1, 3})
+	//A := NewFilledDense(t, n, n, []float64{0, 0, 2, 0, 3, 1, 0, 1, 3})
+	A := NewFilledDense(t, n, n, []float64{2, 0, 0, 0, 3, 1, 0, 1, 3})
 
 	//orig := matrix.CloneMatrix(A) // wrapper for A.Clone()
 	orig := A.Clone()
@@ -2112,7 +2090,7 @@ func propOrthonormal(t *testing.T, Q matrix.Matrix, delta float64) {
 				}
 			} else {
 				if InDelta(t, v, 0.0, delta) {
-					t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 1.0, delta)
+					t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 0.0, delta)
 				}
 			}
 		}
@@ -2317,12 +2295,13 @@ func propReconstructionLU(t *testing.T, A, L, U matrix.Matrix, delta float64) {
 
 	for i = 0; i < A.Rows(); i++ {
 		for j = 0; j < A.Cols(); j++ {
-			ar = MustAt(t, LU, i, j)
+			// lr = (L*U)[i,j], ar = A[i,j].
+			lr = MustAt(t, LU, i, j)
 			ar = MustAt(t, A, i, j)
 
 			if delta == 0 {
 				if lr != ar {
-					t.Fatalf("A vs L*U at [%d,%d]: want v == %b, got: %.6g", i, j, lr, ar)
+					t.Fatalf("A vs L*U at [%d,%d]: want %.6g, got %.6g", i, j, ar, lr)
 				}
 			} else {
 				if InDelta(t, lr, ar, delta) {

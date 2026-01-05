@@ -30,6 +30,22 @@ package matrix
 //   - Prefer keeping ALL test-only bridges co-located here to avoid clutter across files.
 //   - If a private helper changes signature, mirror the change here once, not across many tests.
 
+var (
+	// ExportedDenseFill exposes Dense.Fill for white-box tests.
+	ExportedDenseFill = (*Dense).Fill
+	// ExportedNewDenseWithPolicy exposes newDenseWithPolicy for white-box tests.
+	ExportedNewDenseWithPolicy = newDenseWithPolicy
+
+	ExportedValidateTol    = validateTol
+	ExportedValidateBounds = validateBounds
+)
+
+// Panic message exports to avoid "magic strings" in tests.
+const (
+	PanicEpsilonInvalid_TestOnly       = panicEpsilonInvalid
+	PanicEdgeThresholdInvalid_TestOnly = panicEdgeThresholdInvalid
+)
+
 // --- ew* micro-kernel bridges -------------------------------------------------
 
 // EwBroadcastSubCols_TestOnly forwards to the private ewBroadcastSubCols kernel.
@@ -82,16 +98,19 @@ func EwAllClose_TestOnly(a, b Matrix, rtol, atol float64) (bool, error) {
 // Determinism:
 //   - Pure struct copy; no side effects.
 type OptionsSnapshot struct {
-	Eps            float64
-	ValidateNaNInf bool
-	Directed       bool
-	AllowMulti     bool
-	AllowLoops     bool
-	Weighted       bool
-	MetricClose    bool
-	EdgeThreshold  float64
-	KeepWeights    bool
-	Undirected     bool // derived: !Directed
+	Eps               float64
+	ValidateNaNInf    bool
+	AllowInfDistances bool
+
+	Directed    bool
+	AllowMulti  bool
+	AllowLoops  bool
+	Weighted    bool
+	MetricClose bool
+
+	EdgeThreshold float64
+	KeepWeights   bool
+	BinaryWeights bool
 }
 
 // NewMatrixOptionsSnapshot_TestOnly builds Options via public Option funcs and returns a snapshot.
@@ -100,6 +119,7 @@ type OptionsSnapshot struct {
 //   - Stage 2: snapshotOf(o)
 func NewMatrixOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
 	o := NewMatrixOptions(opts...)
+
 	return snapshotOf(o)
 }
 
@@ -112,6 +132,7 @@ func NewMatrixOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
 //   - Keep this wrapper in sync if the internal derivation pipeline changes.
 func GatherOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
 	o := gatherOptions(opts...)
+
 	return snapshotOf(o)
 }
 
@@ -120,15 +141,18 @@ func GatherOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
 //   - No allocations besides the snapshot value itself.
 func snapshotOf(o Options) OptionsSnapshot {
 	return OptionsSnapshot{
-		Eps:            o.eps,
-		ValidateNaNInf: o.validateNaNInf,
-		Directed:       o.directed,
-		AllowMulti:     o.allowMulti,
-		AllowLoops:     o.allowLoops,
-		Weighted:       o.weighted,
-		MetricClose:    o.metricClose,
-		EdgeThreshold:  o.edgeThreshold,
-		KeepWeights:    o.keepWeights,
-		Undirected:     o.undirected,
+		Eps:               o.eps,
+		ValidateNaNInf:    o.validateNaNInf,
+		AllowInfDistances: o.allowInfDistances,
+
+		Directed:    o.directed,
+		AllowMulti:  o.allowMulti,
+		AllowLoops:  o.allowLoops,
+		Weighted:    o.weighted,
+		MetricClose: o.metricClose,
+
+		EdgeThreshold: o.edgeThreshold,
+		KeepWeights:   o.keepWeights,
+		BinaryWeights: o.binaryWeights,
 	}
 }

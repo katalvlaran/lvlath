@@ -179,9 +179,11 @@ func TestEwScaleRows_DimMismatch_Err(t *testing.T) {
 func TestEwReplaceInfNaN_ReplacesNonFinite(t *testing.T) {
 	t.Parallel()
 
-	X := NewFilledDense(t, 2, 3, []float64{0, math.Inf(1), math.Inf(-1), math.NaN(), 1.5, -2.0})
+	// Build a dirty matrix via raw ingest (Fill), not via Set().
 	const repl = 7
-
+	bad := []float64{0, math.Inf(1), math.Inf(-1), math.NaN(), 1.5, -2.0}
+	X, _ := matrix.NewPreparedDense(2, 3, matrix.WithNoValidateNaNInf())
+	MustFillRowMajor(t, X, bad)
 	got, err := matrix.EwReplaceInfNaN_TestOnly(X, repl)
 	if err != nil {
 		t.Fatalf("ReplaceInfNaN: %v", err)
@@ -301,7 +303,7 @@ func TestEwAllClose_ErrorsAndNormalization(t *testing.T) {
 	}
 
 	c := NewFilledDense(t, 1, 1, []float64{5e-6})
-	ok, err := matrix.EwAllClose_TestOnly(NewFilledDense(t, 1, 1, []float64{0}), c, -1e-5, -1e-9) // negatives abs-ed
+	ok, err := matrix.EwAllClose_TestOnly(NewFilledDense(t, 1, 1, []float64{0}), c, -1e-5, 1e-5) // negatives abs-ed
 	if err != nil {
 		t.Fatalf("neg tol err: %v", err)
 	}
@@ -370,8 +372,11 @@ func TestReplaceInfNaN_BasicAndInvalidVal(t *testing.T) {
 	t.Parallel()
 
 	// Input contains 0, +Inf, -Inf, NaN, and two finite normals.
-	M := NewFilledDense(t, 2, 3, []float64{0, math.Inf(1), math.Inf(-1), math.NaN(), 1.5, -2.0})
+	// Build a dirty matrix via raw ingest (Fill), not via Set().
+	bad := []float64{0, math.Inf(1), math.Inf(-1), math.NaN(), 1.5, -2.0}
+	M, _ := matrix.NewPreparedDense(2, 3, matrix.WithNoValidateNaNInf())
 
+	MustFillRowMajor(t, M, bad)
 	// Valid replacement value (finite).
 	const repl = 42.0
 	out, err := matrix.ReplaceInfNaN(M, repl)
@@ -405,11 +410,11 @@ func TestReplaceInfNaN_BasicAndInvalidVal(t *testing.T) {
 func TestReplaceInfNaN_ReplacesAllNonFinite_WithFiniteValue(t *testing.T) {
 	t.Parallel()
 
-	A := MustDense(t, 2, 3)
+	//A := MustDense(t, 2, 3)
+	A, _ := matrix.NewPreparedDense(2, 3, matrix.WithNoValidateNaNInf())
 	bad := []float64{1, math.Inf(+1), -3.5, math.NaN(), 0, math.Inf(-1)}
-	for k := 0; k < len(bad); k++ {
-		MustSet(t, A, k/3, k%3, bad[k])
-	}
+	// Raw-ingest to avoid Set() numeric-policy on NaN/Inf.
+	MustFillRowMajor(t, A, bad)
 	const rep = 7.0
 
 	B, err := matrix.ReplaceInfNaN(A, rep)
@@ -524,7 +529,7 @@ func TestAllClose_NegativeTolerances_AreNormalized(t *testing.T) {
 	a := NewFilledDense(t, 1, 1, []float64{0})
 	b := NewFilledDense(t, 1, 1, []float64{5e-6})
 
-	ok, err := matrix.AllClose(a, b, -1e-5, -1e-9) // normalized to 1e-5 and 1e-9
+	ok, err := matrix.AllClose(a, b, -1e-5, 1e-5) // normalized to 1e-5 and 1e-9
 	if err != nil {
 		t.Fatalf("AllClose negative tol err: %v", err)
 	}

@@ -11,27 +11,41 @@
 //   - Deterministic behavior: no global state, no implicit randomness.
 //   - No dead switches: each flag impacts behavior and is covered by tests.
 //   - Safe by construction: panic only on invalid parameters (programmer error).
-//   - Reusability: Options is internal; public APIs consume ...Option.
+//   - Reusability: ; public APIs consume ...Option.
+//
+// Design goals:
+//   - Deterministic behavior: no global state, no implicit randomness.
+//   - No dead switches: each flag impacts behavior and is covered by tests.
+//   - Safe by construction: panic only on invalid parameters (programmer error).
+//   - Reusability: Options fields are unexported (is internal); public APIs consume ...Option.
 //
 // Notes:
-//   - Core vs Matrix defaults: core graphs by default are undirected, unweighted,
-//     no loops, no multi-edges. Matrix adapters have the same spirit except that
-//     the adapter default here is AllowMulti = true (i.e., if a source graph
-//     contained parallel edges, the adapter would include them). In practice
-//     core will not output parallel edges unless the graph was constructed with
-//     multi-edges enabled, so the defaults remain consistent in the common case.
-//   - Numeric policy (validateNaNInf): adapters (e.g., adjacency/incidence
-//     builders) propagate this flag into newly created Dense matrices via an
-//     internal constructor (newDenseWithPolicy). There is no toggle for existing
-//     matrices; the flag is effective at creation time.
-//   - Incidence matrices do not use numeric edge weights for signs; any Weighted
-//     toggle is ignored by the incidence builder. This is documented here to
-//     avoid confusion; the builder will prefer correctness over the flag.
+//   - Core vs Matrix defaults:
+//   - core defaults are: undirected, unweighted, loops=false, multi-edges=false.
+//   - matrix adapter defaults mirror that spirit, with one intentional difference:
+//     DefaultAllowMulti=true so adapters can faithfully represent multi-edge graphs
+//     when the source graph was explicitly built with WithMultiEdges().
+//   - Directedness mapping (core → matrix):
+//   - core can be uniform-directed or mixed-mode per-edge (Edge.Directed).
+//   - adapters must remain deterministic: vertex order is stable (ID asc), and
+//     edge iteration must be stable (Edge.ID asc) before writing into matrices.
+//   - Multi-edge representation:
+//   - Dense adjacency has one cell per (u,v); it cannot losslessly represent
+//     parallel edges. When AllowMulti=true, a deterministic overwrite policy
+//     must be documented (e.g., last-write-wins under stable edge order).
+//   - Incidence matrices can represent multi-edges naturally (one column per edge).
+//   - Weighted semantics:
+//   - core enforces weight==0 unless WithWeighted() was enabled.
+//   - matrix.Weighted controls whether adapters export numeric weights or a binary structure.
+//   - incidence sign is structural; numeric weights are intentionally ignored there.
+//   - Numeric policy is orthogonal and explicit:
+//   - validateNaNInf controls whether Set()/ingestion rejects NaN/Inf at all.
+//   - allowInfDistances is a narrow exception for +Inf as “no path” in distance matrices.
+//     Under validation, NaN and -Inf remain rejected even when allowInfDistances=true.
+//   - MetricClosure / APSP:
+//   - distance-policy builders require +Inf off-diagonal for “no path”.
+//   - those builders must allocate Dense with allowInfDistances=true to make Set(+Inf) legal.
 package matrix
-
-import (
-	"math"
-)
 
 // ---------- Defaults (single source of truth) ----------
 
@@ -39,8 +53,18 @@ import (
 const (
 	// DefaultEpsilon defines the non-negative tolerance used by structural checks.
 	DefaultEpsilon = 1e-9
+
 	// DefaultValidateNaNInf toggles strict finite-value validation on ingestion and Set.
 	DefaultValidateNaNInf = true
+
+	// DefaultAllowInfDistances permits +Inf values to represent “no path” in
+	// APSP/MetricClosure distance-policy matrices.
+	//
+	// IMPORTANT:
+	//   - This is NOT a “dirty-data” mode.
+	//   - When ValidateNaNInf is enabled, NaN and -Inf are still rejected; only +Inf
+	//     is allowed by this mode.
+	DefaultAllowInfDistances = false
 )
 
 // DEFAULTS - single source of truth for zero-value behavior.
@@ -61,7 +85,6 @@ const (
 	DefaultAllowMulti = true
 
 	// DefaultAllowLoops includes self-loops when true.
-	// NOTE: older comments elsewhere may suggest otherwise; the intended default is false.
 	DefaultAllowLoops = false
 
 	// DefaultMetricClosure converts adjacency to all-pairs shortest-path distances
@@ -72,11 +95,14 @@ const (
 
 // Export policy (AdjacencyMatrix.ToGraph).
 const (
-	// DefaultEdgeThreshold: a[i,j] > threshold ⇒ edge.
+	// DefaultEdgeThreshold a[i,j] > threshold ⇒ edge.
 	DefaultEdgeThreshold = 0.5
-	// DefaultKeepWeights: if true, weight=a[i,j]; else weight=1.
+
+	// DefaultKeepWeights if true, weight=a[i,j]; else weight=1.
 	DefaultKeepWeights = true
-	// 'undirected' for export is inferred from 'directed' (see gatherOptions).
+
+	// DefaultBinaryWeights if true, exported edges get weight=1 (ignores a[i,j]).
+	DefaultBinaryWeights = false
 )
 
 // ---------- Internal panic messages (no magic strings) ----------
@@ -97,8 +123,9 @@ type Option func(*Options)
 // points accept `...Option` and internally resolve them via gatherOptions.
 type Options struct {
 	// numeric policy
-	eps            float64 // >= 0; DefaultEpsilon
-	validateNaNInf bool    // DefaultValidateNaNInf
+	eps               float64 // >= 0; DefaultEpsilon
+	validateNaNInf    bool    // DefaultValidateNaNInf
+	allowInfDistances bool    // DefaultAllowInfDistances (+Inf as “no path”)
 
 	// adjacency/incidence build policy
 	directed    bool // DefaultDirected
@@ -109,8 +136,8 @@ type Options struct {
 
 	// export policy (ToGraph)
 	edgeThreshold float64 // DefaultEdgeThreshold
-	undirected    bool    // inferred from 'directed' if not overridden internally
 	keepWeights   bool    // DefaultKeepWeights
+	binaryWeights bool    // DefaultBinaryWeights
 }
 
 // ---------- Constructors (WithX) ----------
@@ -142,7 +169,7 @@ type Options struct {
 // AI-Hints:
 //   - Prefer small positive eps (e.g., 1e-9) for double-precision data or unless dealing with noisy data.
 func WithEpsilon(eps float64) Option {
-	if math.IsNaN(eps) || math.IsInf(eps, 0) || eps < 0 {
+	if isNonFinite(eps) || eps < 0 {
 		panic(panicEpsilonInvalid)
 	}
 
@@ -155,7 +182,8 @@ func WithEpsilon(eps float64) Option {
 //   - Stage 1: set validateNaNInf=true.
 //
 // Behavior highlights:
-//   - Enforced at Dense creation and Set/Clone/Transpose/Induced/IdentityLike.
+//   - When enabled, NaN and -Inf are always rejected.
+//   - +Inf is rejected unless AllowInfDistances is enabled.
 //
 // Returns:
 //   - Option: functional setter.
@@ -169,7 +197,8 @@ func WithEpsilon(eps float64) Option {
 //
 // AI-Hints:
 //   - Keep this enabled in data-clean pipelines; disable only when ingesting
-//     external data with known ±Inf placeholders and sanitizing later or  in controlled experiments.
+//     external data with known ±Inf placeholders and sanitizing later or in controlled experiments.
+//   - Combine with WithAllowInfDistances for APSP.
 func WithValidateNaNInf() Option {
 	return func(o *Options) { o.validateNaNInf = true }
 }
@@ -194,6 +223,50 @@ func WithValidateNaNInf() Option {
 //   - Combine with data sanitization ops (ReplaceInfNaN, Clip) if you disable checks.
 func WithNoValidateNaNInf() Option {
 	return func(o *Options) { o.validateNaNInf = false }
+}
+
+// WithAllowInfDistances permits +Inf entries to represent “no path” in distance-policy matrices.
+// Implementation:
+//   - Stage 1: set allowInfDistances=true.
+//
+// Behavior highlights:
+//   - Does NOT imply “allow NaN”: if ValidateNaNInf is enabled, NaN and -Inf are still rejected.
+//
+// Returns:
+//   - Option: functional setter.
+//
+// Errors:
+//   - none (pure setter).
+//
+// Determinism:
+//   - N/A.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Intended for APSP/MetricClosure where +Inf is a semantic sentinel.
+//
+// AI-Hints:
+//   - Use together with WithMetricClosure or APSP builders.
+func WithAllowInfDistances() Option {
+	return func(o *Options) { o.allowInfDistances = true }
+}
+
+// WithDisallowInfDistances disables +Inf-permission mode (default).
+// Implementation:
+//   - Stage 1: set allowInfDistances=false.
+//
+// Behavior highlights:
+//   - If ValidateNaNInf is enabled, all infinities are rejected.
+//
+// Returns:
+//   - Option: functional setter.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func WithDisallowInfDistances() Option {
+	return func(o *Options) { o.allowInfDistances = false }
 }
 
 // WithDirected builds directed adjacency/incidence (no mirroring).
@@ -441,7 +514,7 @@ func WithMetricClosure() Option {
 // AI-Hints:
 //   - For weighted graphs, pick a domain-relevant cutoff.
 func WithEdgeThreshold(t float64) Option {
-	if math.IsNaN(t) || math.IsInf(t, 0) {
+	if isNonFinite(t) {
 		panic(panicEdgeThresholdInvalid)
 	}
 
@@ -450,7 +523,7 @@ func WithEdgeThreshold(t float64) Option {
 
 // WithKeepWeights keeps numeric weights on ToGraph export (weight=a[i,j]).
 // Implementation:
-//   - Stage 1: set keepWeights=true.
+//   - Stage 1: set keepWeights=true and binaryWeights=flase.
 //
 // Behavior highlights:
 //   - Edge weights reflect matrix entries.
@@ -467,13 +540,16 @@ func WithEdgeThreshold(t float64) Option {
 // AI-Hints:
 //   - Set an appropriate EdgeThreshold to filter weak links.
 func WithKeepWeights() Option {
-	return func(o *Options) { o.keepWeights = true }
+	return func(o *Options) {
+		o.keepWeights = true
+		o.binaryWeights = false
+	}
 }
 
 // WithBinaryWeights forces unit weights on ToGraph export (weight=1).
 // Implementation:
 //   - Stage 1: no validation needed.
-//   - Stage 2: set keepWeights=false.
+//   - Stage 2: set keepWeights=false and binaryWeights=true.
 //
 // Behavior highlights:
 //   - Edges become unweighted on export, irrespective of matrix entries.
@@ -490,7 +566,10 @@ func WithKeepWeights() Option {
 // AI-Hints:
 //   - Pair with a threshold to sparsify exports.
 func WithBinaryWeights() Option {
-	return func(o *Options) { o.keepWeights = false }
+	return func(o *Options) {
+		o.binaryWeights = true
+		o.keepWeights = false
+	}
 }
 
 // --------------------------- Deprecated Aliases ---------------------------
@@ -499,9 +578,15 @@ func WithBinaryWeights() Option {
 // Deprecated: Use WithNoValidateNaNInf.
 // NOTE: This alias is kept for backwards compatibility and may be removed
 // in a future major release (see CHANGELOG).
-func DisableValidateNaNInf() Option {
-	return WithNoValidateNaNInf()
-}
+func DisableValidateNaNInf() Option { return WithNoValidateNaNInf() }
+
+// WithThreshold sets threshold for ToGraph export.
+// Deprecated: Use WithEdgeThreshold.
+func WithThreshold(t float64) Option { return WithEdgeThreshold(t) }
+
+// WithBinary forces unit weights on export.
+// Deprecated: Use WithBinaryWeights.
+func WithBinary() Option { return WithBinaryWeights() }
 
 // --------------------------- Option Resolution ---------------------------
 
@@ -534,12 +619,7 @@ func DisableValidateNaNInf() Option {
 //   - Compose options close to the adapter call-site for clarity.
 //   - Group related flags together (e.g., Directed + DisallowMulti).
 func NewMatrixOptions(opts ...Option) Options {
-	o := defaultOptions()
-	for _, opt := range opts {
-		opt(&o)
-	}
-
-	return o
+	return gatherOptions(opts...)
 }
 
 // defaultOptions returns the documented defaults (single source of truth).
@@ -562,10 +642,11 @@ func NewMatrixOptions(opts ...Option) Options {
 // AI-Hints:
 //   - Use NewMatrixOptions() to override selectively.
 func defaultOptions() Options {
-	return Options{
+	o := Options{
 		// numeric policy
-		eps:            DefaultEpsilon,
-		validateNaNInf: DefaultValidateNaNInf,
+		eps:               DefaultEpsilon,
+		validateNaNInf:    DefaultValidateNaNInf,
+		allowInfDistances: DefaultAllowInfDistances,
 
 		// build policy
 		directed:    DefaultDirected,
@@ -577,8 +658,13 @@ func defaultOptions() Options {
 		// export policy
 		edgeThreshold: DefaultEdgeThreshold,
 		keepWeights:   DefaultKeepWeights,
+		binaryWeights: DefaultBinaryWeights,
 		// undirected inferred in gatherOptions
 	}
+
+	finalizeOptions(&o)
+
+	return o
 }
 
 // gatherOptions applies user-provided Option setters on top of defaults and
@@ -614,12 +700,79 @@ func defaultOptions() Options {
 // AI-Hints:
 //   - Prefer gatherOptions(...) over ad-hoc defaulting in callers.
 func gatherOptions(user ...Option) Options {
-	o := defaultOptions() // start from documented defaults
+	o := Options{
+		// numeric policy
+		eps:               DefaultEpsilon,
+		validateNaNInf:    DefaultValidateNaNInf,
+		allowInfDistances: DefaultAllowInfDistances,
+
+		// build policy
+		directed:    DefaultDirected,
+		allowMulti:  DefaultAllowMulti,
+		allowLoops:  DefaultAllowLoops,
+		weighted:    DefaultWeighted,
+		metricClose: DefaultMetricClosure,
+
+		// export policy
+		edgeThreshold: DefaultEdgeThreshold,
+		keepWeights:   DefaultKeepWeights,
+		binaryWeights: DefaultBinaryWeights,
+	}
 	for _, set := range user {
 		set(&o) // apply in order; last-writer-wins semantics
 	}
-	// Derive export 'undirected' from build 'directed'.
-	o.undirected = !o.directed
+
+	finalizeOptions(&o)
 
 	return o
+}
+
+// finalizeOptions enforces derived invariants in exactly one place.
+// Implementation:
+//   - Stage 1: Derive distance-policy requirements (MetricClosure ⇒ allowInfDistances).
+//   - Stage 2: Normalize export weight-mode flags into a single consistent state.
+//
+// Behavior highlights:
+//   - Centralized invariant enforcement prevents drift across call sites.
+//
+// Inputs:
+//   - o: pointer to Options to normalize.
+//
+// Returns:
+//   - None (mutates *o).
+//
+// Errors:
+//   - None (invariants are internal; option constructors handle validation/panics).
+//
+// Determinism:
+//   - Deterministic for a fixed o state.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This function MUST be called after applying all Option setters.
+//
+// AI-Hints:
+//   - If you add a new option that implies others, encode that implication here (single source of truth).
+func finalizeOptions(o *Options) {
+	// Distance-policy requires +Inf as “no path”.
+	if o.metricClose {
+		o.allowInfDistances = true
+	}
+	// If metric closure is requested, the distance policy must allow +Inf sentinels.
+	if o.metricClose {
+		o.allowInfDistances = true
+	}
+
+	// Export weight mode must be internally consistent.
+	if o.binaryWeights {
+		o.keepWeights = false
+	} else if o.keepWeights {
+		o.binaryWeights = false
+	} else {
+		// Defensive normalization: ensure a stable default.
+		o.keepWeights = true
+		o.binaryWeights = false
+	}
 }

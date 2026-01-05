@@ -127,6 +127,73 @@ func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 
 // --- Lightweight accessors with error-first invariants ---------------------------------------------
 
+// --- Internal invariant validation ---------------------------------------------------------------
+
+// operation names (no magic strings) used in invariant error wrapping.
+const (
+	opIncidenceVertexCount   = "IncidenceMatrix.VertexCount"
+	opIncidenceEdgeCount     = "IncidenceMatrix.EdgeCount"
+	opIncidenceVertexInc     = "IncidenceMatrix.VertexIncidence"
+	opIncidenceEdgeEndpoints = "IncidenceMatrix.EdgeEndpoints"
+)
+
+// validateMeta CHECKS that the wrapper and its metadata are internally consistent.
+// Implementation:
+//   - Stage 1: validate receiver and underlying matrix are non-nil.
+//   - Stage 2: validate Mat rows match len(VertexIndex).
+//   - Stage 3: validate Mat cols match len(Edges).
+//
+// Behavior highlights:
+//   - Prevents panics in getters that index metadata slices/maps.
+//
+// Inputs:
+//   - op: operation name constant for error context (stable, no magic strings).
+//
+// Returns:
+//   - rows, cols: matrix dimensions when valid.
+//   - err: ErrNilMatrix or ErrDimensionMismatch wrapped with context.
+//
+// Errors:
+//   - ErrNilMatrix when receiver or Mat is nil.
+//   - ErrDimensionMismatch when metadata diverges from Mat shape.
+//
+// Determinism:
+//   - Pure checks; no state mutation.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This is intentionally strict: metadata and Mat must always agree.
+//
+// AI-Hints:
+//   - Call once per public method to guarantee "no panics" contract under misuse.
+func (im *IncidenceMatrix) validateMeta(op string) (rows, cols int, err error) {
+	// Guard nil receiver / nil matrix first (public contract: no panics).
+	if im == nil || im.Mat == nil {
+		return 0, 0, fmt.Errorf("%s: nil receiver or underlying Mat: %w", op, ErrNilMatrix)
+	}
+
+	// Read dimensions once to keep messages stable and avoid repeated calls.
+	rows = im.Mat.Rows() // number of vertex rows
+	cols = im.Mat.Cols() // number of edge columns
+
+	// Vertex metadata must match the number of rows.
+	if rows != len(im.VertexIndex) {
+		return 0, 0, fmt.Errorf("%s: rows=%d vertexIndex=%d: %w",
+			op, rows, len(im.VertexIndex), ErrDimensionMismatch)
+	}
+
+	// Edge metadata must match the number of columns.
+	if cols != len(im.Edges) {
+		return 0, 0, fmt.Errorf("%s: cols=%d edges=%d: %w",
+			op, cols, len(im.Edges), ErrDimensionMismatch)
+	}
+
+	// Success: metadata and matrix are aligned.
+	return rows, cols, nil
+}
+
 // VertexCount RETURN the number of vertices (matrix dimension) with invariant checks, no panics.
 // Implementation:
 //   - Stage 1: validate receiver and underlying Mat presence.
@@ -157,17 +224,12 @@ func NewIncidenceMatrix(g *core.Graph, opts Options) (*IncidenceMatrix, error) {
 // AI-Hints:
 //   - If you need a panic-on-bug assertion in internal code, assert the error upstream once.
 func (im *IncidenceMatrix) VertexCount() (int, error) {
-	if im == nil || im.Mat == nil {
-		return 0, fmt.Errorf("IncidenceMatrix.VertexCount: nil receiver or underlying Mat: %w", ErrNilMatrix)
-	}
-	if im.Mat.Rows() != len(im.VertexIndex) {
-		return 0, fmt.Errorf(
-			"IncidenceMatrix.VertexCount: inconsistent dimensions %d vs %d: %w",
-			im.Mat.Rows(), len(im.VertexIndex), ErrDimensionMismatch,
-		)
+	rows, _, err := im.validateMeta(opIncidenceVertexCount) // strict invariant check
+	if err != nil {
+		return 0, err
 	}
 
-	return im.Mat.Rows(), nil
+	return rows, nil
 }
 
 // EdgeCount RETURN the number of edges (column count) with invariant checks, no panics.
@@ -200,17 +262,12 @@ func (im *IncidenceMatrix) VertexCount() (int, error) {
 // AI-Hints:
 //   - Counts are useful for quick capacity planning before row scans.
 func (im *IncidenceMatrix) EdgeCount() (int, error) {
-	if im == nil || im.Mat == nil {
-		return 0, fmt.Errorf("IncidenceMatrix.EdgeCount: nil receiver or underlying Mat: %w", ErrNilMatrix)
-	}
-	if im.Mat.Cols() != len(im.Edges) {
-		return 0, fmt.Errorf(
-			"IncidenceMatrix.EdgeCount: inconsistent dimensions %d vs %d: %w",
-			im.Mat.Cols(), len(im.Edges), ErrDimensionMismatch,
-		)
+	_, cols, err := im.validateMeta(opIncidenceEdgeCount) // strict invariant check
+	if err != nil {
+		return 0, err
 	}
 
-	return im.Mat.Cols(), nil
+	return cols, nil
 }
 
 // VertexIncidence COPY the signed incidence row for a given vertex into a new slice.
@@ -244,9 +301,10 @@ func (im *IncidenceMatrix) EdgeCount() (int, error) {
 // AI-Hints:
 //   - Use on-demand when you need the per-vertex signed incidence pattern.
 func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
-	// Soft-fail (error) on nil receiver.
-	if im == nil || im.Mat == nil {
-		return nil, fmt.Errorf("VertexIncidence: %w", ErrNilMatrix)
+	// Validate wrapper invariants first to guarantee no panic / no out-of-sync reads.
+	_, cols, err := im.validateMeta(opIncidenceVertexInc)
+	if err != nil {
+		return nil, err
 	}
 	// Resolve row index.
 	row, ok := im.VertexIndex[vertexID]
@@ -254,12 +312,10 @@ func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
 		return nil, fmt.Errorf("VertexIncidence: unknown vertex %q: %w", vertexID, ErrUnknownVertex)
 	}
 	// Allocate output row.
-	cols := im.Mat.Cols()
 	out := make([]float64, cols)
 
 	// Copy via safe At; bubble index errors.
 	var val float64
-	var err error
 	for j := 0; j < cols; j++ {
 		val, err = im.Mat.At(row, j)
 		if err != nil {
@@ -267,6 +323,7 @@ func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
 		}
 		out[j] = val
 	}
+
 	return out, nil
 }
 
@@ -300,18 +357,21 @@ func (im *IncidenceMatrix) VertexIncidence(vertexID string) ([]float64, error) {
 // AI-Hints:
 //   - Validate j exactly once and reuse endpoints to avoid redundant map lookups.
 func (im *IncidenceMatrix) EdgeEndpoints(j int) (fromID, toID string, err error) {
-	// Nil-guard.
-	if im == nil || im.Mat == nil {
-		return "", "", fmt.Errorf("EdgeEndpoints: %w", ErrNilMatrix)
+	// Validate wrapper invariants first to avoid panics on metadata indexing.
+	_, cols, err := im.validateMeta(opIncidenceEdgeEndpoints)
+	if err != nil {
+		return "", "", err
 	}
-	// Bounds-check.
-	if j < 0 || j >= im.Mat.Cols() {
+
+	// Bounds-check against the canonical column count (== len(im.Edges) after validateMeta).
+	if j < 0 || j >= cols {
 		return "", "", fmt.Errorf("EdgeEndpoints: column %d out of range [0,%d): %w",
-			j, im.Mat.Cols(), ErrDimensionMismatch)
+			j, cols, ErrDimensionMismatch)
 	}
-	// Return aligned endpoints.
-	e := im.Edges[j]
-	return e.From, e.To, nil
+	// Safe: j is within [0..len(im.Edges)).
+	e := im.Edges[j] // column-aligned edge metadata
+
+	return e.From, e.To, nil // endpoints as stored by core
 }
 
 // --- Dense incidence builder convenience -----------------------------------------------------------

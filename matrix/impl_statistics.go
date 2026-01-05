@@ -3,26 +3,25 @@
 //
 // Purpose:
 //   - Provide common statistical transforms (centering, normalization, covariance, correlation)
-//     as thin, deterministic compositions over canonical kernels and ew* micro-kernels.
-//   - Keep tight loops factored (ew*) and reuse existing matrix kernels (Mul/Transpose/Scale/MatVec).
+//     as deterministic compositions over canonical kernels (Mul/Transpose/Scale) and ew* micro-kernels.
+//   - Keep tight loops centralized in ew* where it improves reuse and consistency.
 //
 // Exposed API:
-//   - CenterColumns(X)  -> (Xc, means)           // subtract per-column mean
-//   - CenterRows(X)     -> (Xc, means)           // subtract per-row mean
-//   - NormalizeRowsL1(X)-> (Y, norms)            // L1 row normalization (degenerate rows stay zero)
-//   - NormalizeRowsL2(X)-> (Y, norms)            // L2 row normalization (degenerate rows stay zero)
-//   - Covariance(X)     -> (Cov, means)          // sample covariance of columns: (Xcᵀ Xc)/(n-1)
-//   - Correlation(X)    -> (Corr, means, stds)   // Pearson corr via z-scoring; degenerate std=0 → zeroed column
+//   - CenterColumns(X)   -> (Xc, means)         // subtract per-column mean
+//   - CenterRows(X)      -> (Xc, means)         // subtract per-row mean
+//   - NormalizeRowsL1(X) -> (Y, norms)          // L1 row normalization (degenerate rows unchanged)
+//   - NormalizeRowsL2(X) -> (Y, norms)          // L2 row normalization (degenerate rows unchanged)
+//   - Covariance(X)      -> (Cov, means)        // sample covariance of columns: (Xcᵀ Xc)/(r-1)
+//   - Correlation(X)     -> (Corr, means, stds) // Pearson corr via z-scoring; degenerate std=0 → zeroed column
 //
 // Determinism & Performance:
-//   - Deterministic loop orders everywhere.
-//   - O(r*c) for centering/normalization; O(r*c + c^2) for covariance/correlation (via Mul).
-//   - Dense fast-paths used where appropriate; otherwise fall back to safe At/Set.
+//   - Fixed i→j traversal for all explicit loops.
+//   - Dense fast-paths avoid At/Set and operate on row-major flat buffers.
+//   - Zero-size matrices (0×N or N×0) are treated as no-ops for centering/normalization.
 //
 // AI-Hints:
-//   - Reuse returned means/stds to unscale or to feed downstream models.
-//   - For very tall-skinny X, prefer blocked/TSQR outside this package for better cache behavior.
-//   - Sanitize inputs first (ReplaceInfNaN) to avoid NaN propagation in statistics.
+//   - Prefer passing *Dense to unlock flat-slice fast paths.
+//   - Sanitize inputs first (ReplaceInfNaN) if NaN/Inf propagation is undesired in downstream statistics.
 
 package matrix
 
@@ -38,68 +37,85 @@ const (
 	opCorrelation     = "Correlation"
 )
 
-// centerColumns SUBTRACTS the per-column mean from every element (column-wise centering).
+// centerColumns subtracts the per-column mean from every element (column-wise centering).
 // Implementation:
-//   - Stage 1: Validate X (non-nil), compute column means in a deterministic pass.
-//   - Stage 2: Broadcast-subtract via ew kernel (Dense fast-path or generic fallback).
+//   - Stage 1: Validate X (non-nil) and handle zero-size as a strict no-op.
+//   - Stage 2: Compute column means in a deterministic pass (Dense fast-path; At fallback).
+//   - Stage 3: Apply ewBroadcastSubCols to produce a centered copy.
 //
 // Behavior highlights:
-//   - Returns the centered copy and the used means for potential un-centering.
+//   - Zero-size (0×N or N×0): returns (X, zeroMeans, nil) without allocations.
+//   - Deterministic i→j traversal; stable results.
 //
 // Inputs:
-//   - X: Matrix (r×c). Empty dimensions are permitted (means default to zeros).
+//   - X: input matrix (r×c).
 //
 // Returns:
-//   - Matrix: centered copy (r×c).
+//   - Matrix: centered copy (r×c) for r>0 && c>0; otherwise X itself (no-op).
 //   - []float64: column means (len=c).
 //
 // Errors:
-//   - ErrNilMatrix (nil X), wrapped At/Set/NewDense errors.
+//   - ErrNilMatrix from validation.
+//   - Wrapped At/NewDense/Set errors from fallback paths.
 //
 // Determinism:
-//   - Fixed i→j traversal; stable results.
+//   - Fixed loop order; no randomness.
 //
 // Complexity:
-//   - Time O(r*c), Space O(r*c) for the output (+ O(c) for means).
+//   - Time O(r*c), Space O(r*c) for output (+ O(c) means).
 //
 // Notes:
-//   - Means are computed as Σ_i X[i,j] / r; if r==0, means are zeros (neutral).
+//   - Means are Σ_i X[i,j] / r for r>0.
 //
 // AI-Hints:
-//   - Pass *Dense to unlock the flat-slice fast path end-to-end.
+//   - For repeated centering, reuse the returned means to un-center later.
 func centerColumns(X Matrix) (Matrix, []float64, error) {
-	// Validate presence of X.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, matrixErrorf(opCenterColumns, err)
 	}
 
-	if X.Rows() == 0 || X.Cols() == 0 {
-		zeroX, err := ZerosLike(X)
-		if err != nil {
-			return nil, nil, matrixErrorf(opCenterColumns, err)
-		}
-
-		return zeroX, make([]float64, X.Cols()), matrixErrorf(opCenterColumns, nil)
-	}
-	// Read dimensions once.
+	// Stage 1 (Zero-size policy): centering is a no-op when there are no elements.
 	r, c := X.Rows(), X.Cols()
-
-	// Compute column sums via MatVec on transpose inside ColSums.
-	colSums, err := ColSums(X)
-	if err != nil {
-		return nil, nil, matrixErrorf(opCenterColumns, err)
+	means := make([]float64, c) // always return correct length for callers
+	if r == 0 || c == 0 {
+		return X, means, nil
 	}
 
-	// Convert sums to means (one pass; O(c)).
-	means := make([]float64, c)
-	if r > 0 {
-		inv := 1.0 / float64(r) // precompute reciprocal
-		for j := 0; j < c; j++ {
-			means[j] = colSums[j] * inv
-		}
-	} // for r==0, means all-zeros is a harmless neutral
+	// Stage 2 (Prepare): accumulate sums into means, then convert to averages.
+	// We keep a single slice to avoid an extra allocation for "sums".
+	var i, j int
+	var v float64
 
-	// Subtract column means (broadcast over rows).
+	// Stage 2 (Execute): Dense fast-path uses the row-major flat buffer directly.
+	if d, ok := X.(*Dense); ok {
+		for i = 0; i < r; i++ { // deterministic row order
+			base := i * c           // cache row base offset
+			for j = 0; j < c; j++ { // deterministic column order
+				means[j] += d.data[base+j] // accumulate sum for column j
+			}
+		}
+	} else {
+		// Stage 2 (Execute fallback): use At(i,j) with full error propagation.
+		var err error
+		for i = 0; i < r; i++ {
+			for j = 0; j < c; j++ {
+				v, err = X.At(i, j)
+				if err != nil {
+					return nil, nil, matrixErrorf(opCenterColumns, err)
+				}
+				means[j] += v
+			}
+		}
+	}
+
+	// Stage 3 (Finalize means): divide sums by r to obtain means.
+	invR := 1.0 / float64(r)
+	for j = 0; j < c; j++ {
+		means[j] *= invR
+	}
+
+	// Stage 3 (Apply): broadcast-subtract the means over rows to build the centered copy.
 	Xc, err := ewBroadcastSubCols(X, means)
 	if err != nil {
 		return nil, nil, matrixErrorf(opCenterColumns, err)
@@ -109,65 +125,80 @@ func centerColumns(X Matrix) (Matrix, []float64, error) {
 	return Xc, means, nil
 }
 
-// centerRows SUBTRACTS the per-row mean from every element (row-wise centering).
+// centerRows subtracts the per-row mean from every element (row-wise centering).
 // Implementation:
-//   - Stage 1: Validate X, compute row means in a deterministic pass.
-//   - Stage 2: Broadcast-subtract via ew kernel.
+//   - Stage 1: Validate X (non-nil) and handle zero-size as a strict no-op.
+//   - Stage 2: Compute row means deterministically (Dense fast-path; At fallback).
+//   - Stage 3: Apply ewBroadcastSubRows to produce a centered copy.
 //
 // Behavior highlights:
-//   - Returns centered copy and used row means.
+//   - Zero-size (0×N or N×0): returns (X, zeroMeans, nil) without allocations.
+//   - Deterministic i→j traversal; stable results.
 //
 // Inputs:
-//   - X: Matrix (r×c). Empty dimensions permitted.
+//   - X: input matrix (r×c).
 //
 // Returns:
-//   - Matrix: centered copy (r×c).
+//   - Matrix: centered copy (r×c) for r>0 && c>0; otherwise X itself (no-op).
 //   - []float64: row means (len=r).
 //
 // Errors:
-//   - ErrNilMatrix, wrapped At/Set/NewDense errors.
+//   - ErrNilMatrix from validation.
+//   - Wrapped At/NewDense/Set errors from fallback paths.
 //
 // Determinism:
-//   - Fixed i→j traversal; stable results.
+//   - Fixed loop order; no randomness.
 //
 // Complexity:
-//   - Time O(r*c), Space O(r*c) (+ O(r) for means).
+//   - Time O(r*c), Space O(r*c) for output (+ O(r) means).
 //
 // Notes:
-//   - For r==0, means default to zeros and X is returned as-is centered around 0.
+//   - Means are Σ_j X[i,j] / c for c>0.
 //
 // AI-Hints:
-//   - Useful for per-sample baselining before distance/similarity.
+//   - Useful for per-sample baselining before distance/similarity computations.
 func centerRows(X Matrix) (Matrix, []float64, error) {
-	// Validate X presence.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, matrixErrorf(opCenterRows, err)
 	}
 
-	if X.Rows() == 0 || X.Cols() == 0 {
-		emptyX, _ := NewZeros(X.Rows(), X.Cols())
-
-		return emptyX, make([]float64, X.Cols()), nil
-	}
-	// Read dimensions once.
+	// Stage 1 (Zero-size policy): centering is a no-op when there are no elements.
 	r, c := X.Rows(), X.Cols()
-
-	// Compute per-row sums with MatVec inside RowSums.
-	rowSums, err := RowSums(X)
-	if err != nil {
-		return nil, nil, matrixErrorf(opCenterRows, err)
+	means := make([]float64, r) // correct length for row means
+	if r == 0 || c == 0 {
+		return X, means, nil
 	}
 
-	// Convert sums to means.
-	means := make([]float64, r)
-	if c > 0 {
-		inv := 1.0 / float64(c)
-		for i := 0; i < r; i++ {
-			means[i] = rowSums[i] * inv
+	// Stage 2 (Execute): compute mean per row.
+	var i, j int
+	var s, v float64
+
+	if d, ok := X.(*Dense); ok {
+		for i = 0; i < r; i++ {
+			s = 0.0
+			base := i * c
+			for j = 0; j < c; j++ {
+				s += d.data[base+j]
+			}
+			means[i] = s / float64(c)
+		}
+	} else {
+		var err error
+		for i = 0; i < r; i++ {
+			s = 0.0
+			for j = 0; j < c; j++ {
+				v, err = X.At(i, j)
+				if err != nil {
+					return nil, nil, matrixErrorf(opCenterRows, err)
+				}
+				s += v
+			}
+			means[i] = s / float64(c)
 		}
 	} // for c==0, means zeros
 
-	// Subtract row means with broadcast over columns.
+	// Stage 3 (Apply): broadcast-subtract row means over columns.
 	Xc, err := ewBroadcastSubRows(X, means)
 	if err != nil {
 		return nil, nil, matrixErrorf(opCenterRows, err)
@@ -177,53 +208,55 @@ func centerRows(X Matrix) (Matrix, []float64, error) {
 	return Xc, means, nil
 }
 
-// normalizeRowsL1 SCALES each row to have L1-norm == 1 when possible (degenerate rows stay zero).
+// normalizeRowsL1 scales each row to have L1-norm == 1 when possible.
 // Implementation:
-//   - Stage 1: Validate X, compute L1 norms per row deterministically.
-//   - Stage 2: Form reciprocals (norm>0 ? 1/norm : 0) and apply ewScaleRows.
+//   - Stage 1: Validate X (non-nil) and handle zero-size as a strict no-op.
+//   - Stage 2: Compute per-row L1 norms deterministically.
+//   - Stage 3: Build row scale factors (1/norm); for norm==0 use scale=1 to keep the row unchanged.
+//   - Stage 4: Apply ewScaleRows to produce a normalized copy.
 //
 // Behavior highlights:
-//   - Returns normalized copy and original norms.
+//   - Degenerate rows (norm==0) are left unchanged (stable policy).
 //
 // Inputs:
-//   - X: Matrix (r×c).
+//   - X: input matrix (r×c).
 //
 // Returns:
-//   - Matrix: normalized copy.
-//   - []float64: per-row L1 norms.
+//   - Matrix: normalized copy (r×c) for r>0 && c>0; otherwise X itself (no-op).
+//   - []float64: L1 norms (len=r).
 //
 // Errors:
-//   - ErrNilMatrix, wrapped At/Set/NewDense errors.
+//   - ErrNilMatrix from validation.
+//   - Wrapped At/NewDense/Set errors from fallback paths.
 //
 // Determinism:
-//   - Fixed i→j traversal.
+//   - Fixed i→j traversal; no randomness.
 //
 // Complexity:
-//   - Time O(r*c), Space O(r*c).
+//   - Time O(r*c), Space O(r*c) for output (+ O(r) norms + O(r) scales).
 //
 // Notes:
-//   - Rows of all zeros remain zeros (stable policy).
-//   - For c==0, means default to zeros; centering becomes a no-op.
+//   - L1 norm is Σ_j |x_ij|.
 //
 // AI-Hints:
-//   - Useful before row-normalization (L1/L2).
-//   - Combine with CenterRows for robust per-sample normalization.
+//   - Prefer L1 normalization for row-stochastic style preprocessing.
 func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
-	// Validate presence.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, matrixErrorf(opNormalizeRowsL1, err)
 	}
 
-	// Read shape.
+	// Stage 1 (Zero-size policy): no elements => no-op.
 	r, c := X.Rows(), X.Cols()
-
-	// Allocate norms slice.
 	norms := make([]float64, r)
+	if r == 0 || c == 0 {
+		return X, norms, nil
+	}
 
-	// Fast-path when X is Dense: compute ||row||_1 via flat pass.
+	// Stage 2 (Execute): compute L1 norms per row.
 	var i, j int
 	var s, v float64
-	var err error
+
 	if d, ok := X.(*Dense); ok {
 		for i = 0; i < r; i++ {
 			s = 0.0
@@ -231,14 +264,14 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 			for j = 0; j < c; j++ {
 				v = d.data[base+j]
 				if v < 0 {
-					v = -v
-				} // abs
+					v = -v // abs
+				}
 				s += v
 			}
 			norms[i] = s
 		}
 	} else {
-		// Fallback via At.
+		var err error
 		for i = 0; i < r; i++ {
 			s = 0.0
 			for j = 0; j < c; j++ {
@@ -255,17 +288,17 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 		}
 	}
 
-	// Build reciprocal scale factors per row (1/norm if norm>0 else 0).
+	// Stage 3 (Prepare scales): 1/norm for normal rows; 1 for degenerate rows (leave unchanged).
 	scale := make([]float64, r)
 	for i = 0; i < r; i++ {
 		if norms[i] > 0 {
 			scale[i] = 1.0 / norms[i]
 		} else {
-			scale[i] = 0.0
+			scale[i] = 1.0 // preserves the row exactly (avoids "zeroing" underflow rows)
 		}
 	}
 
-	// Apply row-wise scaling.
+	// Stage 4 (Apply): scale rows via the canonical ew micro-kernel.
 	Y, err := ewScaleRows(X, scale)
 	if err != nil {
 		return nil, nil, matrixErrorf(opNormalizeRowsL1, err)
@@ -275,59 +308,44 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 	return Y, norms, nil
 }
 
-// normalizeRowsL2 SCALES each row to have L2-norm == 1 when possible (degenerate rows stay zero).
+// normalizeRowsL2 scales each row to have L2-norm == 1 when possible.
 // Implementation:
-//   - Stage 1: Validate X, compute L2 norms per row deterministically.
-//   - Stage 2: Form reciprocals (norm>0 ? 1/norm : 0) and apply ewScaleRows.
+//   - Stage 1: Validate X (non-nil) and handle zero-size as a strict no-op.
+//   - Stage 2: Compute per-row L2 norms deterministically.
+//   - Stage 3: Build row scale factors (1/norm); for norm==0 use scale=1 to keep the row unchanged.
+//   - Stage 4: Apply ewScaleRows to produce a normalized copy.
 //
 // Behavior highlights:
-//   - Returns normalized copy and original norms.
+//   - Degenerate rows (norm==0) are left unchanged (stable policy).
 //
-// Inputs:
-//   - X: Matrix (r×c).
-//
-// Returns:
-//   - Matrix: normalized copy.
-//   - []float64: per-row L2 norms.
-//
-// Errors:
-//   - ErrNilMatrix, wrapped At/Set/NewDense errors.
-//
-// Determinism:
-//   - Fixed i→j traversal.
+// Inputs/Returns/Errors/Determinism:
+//   - Same structure as normalizeRowsL1.
 //
 // Complexity:
-//   - Time O(r*c), Space O(r*c).
+//   - Time O(r*c), Space O(r*c) (+ O(r) auxiliary slices).
 //
 // Notes:
-//   - Rows of all zeros remain zeros (stable policy).
-//
-// Notes:
-//   - Keep an eye on underflow for extremely small values (rare in typical usage).
+//   - L2 norm is sqrt(Σ_j x_ij^2).
 //
 // AI-Hints:
-//   - Prefer L2 for cosine-similarity pipelines.
-//   - Zero rows are left as exact zeros to avoid NaNs.
-//
-// AI-Hints:
-//   - Combine with centerRows if you need zero-mean plus unit L1 rows.
-//   - Use L2 prior to cosine similarity to make dot≈cosine.
+//   - L2 normalization is typical before cosine similarity pipelines.
 func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
-	// Validate presence.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, matrixErrorf(opNormalizeRowsL2, err)
 	}
 
-	// Read shape.
+	// Stage 1 (Zero-size policy): no elements => no-op.
 	r, c := X.Rows(), X.Cols()
-
-	// Allocate norms slice.
 	norms := make([]float64, r)
+	if r == 0 || c == 0 {
+		return X, norms, nil
+	}
+
+	// Stage 2 (Execute): compute L2 norms per row.
 	var i, j int
 	var sq, v float64
-	var err error
 
-	// Dense fast-path for ||row||_2.
 	if d, ok := X.(*Dense); ok {
 		for i = 0; i < r; i++ {
 			sq = 0.0
@@ -339,7 +357,7 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 			norms[i] = math.Sqrt(sq)
 		}
 	} else {
-		// Generic fallback via At.
+		var err error
 		for i = 0; i < r; i++ {
 			sq = 0.0
 			for j = 0; j < c; j++ {
@@ -353,17 +371,17 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 		}
 	}
 
-	// Build reciprocal scale factors.
+	// Stage 3 (Prepare scales): 1/norm for normal rows; 1 for degenerate rows (leave unchanged).
 	scale := make([]float64, r)
 	for i = 0; i < r; i++ {
 		if norms[i] > 0 {
 			scale[i] = 1.0 / norms[i]
 		} else {
-			scale[i] = 0.0
+			scale[i] = 1.0
 		}
 	}
 
-	// Apply row-wise scaling.
+	// Stage 4 (Apply): scale rows via ew micro-kernel.
 	Y, err := ewScaleRows(X, scale)
 	if err != nil {
 		return nil, nil, matrixErrorf(opNormalizeRowsL2, err)
@@ -405,38 +423,37 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 //   - Reuse means with downstream correlation.
 //   - For very large c, consider block accumulation outside this package.
 func covariance(X Matrix) (Matrix, []float64, error) {
-	// Validate presence.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, matrixErrorf(opCovariance, err)
 	}
 
-	// Require at least two rows for unbiased sample covariance.
-	r := X.Rows()
-	if r < 2 {
+	// Stage 1 (Validate shape): need r>=2 and c>0 for a meaningful sample covariance.
+	r, c := X.Rows(), X.Cols()
+	if r < 2 || c == 0 {
 		return nil, nil, matrixErrorf(opCovariance, ErrDimensionMismatch)
 	}
 
-	// Center columns once.
-	Xc, means, err := CenterColumns(X)
+	// Stage 2 (Center): reuse the canonical centering implementation.
+	Xc, means, err := centerColumns(X)
 	if err != nil {
 		return nil, nil, matrixErrorf(opCovariance, err)
 	}
 
-	// Compute Cov = (Xcᵀ Xc)/(r-1).
+	// Stage 3 (Compute): Cov = (Xcᵀ Xc)/(r-1) via canonical kernels.
 	Xct, err := Transpose(Xc)
 	if err != nil {
 		return nil, nil, matrixErrorf(opCovariance, err)
 	}
-	M, err := Mul(Xct, Xc)
+	G, err := Mul(Xct, Xc)
 	if err != nil {
 		return nil, nil, matrixErrorf(opCovariance, err)
 	}
-	Cov, err := Scale(M, 1.0/float64(r-1))
+	Cov, err := Scale(G, 1.0/float64(r-1))
 	if err != nil {
 		return nil, nil, matrixErrorf(opCovariance, err)
 	}
 
-	// Return covariance matrix and column means.
 	return Cov, means, nil
 }
 
@@ -474,33 +491,32 @@ func covariance(X Matrix) (Matrix, []float64, error) {
 //   - correlation is scale-invariant: Corr(α*X) == Corr(X) for α>0 on non-degenerate columns.
 //   - Degenerate columns (std==0) become zero columns/rows in Corr by construction.
 func correlation(X Matrix) (Matrix, []float64, []float64, error) {
-	// Validate presence.
+	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
 		return nil, nil, nil, matrixErrorf(opCorrelation, err)
 	}
 
-	// Require at least two rows for unbiased denominators.
+	// Stage 1 (Validate shape): need r>=2 and c>0.
 	r, c := X.Rows(), X.Cols()
 	if r < 2 || c == 0 {
 		return nil, nil, nil, matrixErrorf(opCorrelation, ErrDimensionMismatch)
 	}
 
-	// Center columns and obtain means.
-	Xc, means, err := CenterColumns(X)
+	// Stage 2 (Center): subtract column means.
+	Xc, means, err := centerColumns(X)
 	if err != nil {
 		return nil, nil, nil, matrixErrorf(opCorrelation, err)
 	}
 
-	// Compute per-column sample std:
-	//   std[j] = sqrt( Σ_i Xc[i,j]^2 / (r-1) ).
+	// Stage 3 (Compute std): std[j] = sqrt( Σ_i Xc[i,j]^2 / (r-1) ).
 	stds := make([]float64, c)
+	sumsq := make([]float64, c) // accumulate squared sums deterministically
+	inv := 1.0 / float64(r-1)
 
 	var i, j int
-	inv := 1.0 / float64(r-1)
 	var v float64
+
 	if d, ok := Xc.(*Dense); ok {
-		// Dense fast-path: sum squares per column in a single pass.
-		sumsq := make([]float64, c)
 		for i = 0; i < r; i++ {
 			base := i * c
 			for j = 0; j < c; j++ {
@@ -508,12 +524,7 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 				sumsq[j] += v * v
 			}
 		}
-		for j = 0; j < c; j++ {
-			stds[j] = math.Sqrt(sumsq[j] * inv)
-		}
 	} else {
-		// Generic fallback via At.
-		sumsq := make([]float64, c)
 		for i = 0; i < r; i++ {
 			for j = 0; j < c; j++ {
 				v, err = Xc.At(i, j)
@@ -523,12 +534,13 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 				sumsq[j] += v * v
 			}
 		}
-		for j = 0; j < c; j++ {
-			stds[j] = math.Sqrt(sumsq[j] * inv)
-		}
 	}
 
-	// Build inverse std factors for z-scoring; degenerate std==0 → factor 0 (zero the column).
+	for j = 0; j < c; j++ {
+		stds[j] = math.Sqrt(sumsq[j] * inv)
+	}
+
+	// Stage 4 (Build invStd): degenerate std==0 => invStd=0 (zero-out the column).
 	invStd := make([]float64, c)
 	for j = 0; j < c; j++ {
 		if stds[j] > 0 {
@@ -538,13 +550,13 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 		}
 	}
 
-	// Compute Z = Xc * diag(invStd) via broadcast scaling across columns.
+	// Stage 5 (Z-score): Z = Xc * diag(invStd) via ewScaleCols.
 	Z, err := ewScaleCols(Xc, invStd)
 	if err != nil {
 		return nil, nil, nil, matrixErrorf(opCorrelation, err)
 	}
 
-	// Corr = (Zᵀ Z)/(r-1).
+	// Stage 6 (Corr): Corr = (Zᵀ Z)/(r-1).
 	Zt, err := Transpose(Z)
 	if err != nil {
 		return nil, nil, nil, matrixErrorf(opCorrelation, err)

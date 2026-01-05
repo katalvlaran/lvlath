@@ -151,13 +151,24 @@ func addSub(a, b Matrix, sign float64, opTag string) (Matrix, error) {
 	}
 
 	// Fallback: interface path with fixed i→j order.
-	var i, j int // loop iterators
-	var av, bv float64
+	var i, j int       // loop iterators (deterministic order)
+	var av, bv float64 // element temporaries
 	for i = 0; i < rows; i++ {
 		for j = 0; j < cols; j++ {
-			av, _ = a.At(i, j)            // safe: bounds ensured
-			bv, _ = b.At(i, j)            // safe: same shape
-			_ = res.Set(i, j, av+sign*bv) // safe: within bounds
+			// Read a(i,j).
+			av, err = a.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opTag, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			// Read b(i,j).
+			bv, err = b.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opTag, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			// Write result(i,j).
+			if err = res.Set(i, j, av+sign*bv); err != nil {
+				return nil, matrixErrorf(opTag, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+			}
 		}
 	}
 
@@ -260,15 +271,9 @@ func Sub(a, b Matrix) (Matrix, error) { return addSub(a, b, -1, opSub) }
 // AI-Hints:
 //   - If you can keep A as *Dense and cache-friendly by rows, you unlock the best path here.
 func Mul(a, b Matrix) (Matrix, error) {
-	// Validate inputs
-	if err := ValidateNotNil(a); err != nil {
+	// Validate inputs via canonical validator
+	if err := ValidateMulCompatible(a, b); err != nil {
 		return nil, matrixErrorf(opMul, err)
-	}
-	if err := ValidateNotNil(b); err != nil {
-		return nil, matrixErrorf(opMul, err)
-	}
-	if a.Cols() != b.Rows() {
-		return nil, matrixErrorf(opMul, ErrDimensionMismatch)
 	}
 
 	// Allocate result Dense
@@ -311,14 +316,22 @@ func Mul(a, b Matrix) (Matrix, error) {
 		for j = 0; j < bCols; j++ {
 			current = ZeroSum
 			for k = 0; k < aCols; k++ {
-				av, _ = a.At(i, k)
+				av, err = a.At(i, k)
+				if err != nil {
+					return nil, matrixErrorf(opMul, fmt.Errorf("At(%d,%d): %w", i, k, err))
+				}
 				if av == 0 {
 					continue // skip zero for performance
 				}
-				bv, _ = b.At(k, j)
+				bv, err = b.At(k, j)
+				if err != nil {
+					return nil, matrixErrorf(opMul, fmt.Errorf("At(%d,%d): %w", k, j, err))
+				}
 				current += av * bv // accumulate product
 			}
-			_ = res.Set(i, j, current)
+			if err = res.Set(i, j, current); err != nil {
+				return nil, matrixErrorf(opMul, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+			}
 		}
 	}
 
@@ -394,8 +407,13 @@ func Transpose(m Matrix) (Matrix, error) {
 	var v float64
 	for i = 0; i < rows; i++ {
 		for j = 0; j < cols; j++ {
-			v, _ = m.At(i, j)    // safe: bounds ensured
-			_ = res.Set(j, i, v) // safe: within bounds
+			v, err = m.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opTranspose, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			if err = res.Set(j, i, v); err != nil {
+				return nil, matrixErrorf(opTranspose, fmt.Errorf("Set(%d,%d): %w", j, i, err))
+			}
 		}
 	}
 
@@ -469,8 +487,13 @@ func Scale(m Matrix, alpha float64) (Matrix, error) {
 	var v float64
 	for i = 0; i < rows; i++ {
 		for j = 0; j < cols; j++ {
-			v, _ = m.At(i, j)          // safe: bounds ensured
-			_ = res.Set(i, j, v*alpha) // safe: within bounds
+			v, err = m.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opScale, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			if err = res.Set(i, j, v*alpha); err != nil {
+				return nil, matrixErrorf(opScale, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+			}
 		}
 	}
 
@@ -546,9 +569,17 @@ func Hadamard(a, b Matrix) (Matrix, error) {
 	var av, bv float64
 	for i = 0; i < rows; i++ { // fixed i-outer loop
 		for j = 0; j < cols; j++ { // fixed j-inner loop
-			av, _ = a.At(i, j)       // read a(i,j)
-			bv, _ = b.At(i, j)       // read b(i,j)
-			_ = res.Set(i, j, av*bv) // write result(i,j); Set is safe w.r.t. bounds/policy
+			av, err = a.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opHadamard, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			bv, err = b.At(i, j)
+			if err != nil {
+				return nil, matrixErrorf(opHadamard, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			if err = res.Set(i, j, av*bv); err != nil {
+				return nil, matrixErrorf(opHadamard, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+			}
 		}
 	}
 
@@ -599,13 +630,17 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 	}
 
 	// Fallback: interface-based dot-products via At.
-	var i, j int               // loop indices
-	var mv float64             // temporary to hold m(i,j)
+	var i, j int   // loop indices
+	var mv float64 // temporary to hold m(i,j)
+	var err error
 	for i = 0; i < rows; i++ { // iterate rows
 		y[i] = ZeroSum             // initialize y(i) to zero
 		for j = 0; j < cols; j++ { // iterate columns
-			mv, _ = m.At(i, j) // read m(i,j)
-			y[i] += mv * x[j]  // accumulate
+			mv, err = m.At(i, j) // read m(i,j)
+			if err != nil {
+				return nil, matrixErrorf(opMatVec, fmt.Errorf("At(%d,%d): %w", i, j, err))
+			}
+			y[i] += mv * x[j] // accumulate
 		}
 	}
 
@@ -660,7 +695,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	}
 	// Initialize Q as identity: Q[i,i] = 1
 	for i = 0; i < n; i++ {
-		_ = qRaw.Set(i, i, 1.0)
+		qRaw.data[i*n+i] = 1.0 // _ = qRaw.Set(i, i, 1.0)
 	}
 
 	// Detect if we can use fast-path on *Dense
@@ -699,7 +734,11 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 			// fallback: interface-based path via At
 			for i = 0; i < n; i++ {
 				for j = i + 1; j < n; j++ {
-					off, _ = aRaw.At(i, j)
+
+					off, err = aRaw.At(i, j)
+					if err != nil {
+						return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, j, err))
+					}
 					off = math.Abs(off)
 					if off > maxOff {
 						maxOff, p, q = off, i, j
@@ -719,9 +758,18 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 			aqq = Adense.data[q*n+q]
 			apq = Adense.data[p*n+q]
 		} else {
-			app, _ = aRaw.At(p, p)
-			aqq, _ = aRaw.At(q, q)
-			apq, _ = aRaw.At(p, q)
+			app, err = aRaw.At(p, p)
+			if err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", p, p, err))
+			}
+			aqq, err = aRaw.At(q, q)
+			if err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", q, q, err))
+			}
+			apq, err = aRaw.At(p, q)
+			if err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", p, q, err))
+			}
 		}
 		// Guard: avoid division by ~zero off-diagonal
 		if math.Abs(apq) <= tol {
@@ -766,35 +814,50 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 				if i == p || i == q {
 					continue
 				}
-				aip, _ = aRaw.At(i, p)
-				aiq, _ = aRaw.At(i, q)
-				_ = aRaw.Set(i, p, c*aip-s*aiq)
-				_ = aRaw.Set(p, i, c*aip-s*aiq)
-				_ = aRaw.Set(i, q, s*aip+c*aiq)
-				_ = aRaw.Set(q, i, s*aip+c*aiq)
+				aip, err = aRaw.At(i, p)
+				if err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, p, err))
+				}
+				aiq, err = aRaw.At(i, q)
+				if err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, q, err))
+				}
+				new_ip = c*aip - s*aiq
+				new_iq = s*aip + c*aiq
+				if err = aRaw.Set(i, p, new_ip); err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", i, p, err))
+				}
+				if err = aRaw.Set(p, i, new_ip); err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", p, i, err))
+				}
+				if err = aRaw.Set(i, q, new_iq); err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", i, q, err))
+				}
+				if err = aRaw.Set(q, i, new_iq); err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", q, i, err))
+				}
 			}
-			_ = aRaw.Set(p, p, c*c*app-2*c*s*apq+s*s*aqq)
-			_ = aRaw.Set(q, q, s*s*app+2*c*s*apq+c*c*aqq)
-			_ = aRaw.Set(p, q, 0.0)
-			_ = aRaw.Set(q, p, 0.0)
+			if err = aRaw.Set(p, p, c*c*app-2*c*s*apq+s*s*aqq); err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", p, p, err))
+			}
+			if err = aRaw.Set(q, q, s*s*app+2*c*s*apq+c*c*aqq); err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", q, q, err))
+			}
+			if err = aRaw.Set(p, q, 0.0); err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", p, q, err))
+			}
+			if err = aRaw.Set(q, p, 0.0); err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", q, p, err))
+			}
 		}
 
 		// J.5: Accumulate rotation into Q
-		if useFast {
-			// here qRaw is also expected to be *Dense, but this works anyway
-			for i = 0; i < n; i++ {
-				qip = qRaw.data[i*n+p] // Q[i,p]
-				qiq = qRaw.data[i*n+q] // Q[i,q]
-				qRaw.data[i*n+p] = c*qip - s*qiq
-				qRaw.data[i*n+q] = s*qip + c*qiq
-			}
-		} else {
-			for i = 0; i < n; i++ {
-				qip, _ = qRaw.At(i, p)
-				qiq, _ = qRaw.At(i, q)
-				_ = qRaw.Set(i, p, c*qip-s*qiq)
-				_ = qRaw.Set(i, q, s*qip+c*qiq)
-			}
+		// here qRaw is also expected to be *Dense, but this works anyway
+		for i = 0; i < n; i++ {
+			qip = qRaw.data[i*n+p] // Q[i,p]
+			qiq = qRaw.data[i*n+q] // Q[i,q]
+			qRaw.data[i*n+p] = c*qip - s*qiq
+			qRaw.data[i*n+q] = s*qip + c*qiq
 		}
 	}
 
@@ -813,7 +876,10 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	} else {
 		for i = 0; i < n; i++ {
 			for j = i + 1; j < n; j++ {
-				off, _ = aRaw.At(i, j)
+				off, err = aRaw.At(i, j)
+				if err != nil {
+					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, j, err))
+				}
 				off = math.Abs(off)
 				if off > maxOff {
 					maxOff = off
@@ -834,7 +900,10 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	} else {
 		var v float64
 		for i = 0; i < n; i++ {
-			v, _ = aRaw.At(i, i)
+			v, err = aRaw.At(i, i)
+			if err != nil {
+				return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, i, err))
+			}
 			eigs[i] = v
 		}
 	}
@@ -969,7 +1038,10 @@ func Inverse(m Matrix) (Matrix, error) {
 		for i = 0; i < n; i++ {
 			sum = ZeroSum
 			for k = 0; k < i; k++ {
-				v, _ = Lmat.At(i, k)
+				v, err = Lmat.At(i, k)
+				if err != nil {
+					return nil, matrixErrorf(opInverse, fmt.Errorf("At(%d,%d): %w", i, k, err))
+				}
 				sum += v * y[k]
 			}
 			if i == col {
@@ -982,10 +1054,16 @@ func Inverse(m Matrix) (Matrix, error) {
 		for i = n - 1; i >= 0; i-- {
 			sum = ZeroSum
 			for k = i + 1; k < n; k++ {
-				v, _ = Umat.At(i, k)
+				v, err = Umat.At(i, k)
+				if err != nil {
+					return nil, matrixErrorf(opInverse, fmt.Errorf("At(%d,%d): %w", i, k, err))
+				}
 				sum += v * x[k]
 			}
-			pivot, _ = Umat.At(i, i)
+			pivot, err = Umat.At(i, i)
+			if err != nil {
+				return nil, matrixErrorf(opInverse, fmt.Errorf("At(%d,%d): %w", i, i, err))
+			}
 			if pivot == ZeroPivot {
 				return nil, matrixErrorf(opInverse, ErrSingular)
 			}
@@ -993,7 +1071,9 @@ func Inverse(m Matrix) (Matrix, error) {
 		}
 		// Write x into column col of inv
 		for i = 0; i < n; i++ {
-			_ = invDense.Set(i, col, x[i])
+			if err = invDense.Set(i, col, x[i]); err != nil {
+				return nil, matrixErrorf(opInverse, fmt.Errorf("Set(%d,%d): %w", i, col, err))
+			}
 		}
 	}
 
@@ -1099,16 +1179,30 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 			for j = i; j < n; j++ {
 				sum = ZeroSum
 				for k = 0; k < i; k++ {
-					l, _ = Lraw.At(i, k)
-					u, _ = Uraw.At(k, j)
+					l, err = Lraw.At(i, k)
+					if err != nil {
+						return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", i, k, err))
+					}
+					u, err = Uraw.At(k, j)
+					if err != nil {
+						return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", k, j, err))
+					}
 					sum += l * u
 				}
-				a, _ = m.At(i, j)
-				_ = Uraw.Set(i, j, a-sum)
+				a, err = m.At(i, j)
+				if err != nil {
+					return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", i, j, err))
+				}
+				if err = Uraw.Set(i, j, a-sum); err != nil {
+					return nil, nil, matrixErrorf(opLU, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+				}
 			}
 
 			// Zero-pivot guard (generic path)
-			pivot, _ = Uraw.At(i, i)
+			pivot, err = Uraw.At(i, i)
+			if err != nil {
+				return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", i, i, err))
+			}
 			if pivot == ZeroPivot {
 				return nil, nil, matrixErrorf(opLU, ErrSingular)
 			}
@@ -1117,13 +1211,27 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 			for j = i + 1; j < n; j++ {
 				sum = ZeroSum
 				for k = 0; k < i; k++ {
-					l, _ = Lraw.At(j, k)
-					u, _ = Uraw.At(k, i)
+					l, err = Lraw.At(j, k)
+					if err != nil {
+						return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", j, k, err))
+					}
+					u, err = Uraw.At(k, i)
+					if err != nil {
+						return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", k, i, err))
+					}
 					sum += l * u
 				}
-				a, _ = m.At(j, i)
-				pivot, _ = Uraw.At(i, i)
-				_ = Lraw.Set(j, i, (a-sum)/pivot)
+				a, err = m.At(j, i)
+				if err != nil {
+					return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", j, i, err))
+				}
+				pivot, err = Uraw.At(i, i)
+				if err != nil {
+					return nil, nil, matrixErrorf(opLU, fmt.Errorf("At(%d,%d): %w", i, i, err))
+				}
+				if err = Lraw.Set(j, i, (a-sum)/pivot); err != nil {
+					return nil, nil, matrixErrorf(opLU, fmt.Errorf("Set(%d,%d): %w", j, i, err))
+				}
 			}
 		}
 	}
@@ -1187,7 +1295,7 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 
 	// Allocate Householder vector
 	v := make([]float64, n)
-
+	buf := make([]float64, n) // reuse: stores A[i,j] or Q[i,j] for i in [k..n)
 	// Perform Householder reflections
 	var (
 		i, j, k    int     // loop indices
@@ -1206,7 +1314,10 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 			}
 		} else {
 			for i = k; i < n; i++ {
-				aij, _ = Araw.At(i, k)
+				aij, err = Araw.At(i, k)
+				if err != nil {
+					return nil, nil, matrixErrorf(opQR, fmt.Errorf("At(%d,%d): %w", i, k, err))
+				}
 				norm += aij * aij
 			}
 		}
@@ -1219,7 +1330,10 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 		if useFast {
 			aij = Ad.data[k*n+k]
 		} else {
-			aij, _ = Araw.At(k, k)
+			aij, err = Araw.At(k, k)
+			if err != nil {
+				return nil, nil, matrixErrorf(opQR, fmt.Errorf("At(%d,%d): %w", k, k, err))
+			}
 		}
 		alpha = -math.Copysign(norm, aij)
 
@@ -1233,7 +1347,10 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 			}
 		} else {
 			for i = k; i < n; i++ {
-				v[i], _ = Araw.At(i, k)
+				v[i], err = Araw.At(i, k)
+				if err != nil {
+					return nil, nil, matrixErrorf(opQR, fmt.Errorf("At(%d,%d): %w", i, k, err))
+				}
 			}
 		}
 		v[k] -= alpha
@@ -1242,6 +1359,10 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 		beta = NormZero
 		for i = k; i < n; i++ {
 			beta += v[i] * v[i]
+		}
+		// Guard: avoid division by zero if v is degenerate (should be rare but must be safe).
+		if beta == NormZero {
+			continue
 		}
 		tau = 2.0 / beta
 
@@ -1256,13 +1377,20 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 					Ad.data[i*n+j] -= tau * v[i] * sum
 				}
 			} else {
+				// 1) read once into buf + accumulate
 				for i = k; i < n; i++ {
-					aij, _ = Araw.At(i, j)
-					sum += v[i] * aij
+					buf[i], err = Araw.At(i, j)
+					if err != nil {
+						return nil, nil, matrixErrorf(opQR, fmt.Errorf("At(%d,%d): %w", i, j, err))
+					}
+					sum += v[i] * buf[i]
 				}
+				// 2) write using buffered values
 				for i = k; i < n; i++ {
-					aij, _ = Araw.At(i, j)
-					_ = Araw.Set(i, j, aij-tau*v[i]*sum)
+					aij = buf[i] - tau*v[i]*sum
+					if err = Araw.Set(i, j, aij); err != nil {
+						return nil, nil, matrixErrorf(opQR, fmt.Errorf("Set(%d,%d): %w", i, j, err))
+					}
 				}
 			}
 		}
@@ -1270,22 +1398,11 @@ func QR(m Matrix) (Matrix, Matrix, error) {
 		// 4.6: Apply reflection to Q
 		for j = 0; j < n; j++ {
 			sum = ZeroSum
-			if useFast {
-				for i = k; i < n; i++ {
-					sum += v[i] * Qraw.data[i*n+j]
-				}
-				for i = k; i < n; i++ {
-					Qraw.data[i*n+j] -= tau * v[i] * sum
-				}
-			} else {
-				for i = k; i < n; i++ {
-					aij, _ = Qraw.At(i, j)
-					sum += v[i] * aij
-				}
-				for i = k; i < n; i++ {
-					aij, _ = Qraw.At(i, j)
-					_ = Qraw.Set(i, j, aij-tau*v[i]*sum)
-				}
+			for i = k; i < n; i++ {
+				sum += v[i] * Qraw.data[i*n+j]
+			}
+			for i = k; i < n; i++ {
+				Qraw.data[i*n+j] -= tau * v[i] * sum
 			}
 		}
 	}

@@ -8,9 +8,9 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// TestDefaultOptions verifies that NewMatrixOptions() equals documented defaults.
-func TestDefaultOptions(t *testing.T) {
-	o := matrix.NewMatrixOptionsSnapshot_TestOnly() // equal to o := defaultOptions()
+// 1) TestDefaultOptions_Documented verifies that NewMatrixOptions() equals documented defaults.
+func TestDefaultOptions_Documented(t *testing.T) {
+	o := matrix.NewMatrixOptionsSnapshot_TestOnly()
 
 	// numeric
 	if o.Eps != matrix.DefaultEpsilon {
@@ -19,11 +19,15 @@ func TestDefaultOptions(t *testing.T) {
 	if o.ValidateNaNInf != matrix.DefaultValidateNaNInf {
 		t.Fatalf("validateNaNInf default mismatch: got %v, want %v", o.ValidateNaNInf, matrix.DefaultValidateNaNInf)
 	}
+	if o.AllowInfDistances != matrix.DefaultAllowInfDistances {
+		t.Fatalf("allowInfDistances default mismatch: got %v, want %v", o.AllowInfDistances, matrix.DefaultAllowInfDistances)
+	}
 
 	// build policy
 	if o.Directed != matrix.DefaultDirected {
 		t.Fatalf("directed default mismatch: got %v, want %v", o.Directed, matrix.DefaultDirected)
 	}
+
 	if o.AllowMulti != matrix.DefaultAllowMulti {
 		t.Fatalf("allowMulti default mismatch: got %v, want %v", o.AllowMulti, matrix.DefaultAllowMulti)
 	}
@@ -44,10 +48,12 @@ func TestDefaultOptions(t *testing.T) {
 	if o.KeepWeights != matrix.DefaultKeepWeights {
 		t.Fatalf("keepWeights default mismatch: got %v, want %v", o.KeepWeights, matrix.DefaultKeepWeights)
 	}
-	// undirected is derived in gatherOptions, not here.
+	if o.BinaryWeights != matrix.DefaultBinaryWeights {
+		t.Fatalf("binaryWeights default mismatch: got %v, want %v", o.BinaryWeights, matrix.DefaultBinaryWeights)
+	}
 }
 
-// TestNewMatrixOptions_OrderAndIdempotence ensures each Option toggles exactly its intended field.
+// 2) TestNewMatrixOptions_OrderAndIdempotence ensures each Option toggles exactly its intended field.
 func TestNewMatrixOptions_OrderAndIdempotence(t *testing.T) {
 	o1 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithDirected(), matrix.WithUndirected()) // last wins
 	if o1.Directed != false {
@@ -125,38 +131,152 @@ func TestNewMatrixOptions_OrderAndIdempotence(t *testing.T) {
 	}
 }
 
-// TestGatherOptionsDerived checks derived export flag 'undirected := !directed'.
-func TestGatherOptions_DerivedUndirected(t *testing.T) {
-	got := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithDirected())
-	if got.Undirected != false {
-		t.Fatalf("derived undirected expected false, got %v", got.Undirected)
+// 3) allowMulti last-writer-wins.
+func TestNewMatrixOptions_LastWriterWins_AllowMulti(t *testing.T) {
+	o1 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithAllowMulti(), matrix.WithDisallowMulti())
+	if o1.AllowMulti {
+		t.Fatalf("allowMulti last-writer-wins failed: got %v, want false", o1.AllowMulti)
 	}
-	got2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithUndirected())
-	if got2.Undirected != true {
-		t.Fatalf("derived undirected expected true, got %v", got2.Undirected)
+
+	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithDisallowMulti(), matrix.WithAllowMulti())
+	if !o2.AllowMulti {
+		t.Fatalf("allowMulti last-writer-wins failed: got %v, want true", o2.AllowMulti)
 	}
 }
 
-func TestValidateNaNInfToggles(t *testing.T) {
+// 4) allowLoops last-writer-wins.
+func TestNewMatrixOptions_LastWriterWins_AllowLoops(t *testing.T) {
+	o1 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithAllowLoops(), matrix.WithDisallowLoops())
+	if o1.AllowLoops {
+		t.Fatalf("allowLoops last-writer-wins failed: got %v, want false", o1.AllowLoops)
+	}
+
+	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithDisallowLoops(), matrix.WithAllowLoops())
+	if !o2.AllowLoops {
+		t.Fatalf("allowLoops last-writer-wins failed: got %v, want true", o2.AllowLoops)
+	}
+}
+
+// 5) weighted last-writer-wins.
+func TestNewMatrixOptions_LastWriterWins_Weighted(t *testing.T) {
+	o1 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithUnweighted(), matrix.WithWeighted())
+	if !o1.Weighted {
+		t.Fatalf("weighted last-writer-wins failed: got %v, want true", o1.Weighted)
+	}
+
+	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithWeighted(), matrix.WithUnweighted())
+	if o2.Weighted {
+		t.Fatalf("weighted last-writer-wins failed: got %v, want false", o2.Weighted)
+	}
+}
+
+// 6) metricClose must imply allowInfDistances (distance-policy invariant).
+func TestMetricClosure_EnablesAllowInfDistances(t *testing.T) {
+	o := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithMetricClosure())
+	if !o.MetricClose {
+		t.Fatalf("metricClose expected true, got %v", o.MetricClose)
+	}
+	if !o.AllowInfDistances {
+		t.Fatalf("metricClose must imply allowInfDistances=true, got %v", o.AllowInfDistances)
+	}
+}
+
+// 7) export weight mode must be internally consistent and last-writer-wins.
+func TestExportWeightMode_LastWriterWins(t *testing.T) {
+	o1 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithKeepWeights())
+	if !o1.KeepWeights || o1.BinaryWeights {
+		t.Fatalf("keepWeights mode mismatch: keep=%v binary=%v", o1.KeepWeights, o1.BinaryWeights)
+	}
+
+	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithBinaryWeights())
+	if o2.KeepWeights || !o2.BinaryWeights {
+		t.Fatalf("binaryWeights mode mismatch: keep=%v binary=%v", o2.KeepWeights, o2.BinaryWeights)
+	}
+
+	o3 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithKeepWeights(), matrix.WithBinaryWeights())
+	if o3.KeepWeights || !o3.BinaryWeights {
+		t.Fatalf("last-writer-wins mismatch: keep=%v binary=%v", o3.KeepWeights, o3.BinaryWeights)
+	}
+
+	o4 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithBinaryWeights(), matrix.WithKeepWeights())
+	if !o4.KeepWeights || o4.BinaryWeights {
+		t.Fatalf("last-writer-wins mismatch: keep=%v binary=%v", o4.KeepWeights, o4.BinaryWeights)
+	}
+}
+
+// 8) epsilon setter must store the value exactly and be idempotent.
+func TestWithEpsilon_SetsValue(t *testing.T) {
+	o := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithEpsilon(1e-6), matrix.WithEpsilon(1e-6))
+	if o.Eps != 1e-6 {
+		t.Fatalf("eps mismatch: got %v, want %v", o.Eps, 1e-6)
+	}
+}
+
+// 9) edgeThreshold setter must store the value exactly and be idempotent.
+func TestWithEdgeThreshold_SetsValue(t *testing.T) {
+	o := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithEdgeThreshold(0.25), matrix.WithEdgeThreshold(0.25))
+	if o.EdgeThreshold != 0.25 {
+		t.Fatalf("edgeThreshold mismatch: got %v, want %v", o.EdgeThreshold, 0.25)
+	}
+}
+
+// 10) validateNaNInf toggles + deprecated alias must match behavior.
+func TestValidateNaNInfToggles_AndAlias(t *testing.T) {
 	o1 := matrix.GatherOptionsSnapshot_TestOnly()
 	if o1.ValidateNaNInf != true {
 		t.Fatalf("default validateNaNInf expected true, got %v", o1.ValidateNaNInf)
 	}
+
 	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithNoValidateNaNInf())
 	if o2.ValidateNaNInf != false {
 		t.Fatalf("WithNoValidateNaNInf expected false, got %v", o2.ValidateNaNInf)
 	}
+
 	o3 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithValidateNaNInf())
 	if o3.ValidateNaNInf != true {
 		t.Fatalf("WithValidateNaNInf expected true, got %v", o3.ValidateNaNInf)
 	}
+
 	o4 := matrix.GatherOptionsSnapshot_TestOnly(matrix.DisableValidateNaNInf())
 	if o4.ValidateNaNInf != false {
 		t.Fatalf("DisableValidateNaNInf expected false, got %v", o4.ValidateNaNInf)
 	}
 }
 
-// TestDeprecatedAlias verifies DisableValidateNaNInf equals WithNoValidateNaNInf.
+// 11) allowInfDistances must be togglable and last-writer-wins.
+func TestAllowInfDistances_ToggleAndOrder(t *testing.T) {
+	o1 := matrix.GatherOptionsSnapshot_TestOnly()
+	if o1.AllowInfDistances {
+		t.Fatalf("default allowInfDistances expected false, got %v", o1.AllowInfDistances)
+	}
+
+	o2 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithAllowInfDistances())
+	if !o2.AllowInfDistances {
+		t.Fatalf("WithAllowInfDistances expected true, got %v", o2.AllowInfDistances)
+	}
+
+	o3 := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithAllowInfDistances(), matrix.WithDisallowInfDistances())
+	if o3.AllowInfDistances {
+		t.Fatalf("last-writer-wins expected false, got %v", o3.AllowInfDistances)
+	}
+}
+
+// 12) WithEpsilon must panic with stable message on invalid inputs.
+func TestPanics_WithEpsilon_Message(t *testing.T) {
+	ExpectPanicMessage(t, matrix.PanicEpsilonInvalid_TestOnly, func() { _ = matrix.WithEpsilon(math.NaN()) })
+	ExpectPanicMessage(t, matrix.PanicEpsilonInvalid_TestOnly, func() { _ = matrix.WithEpsilon(-1) })
+	ExpectPanicMessage(t, matrix.PanicEpsilonInvalid_TestOnly, func() { _ = matrix.WithEpsilon(math.Inf(1)) })
+	ExpectPanicMessage(t, matrix.PanicEpsilonInvalid_TestOnly, func() { _ = matrix.WithEpsilon(math.Inf(-1)) })
+}
+
+// 13) WithEdgeThreshold must panic with stable message on non-finite inputs.
+func TestPanics_WithEdgeThreshold_Message(t *testing.T) {
+	ExpectPanicMessage(t, matrix.PanicEdgeThresholdInvalid_TestOnly, func() { _ = matrix.WithEdgeThreshold(math.NaN()) })
+	ExpectPanicMessage(t, matrix.PanicEdgeThresholdInvalid_TestOnly, func() { _ = matrix.WithEdgeThreshold(math.Inf(1)) })
+	ExpectPanicMessage(t, matrix.PanicEdgeThresholdInvalid_TestOnly, func() { _ = matrix.WithEdgeThreshold(math.Inf(-1)) })
+}
+
+// 14) TestDeprecatedAlias verifies DisableValidateNaNInf equals WithNoValidateNaNInf.
 func TestDeprecatedAlias(t *testing.T) {
 	a := matrix.GatherOptionsSnapshot_TestOnly(matrix.WithNoValidateNaNInf())
 	b := matrix.GatherOptionsSnapshot_TestOnly(matrix.DisableValidateNaNInf())
@@ -165,7 +285,7 @@ func TestDeprecatedAlias(t *testing.T) {
 	}
 }
 
-// TestPanics validates parameter guards in WithEpsilon and WithEdgeThreshold.
+// 15) TestPanics validates parameter guards in WithEpsilon and WithEdgeThreshold.
 func TestPanics(t *testing.T) {
 	// WithEpsilon invalids
 	ExpectPanic(t, func() { _ = matrix.GatherOptionsSnapshot_TestOnly(matrix.WithEpsilon(math.NaN())) })

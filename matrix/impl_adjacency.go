@@ -239,12 +239,16 @@ func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 
 	// Execute scan
 	for colIdx = 0; colIdx < cols; colIdx++ {
+		// Never return the source vertex as its own neighbor, even if a loop exists.
+		if colIdx == srcIdx {
+			continue
+		}
 		w, err = am.Mat.At(srcIdx, colIdx)
 		if err != nil {
 			return nil, fmt.Errorf("Neighbors: At(%d,%d): %w", srcIdx, colIdx, err)
 		}
 		// skip missing or infinite edges
-		if w == 0 || w == math.Inf(1) {
+		if w == 0 || isNonFinite(w) {
 			continue
 		}
 		// map index → vertex
@@ -372,20 +376,21 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	}
 
 	// Gather export options (threshold/weights). Direction comes from source options.
-	exp := gatherOptions(optFns...)  // apply user overrides on documented defaults
-	thr := exp.edgeThreshold         // a[i,j] must be strictly greater to emit an edge
-	keepWeights := exp.keepWeights   // true ⇒ weight=a[i,j]; false ⇒ weight=1
+	exp := gatherOptions(optFns...) // apply user overrides on documented defaults
+	thr := exp.edgeThreshold        // a[i,j] must be strictly greater to emit an edge
+	keepWeights := exp.keepWeights  // true ⇒ weight=a[i,j]; false ⇒ weight=1
+	binary := exp.binaryWeights
 	directed := am.opts.directed     // inherit orientation of the built adjacency
 	allowLoops := am.opts.allowLoops // snapshot loop policy for core construction
 	allowMulti := am.opts.allowMulti // snapshot multi-edge policy for core construction
-	weightedSrc := am.opts.weighted  // whether adjacency originally preserved weights
 
 	// Prepare the target graph with deterministic, policy-accurate flags.
 	gOpts := make([]core.GraphOption, 0, 4) // preallocate small, fixed set
 	// Direction: undirected export ⇒ core.WithDirected(false); else true.
 	gOpts = append(gOpts, core.WithDirected(directed)) // pass through directedness as is
-	// Weights: keepWeights ⇒ weighted graph; binary export ⇒ unweighted.
-	if keepWeights && weightedSrc { // only mark weighted if it matters
+	// Core forbids non-zero weights in unweighted graphs.
+	// Therefore, any export mode that emits a non-zero weight must build a weighted graph.
+	if keepWeights /* && weightedSrc */ || binary { // only mark weighted if it matters
 		gOpts = append(gOpts, core.WithWeighted())
 	}
 	// Loops / multi-edges: preserve build-time policy snapshot where sensible.
@@ -422,7 +427,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 				if err != nil {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err) // surface matrix read error
 				}
-				if err = returnEdge(g, fromID, toID, val, thr, keepWeights); err != nil {
+				if err = returnEdge(g, fromID, toID, val, thr, keepWeights, binary); err != nil {
 					return nil, err // already wrapped with context
 				}
 			}
@@ -436,7 +441,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 				if err != nil {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err)
 				}
-				if err = returnEdge(g, fromID, toID, val, thr, keepWeights); err != nil {
+				if err = returnEdge(g, fromID, toID, val, thr, keepWeights, binary); err != nil {
 					return nil, err
 				}
 			}
@@ -467,7 +472,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 //
 // AI-Hints:
 //   - Provide integer-native adjacency if you want exact equality without truncation semantics.
-func returnEdge(g *core.Graph, fromID, toID string, aij float64, threshold float64, keep bool) error {
+func returnEdge(g *core.Graph, fromID, toID string, aij, threshold float64, keep, binary bool) error {
 	// Skip distances/+Inf (metric-closure never reaches here) and sub-threshold values.
 	if math.IsInf(aij, +1) || !(aij > threshold) {
 		return nil // not an edge per strict policy
@@ -476,8 +481,11 @@ func returnEdge(g *core.Graph, fromID, toID string, aij float64, threshold float
 	var w float64
 	if keep {
 		w = aij // adjacency values originate from edge weights
-	} else {
+	} else if binary {
 		w = 1.0
+	} else {
+		// Optional "unweighted export" mode: keep topology, but emit weight=0.
+		w = 0.0
 	}
 	// Insert the edge; core enforces multi/loop constraints and ordering.
 	if _, err := g.AddEdge(fromID, toID, w); err != nil {
@@ -542,7 +550,7 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 			for j = 0; j < n; j++ { // fixed inner loop (col)
 				v = d.data[base+j] // read A[i,j]
 				// Ignore invalid/unreachable (policy).
-				if math.IsNaN(v) || math.IsInf(v, +1) {
+				if isNaNOrPosInf(v) {
 					continue
 				}
 				// Early filter: only positive entries contribute.
@@ -574,7 +582,7 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 				return nil, fmt.Errorf("DegreeVector: At(%d,%d): %w", i, j, err)
 			}
 			// Skip invalid/unreachable.
-			if math.IsNaN(v) || math.IsInf(v, +1) {
+			if isNaNOrPosInf(v) {
 				continue
 			}
 			// Only positive entries contribute.

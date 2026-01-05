@@ -128,6 +128,88 @@ func IdentityDense(t *testing.T, n int) matrix.Matrix {
 	return m
 }
 
+// MustAt READS m[i,j] or fails the test.
+// Implementation:
+//   - Stage 1: Call m.At(i,j).
+//   - Stage 2: t.Fatalf on error, return value otherwise.
+//
+// Behavior highlights:
+//   - Clear failure site on bounds/impl errors.
+//
+// Inputs:
+//   - m,i,j.
+//
+// Returns:
+//   - float64 value.
+//
+// Errors:
+//   - Fatal test failure on At error.
+//
+// Determinism:
+//   - N/A.
+//
+// Complexity:
+//   - O(1) per call.
+//
+// Notes:
+//   - Pair with CompareExact/Close.
+//
+// AI-Hints:
+//   - Safe for fallback paths where At may allocate internally.
+func MustAt(t *testing.T, m matrix.Matrix, i, j int) float64 {
+	t.Helper()
+	v, err := m.At(i, j)
+	if err != nil {
+		t.Fatalf("At(%d,%d): %v", i, j, err)
+	}
+
+	return v
+}
+
+// MustSet WRITES a finite scalar v into m[i,j] using Set() policy.
+// Non-finite values are rejected here intentionally to keep most tests "clean".
+//
+// Implementation:
+//   - Stage 1: Reject NaN/±Inf at helper level (fail fast with guidance).
+//   - Stage 2: Call m.Set(i,j,v) and fatal on error.
+//
+// Behavior highlights:
+//   - Ensures helpers do not accidentally fight numeric-policy.
+//
+// Inputs:
+//   - m: target matrix.
+//   - i,j: coordinates.
+//   - v: value (must be finite).
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal if v is NaN/±Inf or Set fails.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - For constructing matrices with NaN/±Inf in storage, use MustFillRowMajor.
+//
+// AI-Hints:
+//   - Keep sanitizer tests explicit: build dirty inputs via Fill, then call sanitizer.
+func MustSet(t *testing.T, m matrix.Matrix, i, j int, v float64) {
+	t.Helper()
+
+	if math.IsNaN(v) || math.IsInf(v, 0) {
+		t.Fatalf("MustSet refuses non-finite v=%v; use MustFillRowMajor (raw ingest) for NaN/±Inf fixtures", v)
+	}
+
+	if err := m.Set(i, j, v); err != nil {
+		t.Fatalf("Set(%d,%d,%v): %v", i, j, v, err)
+	}
+}
+
 // NewFilledDense BUILDS r×c *Dense from a row-major flat slice.
 // Implementation:
 //   - Stage 1: Validate len(vals)==r*c.
@@ -158,11 +240,22 @@ func IdentityDense(t *testing.T, n int) matrix.Matrix {
 //   - Use with CompareExact for integer-like matrices.
 func NewFilledDense(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	t.Helper()
+
 	if len(vals) != r*c {
-		t.Fatalf("NewFilledDence: want %d values, got %d", r*c, len(vals))
+		t.Fatalf("NewFilledDense: want %d values, got %d", r*c, len(vals))
 	}
+
+	// Guard against accidental NaN/Inf in "clean" fixtures.
+	for idx, v := range vals {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			t.Fatalf("NewFilledDense: vals[%d]=%v is non-finite; use MustFillRowMajor/NewFilledDenseRaw for dirty fixtures", idx, v)
+		}
+	}
+
 	d := MustDense(t, r, c)
+
 	var i, j int // loop iterators
+	// Keep Set() path here intentionally (policy-respecting).
 	for i = 0; i < r; i++ {
 		for j = 0; j < c; j++ {
 			MustSet(t, d, i, j, vals[i*c+j])
@@ -172,50 +265,94 @@ func NewFilledDense(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	return d
 }
 
-// RandomFill FILLS a Matrix with deterministic U(-1,1) values by seed.
+// NewFilledDenseRaw BUILDS r×c *Dense from row-major vals using raw Fill (no Set policy).
+//
 // Implementation:
-//   - Stage 1: rng := rand.New(rand.NewSource(seed)).
-//   - Stage 2: For each cell, Set(i,j, rng.Float64()*2-1).
+//   - Stage 1: Validate len(vals)==r*c.
+//   - Stage 2: Allocate Dense.
+//   - Stage 3: Raw-ingest via MustFillRowMajor.
 //
 // Behavior highlights:
-//   - Reproducible randomness for property tests.
+//   - Allows NaN/±Inf in storage for sanitizer tests.
 //
 // Inputs:
-//   - m: target Matrix; seed: RNG seed.
+//   - r,c: shape.
+//   - vals: row-major values (may include NaN/±Inf).
 //
 // Returns:
-//   - None (mutates m).
+//   - *matrix.Dense.
 //
 // Errors:
-//   - Fatal test failure if Set returns error.
+//   - Fatal if allocation fails or Fill is unavailable/fails.
 //
 // Determinism:
-//   - Deterministic for a fixed seed.
+//   - Deterministic ingest order.
 //
 // Complexity:
-//   - Time O(r*c), Space O(1) extra.
+//   - Time O(r*c), Space O(r*c).
 //
 // Notes:
-//   - Keeps values finite to avoid NaN/Inf policy interference.
+//   - Use ONLY when you intentionally test behavior on dirty numeric inputs.
 //
 // AI-Hints:
-//   - Sweep multiple seeds in table-driven tests to increase coverage.
-func RandomFill(t *testing.T, m matrix.Matrix, seed int64) {
+//   - Pair with ReplaceInfNaN/Clip pipelines; avoid using this in algebraic invariants tests.
+func NewFilledDenseRaw(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	t.Helper()
-	rng := rand.New(rand.NewSource(seed))
-	r, c := m.Rows(), m.Cols()
-	var (
-		i, j int     // loop iterators
-		v    float64 // random value
-		err  error
-	)
-	for i = 0; i < r; i++ {
-		for j = 0; j < c; j++ {
-			v = rng.Float64()*2 - 1 // 0*2-1=-1 || 1*2-1=1
-			if err = m.Set(i, j, v); err != nil {
-				t.Fatalf("Set RandomFill(%d,%d): %v", i, j, err)
-			}
-		}
+
+	if len(vals) != r*c {
+		t.Fatalf("NewFilledDenseRaw: want %d values, got %d", r*c, len(vals))
+	}
+
+	d := MustDense(t, r, c)
+	MustFillRowMajor(t, d, vals)
+
+	return d
+}
+
+// MustFillRowMajor RAW-FILLS matrix storage from a row-major slice.
+// This path is intended for tests that must construct matrices containing NaN/±Inf
+// without triggering any Set() numeric-policy.
+//
+// Implementation:
+//   - Stage 1: Assert the matrix implements Fill([]float64) error.
+//   - Stage 2: Call Fill with the provided row-major data.
+//
+// Behavior highlights:
+//   - Bypasses Set() validation by design (raw ingest).
+//
+// Inputs:
+//   - m: target matrix (typically *Dense).
+//   - vals: row-major values, length must match Rows*Cols (enforced by callee or checked by caller).
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if Fill is unavailable or returns an error.
+//
+// Determinism:
+//   - Deterministic (pure data copy in a fixed order).
+//
+// Complexity:
+//   - Time O(r*c), Space O(1) extra (excluding internal validation).
+//
+// Notes:
+//   - Use ONLY when you intentionally need non-finite data in storage.
+//
+// AI-Hints:
+//   - Prefer using this helper in sanitizer tests (ReplaceInfNaN / Clip pipelines).
+func MustFillRowMajor(t *testing.T, m matrix.Matrix, vals []float64) {
+	t.Helper()
+
+	f, ok := m.(interface {
+		Fill([]float64) error
+	})
+	if !ok {
+		t.Fatalf("matrix does not support raw Fill([]float64); cannot ingest non-finite test data")
+	}
+
+	if err := f.Fill(vals); err != nil {
+		t.Fatalf("Fill(row-major): %v", err)
 	}
 }
 
@@ -265,77 +402,51 @@ func RandFilledDense(t *testing.T, r, c int, seed int64) matrix.Matrix {
 	return m
 }
 
-// MustSet WRITES v to m[i,j] or fails the test.
+// RandomFill FILLS a Matrix with deterministic U(-1,1) values by seed.
 // Implementation:
-//   - Stage 1: Call m.Set(i,j,v).
-//   - Stage 2: t.Fatalf on error.
+//   - Stage 1: rng := rand.New(rand.NewSource(seed)).
+//   - Stage 2: For each cell, Set(i,j, rng.Float64()*2-1).
 //
 // Behavior highlights:
-//   - Provides concise error text with indices.
+//   - Reproducible randomness for property tests.
 //
 // Inputs:
-//   - m,i,j,v: target matrix, coordinates, value.
+//   - m: target Matrix; seed: RNG seed.
 //
 // Returns:
-//   - None.
+//   - None (mutates m).
 //
 // Errors:
-//   - Fatal test failure on Set error.
+//   - Fatal test failure if Set returns error.
 //
 // Determinism:
-//   - N/A.
+//   - Deterministic for a fixed seed.
 //
 // Complexity:
-//   - O(1) per call.
+//   - Time O(r*c), Space O(1) extra.
 //
 // Notes:
-//   - Avoids boilerplate if err != nil {...} in tests.
+//   - Keeps values finite to avoid NaN/Inf policy interference.
 //
 // AI-Hints:
-//   - Great with small builders like NewFilledDense.
-func MustSet(t *testing.T, m matrix.Matrix, i, j int, v float64) {
+//   - Sweep multiple seeds in table-driven tests to increase coverage.
+func RandomFill(t *testing.T, m matrix.Matrix, seed int64) {
 	t.Helper()
-	if err := m.Set(i, j, v); err != nil {
-		t.Fatalf("Set(%d,%d,%v): %v", i, j, v, err)
+	rng := rand.New(rand.NewSource(seed))
+	r, c := m.Rows(), m.Cols()
+	var (
+		i, j int     // loop iterators
+		v    float64 // random value
+		err  error
+	)
+	for i = 0; i < r; i++ {
+		for j = 0; j < c; j++ {
+			v = rng.Float64()*2 - 1 // 0*2-1=-1 || 1*2-1=1
+			if err = m.Set(i, j, v); err != nil {
+				t.Fatalf("Set RandomFill(%d,%d): %v", i, j, err)
+			}
+		}
 	}
-}
-
-// MustAt READS m[i,j] or fails the test.
-// Implementation:
-//   - Stage 1: Call m.At(i,j).
-//   - Stage 2: t.Fatalf on error, return value otherwise.
-//
-// Behavior highlights:
-//   - Clear failure site on bounds/impl errors.
-//
-// Inputs:
-//   - m,i,j.
-//
-// Returns:
-//   - float64 value.
-//
-// Errors:
-//   - Fatal test failure on At error.
-//
-// Determinism:
-//   - N/A.
-//
-// Complexity:
-//   - O(1) per call.
-//
-// Notes:
-//   - Pair with CompareExact/Close.
-//
-// AI-Hints:
-//   - Safe for fallback paths where At may allocate internally.
-func MustAt(t *testing.T, m matrix.Matrix, i, j int) float64 {
-	t.Helper()
-	v, err := m.At(i, j)
-	if err != nil {
-		t.Fatalf("At(%d,%d): %v", i, j, err)
-	}
-
-	return v
 }
 
 // CompareExact ASSERTS strict equality between matrix and 2D literal.
@@ -503,17 +614,27 @@ func sliceClose(t *testing.T, a, b []float64, rtol, atol float64) {
 //
 // AI-Hints:
 //   - Can drive table filters (skip flaky, etc.).
-func AlmostEqualSlice(a, b []float64, eps float64) bool {
-	if len(a) != len(b) {
-		return false
+func AlmostEqualSlice(got, want []float64, delta float64) bool {
+	if len(got) != len(want) {
+		return true
 	}
-	for i := range a {
-		if math.Abs(a[i]-b[i]) > eps {
-			return false
+	for i := 0; i < len(got); i++ {
+		// Reuse the same NaN/Inf policy as InDelta (without *testing.T dependency).
+		if math.IsNaN(got[i]) || math.IsNaN(want[i]) {
+			return true
+		}
+		if math.IsInf(got[i], 0) || math.IsInf(want[i], 0) {
+			if got[i] != want[i] {
+				return true
+			}
+			continue
+		}
+		if math.Abs(got[i]-want[i]) > delta {
+			return true
 		}
 	}
 
-	return true
+	return false
 }
 
 // AssertErrorIs WRAPS errors.Is with consistent failure text.
@@ -588,9 +709,64 @@ func ExpectPanic(t *testing.T, fn func()) {
 	fn()
 }
 
+// ExpectPanicMessage asserts that fn panics with an exact string payload.
+// Implementation:
+//   - Stage 1: Defer recover() and assert panic occurred.
+//   - Stage 2: Assert recovered value is a string.
+//   - Stage 3: Assert recovered string equals want exactly.
+//
+// Behavior highlights:
+//   - Strong contract: exact match (no substrings) to keep panic messages stable.
+//
+// Inputs:
+//   - want: expected panic message (exact string).
+//   - fn: function expected to panic.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if:
+//   - no panic occurs,
+//   - panic payload is not a string,
+//   - message mismatch occurs.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Use for option constructors that intentionally panic on programmer error.
+//
+// AI-Hints:
+//   - Prefer stable panic constants (no fmt.Sprintf) to keep this test reliable.
+func ExpectPanicMessage(t *testing.T, want string, fn func()) {
+	t.Helper()
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("expected panic %q, got none", want)
+		}
+		got, ok := r.(string)
+		if !ok {
+			t.Fatalf("expected panic string %q, got %T (%v)", want, r, r)
+		}
+		if got != want {
+			t.Fatalf("panic mismatch: got %q, want %q", got, want)
+		}
+	}()
+
+	fn()
+}
+
 // InDelta RETURNS whether |a-b| ≤ delta (boolean, non-fatal).
 // Implementation:
-//   - Stage 1: Compute diff and compare to ±delta.
+//   - Treats NaN as always mismatching (fail-fast for undefined numerics).
+//   - Requires infinities to match exactly (Inf == Inf, -Inf == -Inf).
+//   - Returns true on mismatch (|got-want| > delta).
 //
 // Behavior highlights:
 //   - Lightweight predicate for coarse checks.
@@ -612,14 +788,19 @@ func ExpectPanic(t *testing.T, fn func()) {
 //
 // AI-Hints:
 //   - Useful for sanity checks on norms, traces, etc.
-func InDelta(t *testing.T, a, b float64, delta float64) bool {
+func InDelta(t *testing.T, got, want, delta float64) bool {
 	t.Helper()
-	diff := a - b
-	if diff < -delta || diff > delta {
-		return false
+	// NaN is never acceptable in comparisons: force mismatch.
+	if math.IsNaN(got) || math.IsNaN(want) {
+		return true
+	}
+	// Infinities must match exactly by sign.
+	if math.IsInf(got, 0) || math.IsInf(want, 0) {
+		return got != want
 	}
 
-	return true
+	// Standard absolute delta check.
+	return math.Abs(got-want) > delta
 }
 
 // RowL1Norm RETURNS L1 norm of row i (Σ_j |m[i,j]|).
@@ -724,6 +905,7 @@ func mustDense(b *testing.B, r, c int) *matrix.Dense {
 	if err != nil {
 		b.Fatalf("NewZeros(%d,%d): %v", r, c, err)
 	}
+
 	return d
 }
 
@@ -732,7 +914,9 @@ func fillDenseRand(b *testing.B, d *matrix.Dense, seed int64) {
 	rows, cols := d.Rows(), d.Cols()
 	for i := 0; i < rows; i++ {
 		for j := 0; j < cols; j++ {
-			_ = d.Set(i, j, rng.Float64()*2-1) // [-1,1]
+			if err := d.Set(i, j, rng.Float64()*2-1); err != nil { // [-1,1]
+				b.Fatalf("Set(%d,%d): %v", i, j, err)
+			}
 		}
 	}
 }
@@ -742,5 +926,6 @@ func onesVec(n int) []float64 {
 	for i := 0; i < n; i++ {
 		v[i] = 1
 	}
+
 	return v
 }

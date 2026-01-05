@@ -81,7 +81,7 @@ func NormalWeightFn(mean, stddev float64) WeightFn {
 	if stddev < 0 {
 		panic(fmt.Sprintf("NormalWeightFn: stddev must be ≥ 0, got %f", stddev))
 	}
-	maxVal := float64(math.MaxInt64)
+	maxVal := float64(math.MaxInt64) // !! math.Inf(1)
 
 	return func(rng *rand.Rand) float64 {
 		if rng == nil {

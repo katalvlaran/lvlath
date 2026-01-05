@@ -429,6 +429,7 @@ func TestToGraph_ThresholdAndBinary(t *testing.T) {
 
 	// threshold=2, binary ⇒ only v0->v2 with weight 1
 	gBin, err := am.ToGraph(matrix.WithEdgeThreshold(2), matrix.WithBinaryWeights())
+	//gBin, err := am.ToGraph(matrix.WithEdgeThreshold(2), matrix.WithKeepWeights())
 	if err != nil {
 		t.Fatalf("ToGraph binary: %v", err)
 	}
@@ -508,7 +509,9 @@ func TestAdjacency_SingleVertex(t *testing.T) {
 // Degree vector tests (directed/undirected/loop semantics).
 func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	// A->B, A->C, B->C, C->C(loop), D isolated
-	g := core.NewGraph(core.WithDirected(true))
+	// core forbids non-zero weights in unweighted graphs, so we must enable weighted mode.
+	// Matrix options still build an unweighted adjacency (presence==1), but core accepts edge insertion.
+	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithLoops())
 	for _, id := range []string{"A", "B", "C", "D"} {
 		_ = g.AddVertex(id)
 	}
@@ -517,7 +520,7 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	_, _ = g.AddEdge("B", "C", 1)
 	_, _ = g.AddEdge("C", "C", 1) // loop
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected()))
+	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowLoops()))
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -527,14 +530,14 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	}
 	// Expected: A=2, B=1, C=1(loop counts 1), D=0
 	want := []float64{2, 1, 1, 0}
-	if !AlmostEqualSlice(vec, want, 1e-12) {
+	if AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }
 
 func TestDegreeVector_Undirected_Unweighted(t *testing.T) {
 	// Undirected edges: A-B, B-C
-	g := core.NewGraph(core.WithDirected(false))
+	g := core.NewGraph(core.WithDirected(false), core.WithWeighted())
 	for _, id := range []string{"A", "B", "C", "D"} {
 		_ = g.AddVertex(id)
 	}
@@ -550,7 +553,7 @@ func TestDegreeVector_Undirected_Unweighted(t *testing.T) {
 		t.Fatalf("DegreeVector: %v", err)
 	}
 	want := []float64{1, 2, 1, 0}
-	if !AlmostEqualSlice(vec, want, 1e-12) {
+	if AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }
@@ -569,7 +572,7 @@ func TestDegreeVector_LoopWeightedCountsAsOne(t *testing.T) {
 		t.Fatalf("DegreeVector: %v", err)
 	}
 	want := []float64{1}
-	if !AlmostEqualSlice(vec, want, 1e-12) {
+	if AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }

@@ -38,15 +38,38 @@ const (
 
 // ---------- Constructors & Utilities (O(1) alloc + O(rc) zeroing by runtime) ----------
 
-// NewZeros returns a new zero-initialized *Dense of size rows×cols.
-// It is a thin alias of NewDense with an intention-revealing name.
-// Deterministic: single allocation; no hidden work;
-// Complexity: O(n^2) zero-init (constructor) + O(n) diagonal writes.
+// NewZeros allocates an r×c zero matrix.
+// Implementation:
+//   - Stage 1: Delegate allocation to NewDense (same numeric policy).
+//   - Stage 2: Return the zeroed matrix.
 //
-// Note: Returns (*Dense, error) to surface ErrInvalidDimensions.
-func NewZeros(rows, cols int) (*Dense, error) {
+// Behavior highlights:
+//   - Backwards compatible: opts are optional.
+//
+// Inputs:
+//   - r,c: shape (>= 0).
+//   - opts: numeric-policy options forwarded to NewDense.
+//
+// Returns:
+//   - *Dense: zero matrix.
+//
+// Errors:
+//   - ErrInvalidDimensions: on negative dimensions.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(r*c), Space O(r*c).
+//
+// Notes:
+//   - Use WithAllowInfDistances when you plan to Set(+Inf) into the matrix.
+//
+// AI-Hints:
+//   - For APSP inputs with “no path” sentinels, prefer NewZeros(n,n, WithAllowInfDistances()) and then fill +Inf off-diagonal.
+func NewZeros(rows, cols int, opts ...Option) (*Dense, error) {
 	// Delegate directly to the strict constructor (single allocation).
-	d, err := NewDense(rows, cols)
+	d, err := NewPreparedDense(rows, cols, opts...)
 	if err != nil {
 		return nil, matrixErrorf(opNewZeros, err)
 	}
@@ -54,14 +77,40 @@ func NewZeros(rows, cols int) (*Dense, error) {
 	return d, nil
 }
 
-// NewIdentity returns I_n (n×n identity; ones on the diagonal, zeros elsewhere).
-// Determinism: fixed i-loop; single write per diagonal cell.
-// Complexity: O(n^2) zeroing (constructor) + O(n) writes on the diagonal.
+// NewIdentity allocates an n×n identity matrix (square of n; ones on the diagonal, zeros elsewhere).
+// Implementation:
+//   - Stage 1: Allocate n×n via NewZeros (policy forwarded).
+//   - Stage 2: Set diagonal to 1 using Set() (policy-safe).
 //
-// AI-Hints: Use as a neutral element for inverses/preconditioning/orthogonalization.
-func NewIdentity(n int) (*Dense, error) {
+// Behavior highlights:
+//   - Backwards compatible: opts are optional.
+//
+// Inputs:
+//   - n: size (>= 0).
+//   - opts: numeric-policy options forwarded to NewZeros/NewDense.
+//
+// Returns:
+//   - matrix.Matrix: identity matrix (typically *Dense).
+//
+// Errors:
+//   - ErrInvalidDimensions: if n < 0.
+//   - ErrIndexOutOfRange / ErrNaNInf: only if internal invariants are broken (should not happen).
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(n^2) allocation, Space O(n^2).
+//
+// Notes:
+//   - Identity contains only finite values; allowInfDistances does not change the result.
+//
+// AI-Hints:
+//   - Use as a neutral element for inverses/preconditioning/orthogonalization.
+//   - Use identity matrices as stable baselines for algebraic property tests.
+func NewIdentity(n int, opts ...Option) (*Dense, error) {
 	// Allocate an n×n zero matrix via the constructor.
-	I, err := NewDense(n, n) // O(1) alloc + O(n^2) zeroing
+	I, err := NewZeros(n, n, opts...) // O(1) alloc + O(n^2) zeroing
 	if err != nil {
 		return nil, matrixErrorf(opNewIdentity, err) // propagate constructor error unchanged
 	}
@@ -92,7 +141,7 @@ func ZerosLike(m Matrix) (*Dense, error) {
 		return nil, matrixErrorf(opZerosLike, err)
 	}
 	// Read shape once and call NewDense with the same dimensions.
-	d, err := NewDense(m.Rows(), m.Cols())
+	d, err := NewZeros(m.Rows(), m.Cols())
 	if err != nil { // errors (if any) bubble up
 		return nil, matrixErrorf(opZerosLike, err)
 	}
@@ -184,7 +233,7 @@ func APSPInPlace(m Matrix) error { return FloydWarshall(m) }
 // Deterministic: delegates to FloydWarshall on the underlying matrix.
 func MetricClosure(am *AdjacencyMatrix) error {
 	// Guard nil pointer early with the package sentinel via centralized validation.
-	if err := ValidateGraph(am); err != nil {
+	if err := ValidateGraphAdjacency(am); err != nil {
 		return matrixErrorf(opMetricClosure, err) // wrap with context
 	}
 
@@ -193,24 +242,34 @@ func MetricClosure(am *AdjacencyMatrix) error {
 }
 
 // BuildMetricClosure constructs adjacency from g and then converts it to metric-closure
-// (Floyd–Warshall in-place). It also marks the returned adjacency as metricClose=true
-// to ensure ToGraph() properly refuses exporting distances as edges.
+// (Floyd–Warshall in-place). It marks the returned adjacency as metricClose=true
+// so ToGraph() refuses exporting distances as edges.
 //
 // AI-Hints:
 //   - Use for TSP/DTW pipelines where you want pairwise shortest-path distances immediately.
 //   - Keep in mind the diagonal=0 and +Inf for unreachable pairs policy.
 func BuildMetricClosure(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
-	// Build adjacency deterministically using the adapter builder.
-	am, err := NewAdjacencyMatrix(g, opts) // may fail on invalid graph/options
+	// Stage 1: enforce distance-policy regardless of caller opts.
+	// This guarantees:
+	//   - “no edge / no path” is represented as +Inf
+	//   - the underlying Dense is allowed to store +Inf (via AllowInfDistances).
+	opts.metricClose = true
+	opts.allowInfDistances = true
+
+	// Stage 2: build adjacency deterministically using the adapter builder.
+	am, err := NewAdjacencyMatrix(g, opts)
 	if err != nil {
-		return nil, err // bubble as-is
+		return nil, err
 	}
-	// Run APSP in place on the underlying matrix.
+
+	// Stage 3: run APSP in place on the underlying matrix.
 	if err = FloydWarshall(am.Mat); err != nil {
-		return nil, err // bubble kernel error
+		return nil, err
 	}
-	// Mark the policy flag so ToGraph() refuses exporting distances as edges.
-	am.opts.metricClose = true // explicit flag (no reflective tricks)
+
+	// Stage 4: persist policy flags on the wrapper for correct downstream behavior (ToGraph refusal).
+	am.opts.metricClose = true
+	am.opts.allowInfDistances = true
 
 	// Return the mutated adjacency wrapper.
 	return am, nil

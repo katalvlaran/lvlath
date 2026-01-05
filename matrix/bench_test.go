@@ -12,7 +12,7 @@ import (
 )
 
 // benchSizes are the matrix sizes to benchmark.
-var benchSizes = []int{50, 100, 200}
+var benchSizes = []int{128, 256, 512}
 
 // sinks to defeat dead-code elimination
 var (
@@ -301,25 +301,28 @@ func BenchmarkEigenSym(b *testing.B) {
 
 func BenchmarkAPSP_FloydWarshall_Dense(b *testing.B) {
 	b.ReportAllocs()
-	for _, n := range []int{60, 100} {
-		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
-			// Full distance matrix with +Inf off-diagonal and sparse edges
-			D, err := matrix.NewZeros(n, n)
+	for _, n := range []int{128, 512} {
+		// buildDistanceMatrix constructs a distance-policy matrix:
+		// diagonal=0, off-diagonal=+Inf, with a few sparse edges.
+		buildDistanceMatrix := func() *matrix.Dense {
+			D, err := matrix.NewZeros(n, n, matrix.WithAllowInfDistances())
 			if err != nil {
-				b.Fatal(err)
+				b.Fatalf("NewZeros(%d,%d): %v", n, n, err)
 			}
-			// init: 0 on the diagonal, +Inf outside
 			inf := math.Inf(1)
 			for i := 0; i < n; i++ {
 				for j := 0; j < n; j++ {
 					if i == j {
-						_ = D.Set(i, j, 0)
-					} else {
-						_ = D.Set(i, j, inf)
+						if err = D.Set(i, j, 0); err != nil {
+							b.Fatalf("Set(diag): %v", err)
+						}
+						continue
+					}
+					if err = D.Set(i, j, inf); err != nil {
+						b.Fatalf("Set(+Inf): %v", err)
 					}
 				}
 			}
-			// add random edges of weight [1,5]
 			rng := rand.New(rand.NewSource(777))
 			for e := 0; e < n*3; e++ {
 				u := rng.Intn(n)
@@ -328,17 +331,23 @@ func BenchmarkAPSP_FloydWarshall_Dense(b *testing.B) {
 					continue
 				}
 				w := 1 + rng.Float64()*4
-				_ = D.Set(u, v, w)
-			}
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				// in-place
-				if err := matrix.APSPInPlace(D); err != nil {
-					b.Fatal(err)
+				if err = D.Set(u, v, w); err != nil {
+					b.Fatalf("Set(edge): %v", err)
 				}
 			}
+
+			return D
+		}
+		b.ResetTimer()
+		for i := 0; i < b.N; i++ {
+			b.StopTimer()
+			D := buildDistanceMatrix()
+			b.StartTimer()
+			if err := matrix.APSPInPlace(D); err != nil {
+				b.Fatal(err)
+			}
 			sinkM = D
-		})
+		}
 	}
 }
 

@@ -23,7 +23,6 @@ package matrix
 
 import (
 	"fmt"
-	"math"
 
 	"github.com/katalvlaran/lvlath/core"
 )
@@ -153,15 +152,18 @@ func BuildDenseAdjacency(
 	//
 	// For pure adjacency we keep the default strict NaN/Inf policy on Dense.
 	// For APSP/metric-closure we must allow +Inf as a sentinel for
-	// "no path", so we construct a Dense with validateNaNInf=false.
+	// "no path". Contractually, we still reject NaN and -Inf, so we keep
+	// validateNaNInf=true and enable allowInfDistances=true.
 	var (
 		mat *Dense
 		err error
 	)
 
 	if opts.metricClose {
-		// APSP / metric-closure path: +Inf must be allowed in the backing data.
-		mat, err = newDenseWithPolicy(V, V, false /* validateNaNInf */)
+		// APSP / metric-closure path:
+		//   - validateNaNInf=true  => NaN and -Inf remain rejected (always).
+		//   - allowInfDistances=true => +Inf is permitted as "unreachable".
+		mat, err = newDenseWithPolicy(V, V, true, true)
 	} else {
 		// Regular adjacency: keep strict NaN/Inf validation.
 		mat, err = NewDense(V, V)
@@ -238,7 +240,7 @@ func BuildDenseAdjacency(
 			// Reject NaN/±Inf *before* writing into the matrix; this keeps all
 			// Dense instances free from non-finite values, except for APSP
 			// matrices that explicitly allow +Inf as "no path".
-			if math.IsNaN(w) || math.IsInf(w, 0) {
+			if isNonFinite(w) {
 				return nil, nil, fmt.Errorf("BuildDenseAdjacency: invalid weight for %q->%q: %w",
 					e.From, e.To, ErrInvalidWeight)
 			}
@@ -260,20 +262,25 @@ func BuildDenseAdjacency(
 
 	// --- Stage 4: Optional metric closure (APSP) ---
 	if opts.metricClose {
-		// Convert adjacency (0 / weight) into distance matrix:
-		//  - diag = 0,
-		//  - off-diagonal: 0 → +Inf (no edge), otherwise keep weight.
-		if err = initDistancesInPlace(mat); err != nil {
+		// Distances are initialized as:
+		//   - dist[i,i] = 0
+		//   - dist[i,j] = +Inf for i!=j
+		// and then direct edges overwrite/relax these entries.
+		//
+		// NOTE: This requires a Dense instance that allows +Inf, and an init path
+		// that does not apply NaN/Inf validation.
+		if err = InitDistancesInPlace(mat); err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
 		}
-		// Run Floyd–Warshall with fixed loop nests (i,k,j) for determinism.
+		// Floyd–Warshall computes APSP deterministically.
 		floydWarshallInPlace(mat)
 	} else {
-		// In pure adjacency mode, ensure diagonal is 0 (no self-cost) and
-		// leave off-diagonal zeros as "no edge".
-		for i = 0; i < V; i++ {
-			if err = mat.Set(i, i, 0.0); err != nil {
-				return nil, nil, fmt.Errorf("BuildDenseAdjacency: Set(%d,%d,0): %w", i, i, err)
+		// Pure adjacency: keep loops only when allowed; otherwise force a clean zero diagonal.
+		if !opts.allowLoops {
+			for i = 0; i < V; i++ {
+				if err = mat.Set(i, i, 0.0); err != nil {
+					return nil, nil, fmt.Errorf("BuildDenseAdjacency: Set(%d,%d,0): %w", i, i, err)
+				}
 			}
 		}
 	}
@@ -406,15 +413,9 @@ func BuildDenseIncidence(
 	Ep := len(eff)
 	var mat *Dense
 	var err error
-	if Ep == 0 {
-		// allow zero-column incidence
-		if mat, err = NewDenseZeroOK(V, 0); err != nil {
-			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDenseZeroOK(%d,0): %w", V, err)
-		}
-	} else {
-		if mat, err = NewDense(V, Ep); err != nil {
-			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDense(%d,%d): %w", V, Ep, err)
-		}
+	// allow zero-column incidence
+	if mat, err = NewDense(V, Ep); err != nil {
+		return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDense(%d,%d): %w", V, Ep, err)
 	}
 
 	// --- Stage 4: Populate columns ---

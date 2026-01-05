@@ -7,6 +7,37 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
+// fillInfOffDiagZeroDiag INITIALIZES a distance-matrix fixture:
+//   - diagonal = 0
+//   - off-diagonal = +Inf
+//
+// This uses a row-major bulk fill to allow +Inf fixtures without MustSet.
+func fillInfOffDiagZeroDiag(t *testing.T, d *matrix.Dense) {
+	t.Helper()
+
+	n := d.Rows()
+	if n != d.Cols() {
+		t.Fatalf("fixture matrix must be square, got %dx%d", d.Rows(), d.Cols())
+	}
+
+	inf := math.Inf(1)
+	data := make([]float64, n*n)
+	for i := 0; i < n; i++ {
+		base := i * n
+		for j := 0; j < n; j++ {
+			if i == j {
+				data[base+j] = 0.0
+			} else {
+				data[base+j] = inf
+			}
+		}
+	}
+
+	if err := d.Fill(data); err != nil {
+		t.Fatalf("Fill(row-major): %v", err)
+	}
+}
+
 // ---------- 5. FloydWarshall ----------
 
 func TestFloydWarshall_Errors(t *testing.T) {
@@ -41,18 +72,10 @@ func TestFloydWarshall_CLRS_5x5_FastPath_Correctness(t *testing.T) {
 		err  error
 	)
 
-	A, _ := matrix.NewDense(n, n)
-	// init ∞ off-diagonal, 0 on diagonal
-	inf := math.Inf(1)
-	for i = 0; i < n; i++ {
-		for j = 0; j < n; j++ {
-			if i == j {
-				MustSet(t, A, i, j, 0)
-			} else {
-				MustSet(t, A, i, j, inf)
-			}
-		}
-	}
+	A, _ := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
+
+	// init ∞ off-diagonal, 0 on diagonal via raw row-major fill
+	fillInfOffDiagZeroDiag(t, A)
 	// edges (u→v = w)
 	MustSet(t, A, 0, 1, 3)
 	MustSet(t, A, 0, 2, 8)
@@ -98,17 +121,8 @@ func TestFloydWarshall_CLRS_5x5_Fallback_MatchesFast(t *testing.T) {
 	)
 
 	makeCLRS := func() matrix.Matrix {
-		M, _ := matrix.NewDense(n, n)
-		inf := math.Inf(1)
-		for i = 0; i < n; i++ {
-			for j = 0; j < n; j++ {
-				if i == j {
-					_ = M.Set(i, j, 0)
-				} else {
-					_ = M.Set(i, j, inf)
-				}
-			}
-		}
+		M, _ := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
+		fillInfOffDiagZeroDiag(t, M)
 		// edges
 		_ = M.Set(0, 1, 3)
 		_ = M.Set(0, 2, 8)
@@ -152,19 +166,10 @@ func TestFloydWarshall_Unreachable_Properties_And_Idempotent(t *testing.T) {
 	var i, j, k int
 	var err error
 
-	D, _ := matrix.NewDense(n, n)
-	inf := math.Inf(1)
+	D, _ := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
 
-	// init ∞ off-diagonal, 0 on diagonal
-	for i = 0; i < n; i++ {
-		for j = 0; j < n; j++ {
-			if i == j {
-				MustSet(t, D, i, j, 0)
-			} else {
-				MustSet(t, D, i, j, inf)
-			}
-		}
-	}
+	inf := math.Inf(1)
+	fillInfOffDiagZeroDiag(t, D)
 
 	// Build an undirected component on {0,1,2} and a directed chain {3 -> 4} ; node 5 isolated.
 	// Undirected edges (symmetric weights):
@@ -249,22 +254,11 @@ func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
 	t.Parallel()
 
 	const n = 4 // 0-1-2 - negative cycle; 3 - isolated
-	var i, j int
+	var i int
 	var err error
 
-	G, _ := matrix.NewDense(n, n)
-	inf := math.Inf(1)
-
-	// init: 0 on diagonal, +Inf off diagonal
-	for i = 0; i < n; i++ {
-		for j = 0; j < n; j++ {
-			if i == j {
-				MustSet(t, G, i, j, 0)
-			} else {
-				MustSet(t, G, i, j, inf)
-			}
-		}
-	}
+	G, _ := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
+	fillInfOffDiagZeroDiag(t, G)
 
 	// Negative cycle: 0→1 (1), 1→2 (-1), 2→0 (-1) => total -1
 	MustSet(t, G, 0, 1, 1)
@@ -288,5 +282,51 @@ func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
 	d, _ = G.At(3, 3)
 	if d != 0.0 {
 		t.Fatalf("isolated node must keep zero on the diagonal [3,3]=%v; want %v", d, 0.0)
+	}
+}
+
+// TestInitDistancesInPlace_NegativeSelfLoopPreservesDiagonal FIXES the contract:
+// a negative self-loop weight on the diagonal MUST remain negative after initialization.
+func TestInitDistancesInPlace_NegativeSelfLoopPreservesDiagonal(t *testing.T) {
+	// Stage 1: Allocate a 2×2 distance matrix container.
+	d, err := matrix.NewPreparedDense(2, 2, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewDense(2,2): %v", err)
+	}
+
+	// Stage 2: Raw-ingest values:
+	//   - diag[0,0] is a negative self-loop and MUST remain negative.
+	//   - diag[1,1] is zero (baseline).
+	//   - off-diagonal [0,1] is +Inf meaning "no direct edge".
+	//   - off-diagonal [1,0] is a finite edge weight.
+	vals := []float64{
+		-2, math.Inf(1),
+		5, 0,
+	}
+	if err = d.Fill(vals); err != nil {
+		t.Fatalf("Fill(row-major): %v", err)
+	}
+
+	// Stage 3: Run the initializer under test.
+	if err = matrix.InitDistancesInPlace(d); err != nil {
+		t.Fatalf("InitDistancesInPlace: %v", err)
+	}
+
+	// Stage 4: Assert the negative diagonal is preserved (not overwritten to 0).
+	got00, err := d.At(0, 0)
+	if err != nil {
+		t.Fatalf("At(0,0): %v", err)
+	}
+	if got00 != -2 {
+		t.Fatalf("diag[0,0]=%v; want %v (negative self-loop must be preserved)", got00, -2)
+	}
+
+	// Optional sanity: ensure +Inf sentinel off-diagonal is still +Inf (no accidental clobber).
+	got01, err := d.At(0, 1)
+	if err != nil {
+		t.Fatalf("At(0,1): %v", err)
+	}
+	if !math.IsInf(got01, 1) {
+		t.Fatalf("m[0,1]=%v; want +Inf (no-path sentinel must remain +Inf)", got01)
 	}
 }

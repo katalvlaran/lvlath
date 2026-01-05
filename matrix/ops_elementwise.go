@@ -35,6 +35,46 @@ const (
 	opAllClose         = "AllClose"
 )
 
+// allCloseElem checks element-wise |a-b| ≤ atol + rtol*|b|, with robust NaN/Inf semantics.
+// Implementation:
+//   - Stage 1: reject NaN in either operand → not close.
+//   - Stage 2: handle ±Inf: only equal-sign infinities are close.
+//   - Stage 3: apply finite all-close inequality.
+//
+// Behavior highlights:
+//   - Fixes the subtle IEEE issue: (+Inf - +Inf) yields NaN, which must NOT be treated as “close by accident”.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func allCloseElem(a, b, rtol, atol float64) bool {
+	// NaN is never “close” under our strict default semantics.
+	if math.IsNaN(a) || math.IsNaN(b) {
+		return false
+	}
+
+	// Infinities: only same-sign infinities are close.
+	if math.IsInf(a, 0) || math.IsInf(b, 0) {
+		if math.IsInf(a, 1) && math.IsInf(b, 1) {
+			return true
+		}
+		if math.IsInf(a, -1) && math.IsInf(b, -1) {
+			return true
+		}
+		return false
+	}
+
+	// Finite inequality: |a-b| ≤ atol + rtol*|b|.
+	diff := a - b
+	if diff < 0 {
+		diff = -diff
+	}
+	absb := b
+	if absb < 0 {
+		absb = -absb
+	}
+	return diff <= (atol + rtol*absb)
+}
+
 // Broadcast-subtract columns: out[i,j] = X[i,j] − colMeans[j].
 // Implementation:
 //   - Stage 1: Validate X (non-nil) and length(colMeans)==Cols(X).
@@ -72,6 +112,7 @@ func ewBroadcastSubCols(X Matrix, colMeans []float64) (Matrix, error) {
 	}
 	// Read shape once (O(1)).
 	r, c := X.Rows(), X.Cols()
+
 	// Check broadcast vector length.
 	if len(colMeans) != c {
 		return nil, matrixErrorf(opBroadcastSubCols, ErrDimensionMismatch)
@@ -105,7 +146,10 @@ func ewBroadcastSubCols(X Matrix, colMeans []float64) (Matrix, error) {
 			if err != nil {
 				return nil, matrixErrorf(opBroadcastSubCols, err)
 			}
-			_ = out.Set(i, j, v-colMeans[j]) // bounds-safe write
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v-colMeans[j]); err != nil {
+				return nil, matrixErrorf(opBroadcastSubCols, err)
+			}
 		}
 	}
 
@@ -182,7 +226,10 @@ func ewBroadcastSubRows(X Matrix, rowMeans []float64) (Matrix, error) {
 			if err != nil {
 				return nil, matrixErrorf(opBroadcastSubRows, err)
 			}
-			_ = out.Set(i, j, v-rowMeans[i])
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v-rowMean); err != nil {
+				return nil, matrixErrorf(opBroadcastSubRows, err)
+			}
 		}
 	}
 
@@ -230,7 +277,10 @@ func ewScaleCols(X Matrix, scale []float64) (Matrix, error) {
 			if err != nil {
 				return nil, matrixErrorf(opScaleCols, err)
 			}
-			_ = out.Set(i, j, v*scale[j])
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v*scale[j]); err != nil {
+				return nil, matrixErrorf(opScaleCols, err)
+			}
 		}
 	}
 
@@ -280,7 +330,10 @@ func ewScaleRows(X Matrix, scale []float64) (Matrix, error) {
 			if err != nil {
 				return nil, matrixErrorf(opScaleRows, err)
 			}
-			_ = out.Set(i, j, v*sf)
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v*sf); err != nil {
+				return nil, matrixErrorf(opScaleRows, err)
+			}
 		}
 	}
 
@@ -323,7 +376,7 @@ func ewReplaceInfNaN(X Matrix, val float64) (Matrix, error) {
 		return nil, matrixErrorf(opReplaceInfNaN, err)
 	}
 	// Validate 'val' is finite per numeric policy.
-	if math.IsNaN(val) || math.IsInf(val, 0) {
+	if isNonFinite(val) {
 		return nil, matrixErrorf(opReplaceInfNaN, ErrNaNInf)
 	}
 	// Read shape and allocate result.
@@ -340,7 +393,7 @@ func ewReplaceInfNaN(X Matrix, val float64) (Matrix, error) {
 		for idx := 0; idx < n; idx++ {
 			v = d.data[idx] // read element
 			// Replace if not finite.
-			if math.IsNaN(v) || math.IsInf(v, 0) {
+			if isNonFinite(v) {
 				v = val
 			}
 			out.data[idx] = v // write element
@@ -357,10 +410,13 @@ func ewReplaceInfNaN(X Matrix, val float64) (Matrix, error) {
 			if err != nil {
 				return nil, matrixErrorf(opReplaceInfNaN, err)
 			}
-			if math.IsNaN(v) || math.IsInf(v, 0) {
+			if isNonFinite(v) {
 				v = val
 			}
-			_ = out.Set(i, j, v) // bounds-safe write
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v); err != nil {
+				return nil, matrixErrorf(opReplaceInfNaN, err)
+			}
 		}
 	}
 
@@ -402,14 +458,14 @@ func ewClipRange(X Matrix, lo, hi float64) (Matrix, error) {
 	if err := ValidateNotNil(X); err != nil {
 		return nil, matrixErrorf(opClip, err)
 	}
-	// Require finite bounds (respect package numeric policy).
-	if math.IsNaN(lo) || math.IsNaN(hi) || math.IsInf(lo, 0) || math.IsInf(hi, 0) {
-		return nil, matrixErrorf(opClip, ErrNaNInf)
+
+	// Normalize and validate bounds using canonical helper.
+	var err error
+	lo, hi, err = validateBounds(lo, hi)
+	if err != nil {
+		return nil, matrixErrorf(opClip, err)
 	}
-	// Normalize bound order to avoid surprising errors.
-	if lo > hi {
-		lo, hi = hi, lo // swap
-	}
+
 	// Read shape and allocate output.
 	r, c := X.Rows(), X.Cols()
 	out, err := NewDense(r, c)
@@ -447,7 +503,10 @@ func ewClipRange(X Matrix, lo, hi float64) (Matrix, error) {
 			} else if v > hi {
 				v = hi
 			}
-			_ = out.Set(i, j, v)
+			// Set() may fail (bounds, policy). Never ignore the error.
+			if err = out.Set(i, j, v); err != nil {
+				return nil, matrixErrorf(opClip, err)
+			}
 		}
 	}
 
@@ -486,48 +545,42 @@ func ewClipRange(X Matrix, lo, hi float64) (Matrix, error) {
 // AI-Hints:
 //   - Use small but non-zero atol for exact-equality comparisons on float data.
 func ewAllClose(a, b Matrix, rtol, atol float64) (bool, error) {
-	// Normalize tolerances to non-negative values (negative inputs are accepted but abs-ed).
-	if math.IsNaN(rtol) || math.IsNaN(atol) || math.IsInf(rtol, 0) || math.IsInf(atol, 0) {
-		return false, matrixErrorf(opAllClose, ErrNaNInf) // invalid tolerance
+	// Normalize tolerances via canonical helper (reject NaN/Inf; accept negatives as abs()).
+	var err error
+	rtol, err = validateTol(rtol)
+	if err != nil {
+		return false, matrixErrorf(opAllClose, err)
 	}
-	if rtol < 0 {
-		rtol = -rtol
-	}
-	if atol < 0 {
-		atol = -atol
+	atol, err = validateTol(atol)
+	if err != nil {
+		return false, matrixErrorf(opAllClose, err)
 	}
 
 	// Validate presence and shape equality using central validators.
-	if err := ValidateNotNil(a); err != nil {
+	if err = ValidateNotNil(a); err != nil {
 		return false, matrixErrorf(opAllClose, err)
 	}
-	if err := ValidateNotNil(b); err != nil {
+	if err = ValidateNotNil(b); err != nil {
 		return false, matrixErrorf(opAllClose, err)
 	}
-	if err := ValidateSameShape(a, b); err != nil {
+	if err = ValidateSameShape(a, b); err != nil {
 		return false, matrixErrorf(opAllClose, err)
 	}
 
 	// Read shape once (O(1)).
 	r, c := a.Rows(), a.Cols()
-
+	// Zero-size matrices of identical shape are trivially close.
+	if r == 0 || c == 0 {
+		return true, nil
+	}
 	// Dense fast-path: operate over flat slices when both are *Dense.
 	if da, okA := a.(*Dense); okA {
 		if db, okB := b.(*Dense); okB {
 			n := r * c // total number of elements
-			var diff, absb float64
 			for idx := 0; idx < n; idx++ {
 				// Compute absolute difference and RHS tolerance bound.
-				diff = da.data[idx] - db.data[idx]
-				if diff < 0 {
-					diff = -diff
-				} // |a-b|
-				absb = db.data[idx]
-				if absb < 0 {
-					absb = -absb
-				} // |b|
 				// Check |a-b| ≤ atol + rtol*|b|.
-				if diff > (atol + rtol*absb) {
+				if !allCloseElem(da.data[idx], db.data[idx], rtol, atol) {
 					return false, nil // early-exit on first violation
 				}
 			}
@@ -538,21 +591,19 @@ func ewAllClose(a, b Matrix, rtol, atol float64) (bool, error) {
 
 	// Generic fallback via At (bounds-safe; still deterministic).
 	var i, j int
-	var av, bv, diff, absb float64
+	var av, bv float64
 	for i = 0; i < r; i++ {
 		for j = 0; j < c; j++ {
-			av, _ = a.At(i, j) // read a(i,j)
-			bv, _ = b.At(i, j) // read b(i,j)
-			diff = av - bv     // difference
-			if diff < 0 {
-				diff = -diff
-			} // abs
-			absb = bv
-			if absb < 0 {
-				absb = -absb
-			} // abs
-			// Compare to tolerance threshold.
-			if diff > (atol + rtol*absb) {
+			av, err = a.At(i, j) // read a(i,j)
+			if err != nil {
+				return false, matrixErrorf(opAllClose, err)
+			}
+			bv, err = b.At(i, j) // read b(i,j)
+			if err != nil {
+				return false, matrixErrorf(opAllClose, err)
+			}
+			if !allCloseElem(av, bv, rtol, atol) {
+				// Compare to tolerance threshold.
 				return false, nil
 			}
 		}

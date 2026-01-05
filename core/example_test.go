@@ -85,7 +85,7 @@ func ExampleGraph_Advanced() {
 	// Identify the loop:
 	fmt.Println("Self-loop ID:", loopID)
 
-	// Output (order may vary by ID but sorted above):
+	// Output:
 	// All edge IDs: [e1 e2 e3]
 	// e1 weight=5
 	// e2 weight=7

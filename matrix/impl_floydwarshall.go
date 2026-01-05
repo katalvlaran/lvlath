@@ -24,7 +24,7 @@ import (
 // Operation name constants for unified error wrapping and reducing magic strings.
 const opFloydWarshall = "FloydWarshall"
 
-// initDistancesInPlace CONVERTS adjacency (0 / w) to a distance matrix in-place.
+// InitDistancesInPlace CONVERTS adjacency (0 / w) to a distance matrix in-place.
 // Implementation:
 //   - Stage 1: validate square shape (rows==cols), otherwise ErrDimensionMismatch.
 //   - Stage 2: row-major rewrite: diag=0; off-diagonal 0 → +Inf; non-zero stays unchanged.
@@ -52,29 +52,64 @@ const opFloydWarshall = "FloydWarshall"
 //
 // AI-Hints:
 //   - Use when starting from 0/weight adjacency; then run FloydWarshall.
-func initDistancesInPlace(mat *Dense) error {
+func InitDistancesInPlace(mat *Dense) error {
+	// Guard nil pointer to preserve "no panics" discipline even for internal helpers.
+	if mat == nil {
+		return fmt.Errorf("initDistancesInPlace: nil matrix: %w", ErrNilMatrix)
+	}
 	r, c := mat.Rows(), mat.Cols()
 	if r != c {
-		return fmt.Errorf("initDistancesInPlace: non-square %dx%d: %w", r, c, ErrDimensionMismatch)
+		return fmt.Errorf("InitDistancesInPlace: non-square %dx%d: %w", r, c, ErrDimensionMismatch)
 	}
 
 	// Rewrite values row-by-row in a fixed order for determinism.
 	var i, j int
 	var v float64
+	var err error
 	for i = 0; i < r; i++ {
 		for j = 0; j < c; j++ {
 			if i == j {
-				// Distance from a node to itself is zero.
-				if err := mat.Set(i, j, 0.0); err != nil {
-					return fmt.Errorf("initDistancesInPlace: Set(%d,%d,0): %w", i, j, err)
+				// Diagonal initialization:
+				//   - Base rule: dist(i,i) starts at 0.
+				//   - If an explicit self-loop with negative weight exists, it must be preserved:
+				//       dist(i,i) = min(0, w_loop) = w_loop when w_loop < 0.
+				v, err = mat.At(i, j) // read current diagonal value (may contain loop weight)
+				if err != nil {
+					return fmt.Errorf("initDistancesInPlace: At(%d,%d): %w", i, j, err)
 				}
+				// Reject non-finite values early; distances use +Inf only off-diagonal.
+				if isNonFinite(v) {
+					return fmt.Errorf("initDistancesInPlace: invalid diagonal [%d,%d]=%v: %w", i, j, v, ErrInvalidWeight)
+				}
+				// Keep negative self-loop weight; otherwise enforce 0.
+				if v < 0.0 {
+					if err = mat.Set(i, j, v); err != nil {
+						return fmt.Errorf("initDistancesInPlace: Set(%d,%d,%v): %w", i, j, v, err)
+					}
+				} else {
+					if err = mat.Set(i, j, 0.0); err != nil {
+						return fmt.Errorf("initDistancesInPlace: Set(%d,%d,0): %w", i, j, err)
+					}
+				}
+
 				continue
 			}
-			// Read current adjacency value.
-			v, _ = mat.At(i, j) // safe after shape validation
+
+			// Off-diagonal rewrite:
+			//   - adjacency 0 means "no edge" -> convert to +Inf ("no path" sentinel)
+			//   - non-zero finite values are direct edges and must remain as-is
+			//   - +Inf is allowed and left unchanged (idempotent initialization)
+			v, err = mat.At(i, j) // read current adjacency value
+			if err != nil {
+				return fmt.Errorf("initDistancesInPlace: At(%d,%d): %w", i, j, err)
+			}
+			// Reject NaN and -Inf; +Inf is only meaningful as "no path" sentinel.
+			if isNaNOrNegInf(v) {
+				return fmt.Errorf("initDistancesInPlace: invalid entry [%d,%d]=%v: %w", i, j, v, ErrInvalidWeight)
+			}
+			// Convert absent edge marker into distance sentinel.
 			if v == 0.0 {
-				// No direct edge: set +Inf to represent "no path" initially.
-				if err := mat.Set(i, j, math.Inf(1)); err != nil {
+				if err = mat.Set(i, j, math.Inf(1)); err != nil {
 					return fmt.Errorf("initDistancesInPlace: Set(%d,%d,+Inf): %w", i, j, err)
 				}
 			}

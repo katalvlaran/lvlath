@@ -250,7 +250,7 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 	t.Parallel()
 
 	// Prepare a directed graph allowing multi-edges, two identical parallel edges v0->v1
-	g := core.NewGraph(core.WithDirected(true), core.WithMultiEdges())
+	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 	_ = g.AddVertex("v0")
 	_ = g.AddVertex("v1")
 	if _, err := g.AddEdge("v0", "v1", 10); err != nil {
@@ -269,6 +269,14 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 		t.Fatalf("EdgeCount (disallow): got %d (err=%v), want 1", got, err)
 	}
 
+	// First-edge-wins: the surviving column must correspond to the first inserted edge (weight=10).
+	if len(imDis.Edges) != 1 {
+		t.Fatalf("Edges (disallow): got len=%d, want 1", len(imDis.Edges))
+	}
+	if imDis.Edges[0].Weight != 10 {
+		t.Fatalf("first-edge-wins: got weight=%v, want 10", imDis.Edges[0].Weight)
+	}
+
 	// AllowMulti ⇒ two columns
 	imAllow, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowMulti()))
 	if err != nil {
@@ -277,13 +285,20 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 	if got, err := imAllow.EdgeCount(); err != nil || got != 2 {
 		t.Fatalf("EdgeCount (allow): got %d (err=%v), want 2", got, err)
 	}
+	// First-edge-wins: the surviving column must correspond to the first inserted edge (weight=10).
+	if len(imDis.Edges) != 1 {
+		t.Fatalf("Edges (disallow): got len=%d, want 1", len(imDis.Edges))
+	}
+	if imDis.Edges[0].Weight != 10 {
+		t.Fatalf("first-edge-wins: got weight=%v, want 10", imDis.Edges[0].Weight)
+	}
 }
 
 // Undirected self-loop must be represented as +2 in the incident row.
 func TestIncidence_UndirectedLoop_Plus2(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithLoops())
+	g := core.NewGraph(core.WithLoops(), core.WithWeighted())
 	_ = g.AddVertex("x")
 	if _, err := g.AddEdge("x", "x", 1); err != nil {
 		t.Fatalf("AddEdge loop: %v", err)
@@ -317,7 +332,7 @@ func TestIncidence_UndirectedLoop_Plus2(t *testing.T) {
 func TestIncidence_DirectedLoop_SkippedColumn(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithLoops())
+	g := core.NewGraph(core.WithDirected(true), core.WithLoops(), core.WithWeighted())
 	_ = g.AddVertex("x")
 	if _, err := g.AddEdge("x", "x", 1); err != nil {
 		t.Fatalf("AddEdge loop: %v", err)
@@ -401,7 +416,7 @@ func TestIncidence_NilReceiver_Errors(t *testing.T) {
 func TestIncidence_Counts_DimensionMismatch(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
+	g := core.NewGraph(core.WithWeighted())
 	for _, id := range []string{"v0", "v1", "v2"} {
 		_ = g.AddVertex(id)
 	}

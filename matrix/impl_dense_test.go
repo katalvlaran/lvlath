@@ -13,14 +13,63 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// TestNewDenseInvalidDimensions ensures that NewDense rejects non-positive dimensions.
+// TestNewDenseInvalidDimensions ensures that NewDense rejects negative dimensions
+// but accepts zero-sized shapes.
 func TestNewDenseInvalidDimensions(t *testing.T) {
-	if _, err := matrix.NewDense(0, 5); !errors.Is(err, matrix.ErrInvalidDimensions) {
-		t.Fatalf("rows=0 must fail with ErrInvalidDimensions; got %v", err)
+	// Negative rows.
+	if _, err := matrix.NewDense(-1, 5); !errors.Is(err, matrix.ErrInvalidDimensions) {
+		t.Fatalf("rows=-1 must fail with ErrInvalidDimensions; got %v", err)
 	}
-	if _, err := matrix.NewDense(5, 0); !errors.Is(err, matrix.ErrInvalidDimensions) {
-		t.Fatalf("cols=0 must fail with ErrInvalidDimensions; got %v", err)
+	// Negative cols.
+	if _, err := matrix.NewDense(5, -1); !errors.Is(err, matrix.ErrInvalidDimensions) {
+		t.Fatalf("cols=-1 must fail with ErrInvalidDimensions; got %v", err)
 	}
+
+	// Zero-sized shapes are legal and must not fail.
+	if _, err := matrix.NewDense(0, 5); err != nil {
+		t.Fatalf("rows=0 must be allowed; got %v", err)
+	}
+	if _, err := matrix.NewDense(5, 0); err != nil {
+		t.Fatalf("cols=0 must be allowed; got %v", err)
+	}
+	if _, err := matrix.NewDense(0, 0); err != nil {
+		t.Fatalf("0x0 must be allowed; got %v", err)
+	}
+}
+
+func TestNewDenseDefaultZero(t *testing.T) {
+	t.Run("NonZeroShapes", func(t *testing.T) {
+		m, err := matrix.NewDense(3, 4)
+		if err != nil {
+			t.Fatalf("NewDense(3,4): %v", err)
+		}
+		// immediately after creation all elements should be 0
+		var i, j int // loop iterators
+		var v float64
+		for i = 0; i < m.Rows(); i++ {
+			for j = 0; j < m.Cols(); j++ {
+				v, err = m.At(i, j)
+				if err != nil {
+					t.Fatalf("At(%d,%d): %v", i, j, err)
+				}
+				if v != 0.0 {
+					t.Fatalf("default value at (%d,%d) must be 0; got %v", i, j, v)
+				}
+			}
+		}
+	})
+
+	t.Run("ZeroSizedShapes", func(t *testing.T) {
+		if m, err := matrix.NewDense(0, 5); err != nil || m.Rows() != 0 || m.Cols() != 5 {
+			t.Fatalf("0x5: got (%d,%d), err=%v", m.Rows(), m.Cols(), err)
+		}
+		if m, err := matrix.NewDense(5, 0); err != nil || m.Rows() != 5 || m.Cols() != 0 {
+			t.Fatalf("5x0: got (%d,%d), err=%v", m.Rows(), m.Cols(), err)
+		}
+		if m, err := matrix.NewDense(0, 0); err != nil || m.Rows() != 0 || m.Cols() != 0 {
+			t.Fatalf("0x0: got (%d,%d), err=%v", m.Rows(), m.Cols(), err)
+		}
+	})
 }
 
 // TestRowsColsShape verifies that Rows/Cols/Shape return correct dimensions.
@@ -100,6 +149,118 @@ func TestNaNInfPolicy(t *testing.T) {
 	}
 }
 
+// TestFill_Basic
+func TestFill_Basic(t *testing.T) {
+	m, err := matrix.NewDense(2, 3)
+	if err != nil {
+		t.Fatalf("NewDense: %v", err)
+	}
+	data := []float64{1, 2, 3, 4, 5, 6}
+	if err = m.Fill(data); err != nil {
+		t.Fatalf("Fill: %v", err)
+	}
+	want := [][]float64{{1, 2, 3}, {4, 5, 6}}
+	var i, j int // loop iterators
+	var got float64
+	for i = 0; i < m.Rows(); i++ {
+		for j = 0; j < m.Cols(); j++ {
+			got, err = m.At(i, j)
+			if err != nil {
+				t.Fatalf("At(%d,%d): %v", i, j, err)
+			}
+			if got != want[i][j] {
+				t.Fatalf("Fill mismatch at (%d,%d): got %v, want %v", i, j, got, want[i][j])
+			}
+		}
+	}
+}
+
+// TestFill_ZeroSize
+func TestFill_ZeroSize(t *testing.T) {
+	// 0x0
+	m0, err := matrix.NewDense(0, 0)
+	if err != nil {
+		t.Fatalf("NewDense(0,0): %v", err)
+	}
+	if err = m0.Fill([]float64{}); err != nil {
+		t.Fatalf("Fill(0x0): %v", err)
+	}
+
+	// 0x3
+	m1, err := matrix.NewDense(0, 3)
+	if err != nil {
+		t.Fatalf("NewDense(0,3): %v", err)
+	}
+	if err = m1.Fill([]float64{}); err != nil {
+		t.Fatalf("Fill(0x3): %v", err)
+	}
+
+	// 3x0
+	m2, err := matrix.NewDense(3, 0)
+	if err != nil {
+		t.Fatalf("NewDense(3,0): %v", err)
+	}
+	if err = m2.Fill([]float64{}); err != nil {
+		t.Fatalf("Fill(3x0): %v", err)
+	}
+}
+
+// TestFill_InvalidLength
+func TestFill_InvalidLength(t *testing.T) {
+	m, err := matrix.NewDense(2, 2)
+	if err != nil {
+		t.Fatalf("NewDense: %v", err)
+	}
+	// Expect ErrInvalidDimensions for mismatched length.
+	if err = matrix.ExportedDenseFill(m, []float64{1, 2, 3}); !errors.Is(err, matrix.ErrInvalidDimensions) {
+		t.Fatalf("Fill invalid length: expected ErrInvalidDimensions, got %v", err)
+	}
+}
+
+// TestFill_PolicyEnforced ensures Fill enforces the same numeric policy as Set:
+//   - NaN and -Inf are always rejected under validation.
+//   - +Inf is rejected by default, but allowed when allowInfDistances=true.
+func TestFill_PolicyEnforced(t *testing.T) {
+	t.Run("DefaultPolicyRejectsInf", func(t *testing.T) {
+		m, err := matrix.NewDense(1, 2)
+		if err != nil {
+			t.Fatalf("NewDense: %v", err)
+		}
+		// +Inf must be rejected by default policy.
+		if err = m.Fill([]float64{math.Inf(1), 0}); !errors.Is(err, matrix.ErrNaNInf) {
+			t.Fatalf("Fill +Inf (default policy): expected ErrNaNInf, got %v", err)
+		}
+		// NaN must be rejected by default policy.
+		if err = m.Fill([]float64{math.NaN(), 0}); !errors.Is(err, matrix.ErrNaNInf) {
+			t.Fatalf("Fill NaN (default policy): expected ErrNaNInf, got %v", err)
+		}
+		// -Inf must be rejected by default policy.
+		if err = m.Fill([]float64{math.Inf(-1), 0}); !errors.Is(err, matrix.ErrNaNInf) {
+			t.Fatalf("Fill -Inf (default policy): expected ErrNaNInf, got %v", err)
+		}
+	})
+
+	t.Run("AllowInfDistancesAcceptsPosInf", func(t *testing.T) {
+		// Allocate with explicit distance policy to allow +Inf.
+		m, err := matrix.NewPreparedDense(1, 2, matrix.WithAllowInfDistances())
+		if err != nil {
+			t.Fatalf("NewPreparedDense: %v", err)
+		}
+		// +Inf must be accepted under allowInfDistances.
+		if err = m.Fill([]float64{math.Inf(1), 0}); err != nil {
+			t.Fatalf("Fill +Inf (allowInfDistances): %v", err)
+		}
+		// Read back and confirm the sentinel is preserved.
+		v, err := m.At(0, 0)
+		if err != nil {
+			t.Fatalf("At: %v", err)
+		}
+		if !math.IsInf(v, 1) {
+			t.Fatalf("expected +Inf stored at (0,0), got %v", v)
+		}
+	})
+}
+
 // TestCloneIndependence ensures Clone produces an independent deep copy
 // and preserves numeric policy (strict by default).
 func TestCloneIndependence(t *testing.T) {
@@ -129,6 +290,23 @@ func TestCloneIndependence(t *testing.T) {
 	// Policy preservation: default is strict, so ErrNaNInf on clone too.
 	if err = clone.Set(0, 1, math.NaN()); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("clone NaN policy: expected ErrNaNInf, got %v", err)
+	}
+}
+
+// TestClone_PreservesAllowInfDistances ensures distance-policy survives cloning.
+func TestClone_PreservesAllowInfDistances(t *testing.T) {
+	m, err := matrix.NewPreparedDense(1, 2, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+	// Store +Inf (must succeed under distance policy).
+	if err = m.Set(0, 0, math.Inf(1)); err != nil {
+		t.Fatalf("Set +Inf: %v", err)
+	}
+	clone := m.Clone()
+	// Clone must still allow +Inf writes (policy preservation).
+	if err = clone.Set(0, 1, math.Inf(1)); err != nil {
+		t.Fatalf("clone.Set +Inf: %v", err)
 	}
 }
 
@@ -249,6 +427,43 @@ func TestInducedCoversZeroSizedAndBounds(t *testing.T) {
 	}
 }
 
+// TestView_PolicyEnforced ensures MatrixView.Set respects the base allowInfDistances policy.
+func TestView_PolicyEnforced(t *testing.T) {
+	t.Run("DefaultPolicyRejectsInf", func(t *testing.T) {
+		m, err := matrix.NewDense(2, 2)
+		if err != nil {
+			t.Fatalf("NewDense: %v", err)
+		}
+		vw, err := m.View(0, 0, 2, 2)
+		if err != nil {
+			t.Fatalf("View: %v", err)
+		}
+		if err = vw.Set(0, 0, math.Inf(1)); !errors.Is(err, matrix.ErrNaNInf) {
+			t.Fatalf("view.Set +Inf (default): expected ErrNaNInf, got %v", err)
+		}
+	})
+	t.Run("AllowInfDistancesAcceptsPosInf", func(t *testing.T) {
+		m, err := matrix.NewPreparedDense(2, 2, matrix.WithAllowInfDistances())
+		if err != nil {
+			t.Fatalf("NewPreparedDense: %v", err)
+		}
+		vw, err := m.View(0, 0, 2, 2)
+		if err != nil {
+			t.Fatalf("View: %v", err)
+		}
+		if err = vw.Set(0, 0, math.Inf(1)); err != nil {
+			t.Fatalf("view.Set +Inf (allowInfDistances): %v", err)
+		}
+		got, err := m.At(0, 0)
+		if err != nil {
+			t.Fatalf("At: %v", err)
+		}
+		if !math.IsInf(got, 1) {
+			t.Fatalf("expected base(0,0)=+Inf, got %v", got)
+		}
+	})
+}
+
 // TestApplyAndDo ensures Apply enforces numeric policy and Do iterates deterministically.
 func TestApplyAndDo(t *testing.T) {
 	m, err := matrix.NewDense(2, 2)
@@ -285,9 +500,29 @@ func TestApplyAndDo(t *testing.T) {
 	seen := 0
 	m.Do(func(i, j int, v float64) bool {
 		seen++
-		return seen < 3 // stop after visiting 2 elements
+		return seen < 2 // stop after visiting 2 elements
 	})
 	if seen != 2 {
 		t.Fatalf("Do early-stop: visited %d elements, want 2", seen)
+	}
+}
+
+// TestApply_AllowsPosInfWhenConfigured ensures Apply does not reject +Inf
+// when allowInfDistances is enabled (distance-policy matrices).
+func TestApply_AllowsPosInfWhenConfigured(t *testing.T) {
+	m, err := matrix.NewPreparedDense(1, 2, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+	// Seed with +Inf and finite.
+	if err = m.Set(0, 0, math.Inf(1)); err != nil {
+		t.Fatalf("Set +Inf: %v", err)
+	}
+	if err = m.Set(0, 1, 1.0); err != nil {
+		t.Fatalf("Set finite: %v", err)
+	}
+	// Identity Apply must not fail on +Inf under distance policy.
+	if err = m.Apply(func(i, j int, v float64) float64 { return v }); err != nil {
+		t.Fatalf("Apply identity (allowInfDistances): %v", err)
 	}
 }

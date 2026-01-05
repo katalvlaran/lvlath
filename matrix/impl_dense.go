@@ -32,6 +32,7 @@ const (
 	ctxAt     = "At"      // method tag used in error wrappers
 	ctxSet    = "Set"     // method tag used in error wrappers
 	ctxApply  = "Apply"   // method tag used in error wrappers
+	ctxFill   = "Fill"    // method tag used in error wrappers
 	ctxView   = "View"    // ctor tag for Dense.View
 	ctxInduce = "Induced" // ctor/tag for Dense.Induced
 )
@@ -74,14 +75,81 @@ func denseErrorf(method string, row, col int, err error) error {
 	return fmt.Errorf("Dense.%s(%d,%d): %w", method, row, col, err)
 }
 
-// Dense is a concrete row-major matrix.
-//   - r,c hold dimensions (rows, cols).
-//   - data is a flat buffer of length r*c in row-major order (offset = i*c + j).
-//   - validateNaNInf enables optional NaN/Inf rejection in Set (policy default from options.go).
+// validateValue validates v against the receiver's numeric policy.
+// Implementation:
+//   - Stage 1: If validateNaNInf is disabled, accept any value.
+//   - Stage 2: Reject NaN and -Inf unconditionally when validation is enabled.
+//   - Stage 3: Allow +Inf only when allowInfDistances is enabled.
+//
+// Behavior highlights:
+//   - Single source of truth for all write paths (Set/Apply/View/Fill).
+//
+// Inputs:
+//   - v: candidate value to be stored.
+//
+// Returns:
+//   - error: nil if acceptable; ErrNaNInf otherwise.
+//
+// Determinism:
+//   - Pure function w.r.t. receiver flags; no side effects.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This function intentionally does NOT wrap errors with coordinates;
+//     callers wrap at the nearest site for precise context.
+//
+// AI-Hints:
+//   - Reuse this helper for any new write path to keep policy consistent.
+func (m *Dense) validateValue(v float64) error {
+	// Accept everything when validation is explicitly disabled.
+	if !m.validateNaNInf {
+		return nil
+	}
+	// Reject NaN and -Inf deterministically under validation.
+	if isNaNOrNegInf(v) {
+		return ErrNaNInf
+	}
+	// Allow +Inf only for distance-policy matrices.
+	if math.IsInf(v, 1) && !m.allowInfDistances {
+		return ErrNaNInf
+	}
+
+	// All other values are acceptable under the policy.
+	return nil
+}
+
+// Dense is a contiguous row-major matrix implementation.
+// Implementation:
+//   - Stage 1: Store shape (r,c) and data buffer (len=r*c).
+//   - Stage 2: Enforce numeric policy on Set() (and any other write path).
+//
+// Behavior highlights:
+//   - Deterministic indexing: idx = i*cols + j.
+//   - Numeric policy is per-instance (no globals).
+//
+// Determinism:
+//   - Deterministic for fixed inputs.
+//
+// Notes:
+//   - validateNaNInf and allowInfDistances together define what Set() accepts.
+//
+// AI-Hints:
+//   - Use WithAllowInfDistances only for distance-policy matrices (APSP/MetricClosure).
 type Dense struct {
-	r, c           int       // row and column counts (>=0; zero allowed only for internal zero-OK constructors)
-	data           []float64 // contiguous row-major storage (len == r*c)
-	validateNaNInf bool      // numeric guard: reject NaN/Inf in Set when true
+	// r (rows) is the number of rows in the matrix (>= 0).
+	r int
+	// c (columns) is the number of columns in the matrix (>= 0).
+	c int
+	// data stores row-major values: data[i*cols+j].
+	data []float64
+	// validateNaNInf rejects NaN and infinities on Set() when true.
+	validateNaNInf bool
+	// allowInfDistances permits +Inf on Set() when validateNaNInf is true.
+	// IMPORTANT:
+	//   - NaN and -Inf remain rejected under validation.
+	allowInfDistances bool
 }
 
 // Compile-time assertions for interface & fmt.Stringer conformance.
@@ -92,155 +160,183 @@ var (
 
 // NewDense creates an r×c zero matrix using row-major storage.
 // MAIN DESCRIPTION:
-//   - Public constructor for Dense with strict shape validation and default numeric policy.
+//   - Public constructor for Dense with non-negative shape validation
+//     and the default numeric policy.
+//   - Zero-sized matrices (0×N, N×0, 0×0) are legal and represented
+//     by a nil backing slice.
 //
 // Implementation:
-//   - Stage 1: validate rows>0 && cols>0; else ErrInvalidDimensions.
-//   - Stage 2: allocate zero-filled buffer and initialize policy.
-//   - Stage 3: set numeric policy from defaults.
+//   - Stage 1: validate rows>=0 && cols>=0; negative dimensions are rejected.
+//   - Stage 2: handle zero-sized matrices as a dedicated fast-path.
+//   - Stage 3: allocate a contiguous zero-filled buffer for non-zero shapes.
 //
 // Behavior highlights:
-//   - No panics on user errors; returns sentinel errors.
-//   - Public constructor forbids empty dimensions to avoid accidental 0×0 matrices.
+//   - Never panics on user errors; returns sentinel errors instead.
+//   - Zero-sized matrices are safe to pass into all Dense methods;
+//     bounds checks will prevent any data access.
+//   - Numeric policy (validateNaNInf) defaults from DefaultValidateNaNInf.
 //
 // Inputs:
-//   - rows: positive number of rows
-//   - cols: positive number of columns
+//   - rows: number of rows (may be zero).
+//   - cols: number of columns (may be zero).
 //
 // Returns:
-//   - *Dense: newly allocated matrix.
+//   - *Dense: newly allocated matrix with the requested shape.
+//   - error : ErrInvalidDimensions when rows<0 or cols<0.
 //
 // Errors:
 //   - ErrInvalidDimensions (shape contract violation).
 //
 // Determinism:
 //   - Always allocates the same layout for given (rows, cols).
-//   - Fixed zero initialization; no randomness.
+//   - For zero-sized shapes, data is guaranteed to be nil.
+//
+// Complexity:
+//   - Time O(rows*cols) for non-zero shapes (allocation & zeroing).
+//   - Time O(1) for zero-sized matrices.
+//
+// Notes:
+//   - High-level facades (NewZeros, NewIdentity, APSP helpers) are
+//     responsible for enforcing rows>0 && cols>0 where needed.
+//   - This constructor is suitable for both user code and internal
+//     low-level matrix creation.
+//
+// AI-Hints:
+//   - Use NewDense whenever you need a concrete, owning Dense buffer.
+//   - Zero-sized matrices are often useful as neutral elements in
+//     pipelines; treat them as valid, not as errors.
+func NewDense(rows, cols int) (*Dense, error) {
+	// Reject negative dimensions: they are always invalid.
+	if rows < 0 || cols < 0 {
+		return nil, ErrInvalidDimensions
+	}
+
+	// Zero-sized shapes are legal and represented by a nil buffer.
+	if rows == 0 || cols == 0 {
+		return &Dense{
+			r:                 rows,
+			c:                 cols,
+			data:              nil,                   // no backing storage needed
+			validateNaNInf:    DefaultValidateNaNInf, // default numeric policy
+			allowInfDistances: DefaultAllowInfDistances,
+		}, nil
+	}
+
+	// Non-zero shape: allocate a contiguous flat buffer; make() zero-fills it.
+	buf := make([]float64, rows*cols)
+
+	return &Dense{
+		r:                 rows,
+		c:                 cols,
+		data:              buf,
+		validateNaNInf:    DefaultValidateNaNInf,
+		allowInfDistances: DefaultAllowInfDistances,
+	}, nil
+}
+
+// newDenseWithPolicy constructs a Dense matrix with an explicit NaN/Inf policy.
+// Implementation:
+//   - Stage 1: Validate dimensions (r,c >= 0).
+//   - Stage 2: Fast-path zero-sized shapes (nil buffer).
+//   - Stage 3: Allocate row-major buffer.
+//
+// Behavior highlights:
+//   - Hot-path friendly: avoids option parsing for internal builders.
+//
+// Inputs:
+//   - rows, cols: matrix dimensions, must be >= 0.
+//   - validateNaNInf: whether Dense.Set should reject NaN/±Inf values.
+//   - allowInfDistances: allow +Inf on Set() when validateNaNInf is true.
+//
+// Returns:
+//   - *Dense: allocated matrix.
+//
+// Errors:
+//   - ErrInvalidDimensions: if r < 0 or c < 0.
+//
+// Determinism:
+//   - Deterministic allocation.
 //
 // Complexity:
 //   - Time O(r*c), Space O(r*c).
 //
 // Notes:
-//   - Internal zero-sized cases use NewDenseZeroOK.
+//   - Intended for internal builders (Adjacency/Incidence/MetricClosure).
 //
 // AI-Hints:
-//   - Prefer this ctor for public creation. For subviews, use View().
-func NewDense(rows, cols int) (*Dense, error) {
-	// Validate shape.
-	if rows <= 0 || cols <= 0 {
-		return nil, ErrInvalidDimensions
-	}
-	// Allocate a contiguous flat buffer; make() zero-fills it deterministically.
-	buf := make([]float64, rows*cols)
-
-	return &Dense{
-		r:              rows,
-		c:              cols,
-		data:           buf,
-		validateNaNInf: DefaultValidateNaNInf,
-	}, nil
-}
-
-// NewDenseZeroOK is an internal constructor that allows rows==0 or cols==0.
-// MAIN DESCRIPTION:
-//   - Internal factory for legal 0×N or N×0 shapes used by builders.
-//
-// Implementation:
-//   - Stage 1: validate rows>=0 && cols>=0.
-//   - Stage 2: allocate len(rows*cols) buffer (possibly zero).
-//
-// Behavior highlights:
-//   - Same numeric policy as public constructor.
-//   - Used by builders to produce legal 0×k or k×0 matrices when needed.
-//
-// Inputs:
-//   - rows, cols: non-negative dimensions.
-//
-// Returns:
-//   - *Dense or ErrInvalidDimensions.
-//
-// Complexity:
-//   - Time O(r*c).
-//
-// Inputs:
-//   - rows, cols: non-negative dimensions.
-//
-// Returns:
-//   - *Dense or ErrInvalidDimensions on negatives.
-//
-// Complexity:
-//   - Time O(rows*cols), Space O(rows*cols).
-func NewDenseZeroOK(rows, cols int) (*Dense, error) {
+//   - Use validateNaNInf=true and allowInfDistances=true for APSP/MetricClosure distance matrices.
+func newDenseWithPolicy(rows, cols int, validateNaNInf, allowInfDistances bool) (*Dense, error) {
 	if rows < 0 || cols < 0 {
 		return nil, ErrInvalidDimensions
 	}
-	// Zero-length buffer is legal when rows==0 or cols==0 (len == rows*cols).
+
+	// Represent zero-sized matrices with a nil backing slice (consistent with NewDense).
+	if rows == 0 || cols == 0 {
+		return &Dense{
+			r:                 rows,
+			c:                 cols,
+			data:              nil,               // explicit nil buffer for determinism
+			validateNaNInf:    validateNaNInf,    // store resolved policy
+			allowInfDistances: allowInfDistances, // store resolved policy
+		}, nil
+	}
+	// Prepare: allocate row-major storage (runtime zero-fills).
 	buf := make([]float64, rows*cols)
 
 	return &Dense{
-		r:              rows,
-		c:              cols,
-		data:           buf,
-		validateNaNInf: DefaultValidateNaNInf,
+		r:                 rows,
+		c:                 cols,
+		data:              buf,
+		validateNaNInf:    validateNaNInf,
+		allowInfDistances: allowInfDistances,
 	}, nil
 }
 
-// newDenseWithPolicy constructs a Dense matrix with an explicit NaN/Inf policy.
-// rows and cols must be strictly positive; zero-sized matrices are handled by
-// NewDense directly and are not used in this builder fast-path.
-//
+// NewPreparedDense allocates an r×c Dense matrix and applies numeric policy options.
 // Implementation:
-//   - Stage 1: validate dimensions.
-//   - Stage 2: allocate Dense via NewDense.
-//   - Stage 3: override validateNaNInf according to the requested policy.
+//   - Stage 1: Validate dimensions (r,c >= 0).
+//   - Stage 2: Apply option setters (only numeric policy fields are consumed here).
+//   - Stage 3: Allocate a zeroed row-major buffer and return Dense.
 //
 // Behavior highlights:
-//   - Used only for internal APSP / metric-closure code paths where we need
-//     to relax NaN/Inf checks for +Inf sentinel distances.
+//   - Backwards compatible: callers may pass no options (same as old signature).
+//   - Strict-by-default numeric policy (ValidateNaNInf=true, AllowInfDistances=false).
 //
 // Inputs:
-//   - rows, cols: matrix dimensions, must be > 0.
-//   - validateNaNInf: whether Dense.Set should reject NaN/±Inf values.
+//   - r,c: matrix shape (must be >= 0).
+//   - opts: functional options; only numeric policy is observed by this constructor.
 //
 // Returns:
-//   - *Dense: newly allocated dense matrix with the requested policy.
-//   - error: ErrInvalidDimensions or propagated NewDense error.
+//   - *Dense: allocated matrix with attached policy.
 //
 // Errors:
-//   - ErrInvalidDimensions: rows <= 0 or cols <= 0.
-//   - Any error returned by NewDense.
+//   - ErrInvalidDimensions: if r < 0 or c < 0.
 //
 // Determinism:
-//   - Always allocates a matrix of exactly rows×cols with zeroed data.
+//   - Deterministic allocation and configuration.
 //
 // Complexity:
-//   - Time O(rows*cols) due to allocation and zeroing,
-//   - Space O(rows*cols) for the underlying buffer.
+//   - Time O(r*c) for zeroing by runtime, Space O(r*c).
 //
 // Notes:
-//   - Zero-sized matrices (0×N, N×0, 0×0) are constructed via NewDense
-//     in other call sites; this helper is reserved for APSP paths only.
+//   - This constructor intentionally DOES NOT apply derived invariants such as
+//     "MetricClosure implies AllowInfDistances" because MetricClosure is a builder concern,
+//     not a generic Dense allocation concern.
 //
 // AI-Hints:
-//   - Do not expose this helper in the public API.
-//   - Use it in APSP builders and tests via export_privates_for_test.go only.
-func newDenseWithPolicy(rows, cols int, validateNaNInf bool) (*Dense, error) {
-	if rows <= 0 || cols <= 0 {
-		// Use sentinel, not raw errors.New.
-		return nil, ErrInvalidDimensions
+//   - Use NewPreparedDense(r,c, WithAllowInfDistances()) when you plan to Set(+Inf) as “no path”.
+func NewPreparedDense(rows, cols int, opts ...Option) (*Dense, error) {
+	// Config: start from numeric defaults.
+	cfg := Options{
+		validateNaNInf:    DefaultValidateNaNInf,
+		allowInfDistances: DefaultAllowInfDistances,
 	}
-
-	// Allocate a dense matrix with default options; options that affect
-	// validateNaNInf should be wired in NewDense / MatrixOptions.
-	m, err := NewDense(rows, cols)
-	if err != nil {
-		return nil, err
+	// Execute: apply setters in call order (last-writer-wins).
+	for _, set := range opts {
+		set(&cfg)
 	}
-
-	// Explicitly override the internal NaN/Inf policy for APSP use-cases.
-	m.validateNaNInf = validateNaNInf
-
-	return m, nil
+	// Finalize: allocate with resolved policy.
+	return newDenseWithPolicy(rows, cols, cfg.validateNaNInf, cfg.allowInfDistances)
 }
 
 // Rows returns the row count. No side effects.
@@ -343,11 +439,12 @@ func (m *Dense) At(row, col int) (float64, error) {
 //   - Safe element write with optional finite-only policy.
 //
 // Implementation:
-//   - Stage 1: compute offset via indexOf (bounds check).
-//   - Stage 2: enforce numeric policy (reject NaN/±Inf when enabled).
-//   - Stage 3: write into flat buffer.
+//   - Stage 1: Validate bounds.
+//   - Stage 2: Enforce numeric policy (NaN/-Inf always rejected under validation; +Inf conditional).
+//   - Stage 3: Write into row-major storage.
 //
 // Behavior highlights:
+//   - Strict, local validation; no hidden global toggles.
 //   - Never panics; returns sentinel errors.
 //   - Numeric policy is a per-instance flag preserved by Clone.
 //
@@ -371,21 +468,121 @@ func (m *Dense) At(row, col int) (float64, error) {
 //   - Time O(1), Space O(1).
 //
 // Notes:
+//   - allowInfDistances affects ONLY +Inf acceptance under validation.
 //   - Policy flag is carried by Clone/Induced/View (single source of truth).
+//   - If you need to store NaN/±Inf for sanitizer tests, disable validation explicitly via WithNoValidateNaNInf().
 //
 // AI-Hints:
 //   - Keep policy ON in production data flows; disable only in controlled ingestion.
+//   - If you need to store NaN/±Inf for sanitizer tests, disable validation explicitly via WithNoValidateNaNInf().
 func (m *Dense) Set(row, col int, v float64) error {
+	// Validate: nil receiver must not panic on the public surface.
+	if m == nil {
+		return denseErrorf(ctxSet, row, col, ErrNilMatrix)
+	}
 	off, err := m.indexOf(row, col)
 	if err != nil {
 		return denseErrorf(ctxSet, row, col, err) // wrap with context
 	}
-	// Numeric policy: optional finite-only enforcement.
-	if m.validateNaNInf && (math.IsNaN(v) || math.IsInf(v, 0)) {
-		return denseErrorf(ctxSet, row, col, ErrNaNInf)
-	}
-	m.data[off] = v // direct flat write
 
+	// Validate: enforce numeric policy via the single-source helper.
+	if err = m.validateValue(v); err != nil {
+		return denseErrorf(ctxSet, row, col, err) // keep coordinates for diagnostics
+	}
+	// Execute: direct flat write into row-major storage.
+	m.data[off] = v
+
+	return nil
+}
+
+// Fill MAIN DESCRIPTION (2+ lines, no marketing).
+// Overwrites the entire Dense buffer with the provided row-major slice.
+// Enforces the receiver numeric policy (same rules as Set) to keep invariants consistent.
+//
+// Implementation:
+//   - Stage 1: Validate receiver, shape invariants, and input length.
+//   - Stage 2: Validate every value against the numeric policy in deterministic order.
+//   - Stage 3: Copy into the internal row-major buffer.
+//
+// Behavior highlights:
+//   - Policy-consistent: rejects NaN/-Inf always when validation is enabled; +Inf only if allowInfDistances=true.
+//   - Deterministic: validates and copies in stable row-major order.
+//   - Zero-sized matrices accept an empty slice and become a no-op.
+//
+// Inputs:
+//   - data: flat row-major slice; len(data) must equal Rows()*Cols().
+//
+// Returns:
+//   - error: nil on success.
+//
+// Errors:
+//   - ErrNilMatrix: if receiver is nil.
+//   - ErrInvalidDimensions: if len(data) mismatches shape or receiver invariants are broken.
+//   - ErrNaNInf: if a value violates numeric policy.
+//
+// Determinism:
+//   - Fixed k=0..N-1 traversal; stable failure coordinate.
+//
+// Complexity:
+//   - Time O(r*c), Space O(1) extra.
+//
+// Notes:
+//   - Use distance-policy matrices (WithAllowInfDistances) for APSP/unreachable sentinels (+Inf).
+//   - Use raw-policy matrices (WithNoValidateNaNInf) for ingestion/sanitizer scenarios.
+//
+// AI-Hints:
+//   - Prefer Fill for bulk deterministic ingestion; prefer Set for sparse updates.
+//   - For distance matrices: allocate via NewPreparedDense(..., WithAllowInfDistances()).
+//   - If you intentionally need to allow NaN/±Inf for controlled tests,
+//     disable validation explicitly upstream (WithNoValidateNaNInf()).
+func (d *Dense) Fill(data []float64) error {
+	// Validate: nil receiver must not panic on the public surface.
+	if d == nil {
+		return ErrNilMatrix
+	}
+
+	// Validate: Dense shape must never be negative.
+	if d.r < 0 || d.c < 0 {
+		return ErrInvalidDimensions
+	}
+
+	// Prepare: compute expected total element count.
+	total := d.r * d.c
+
+	// Validate: input length must match shape exactly.
+	if len(data) != total {
+		return ErrInvalidDimensions
+	}
+
+	// Fast-path: zero-area matrices are legal; no backing storage is required.
+	if total == 0 {
+		return nil
+	}
+
+	// Validate: enforce the exact same numeric policy as Set(), in deterministic order.
+	// We map flat index k -> (row, col) for stable diagnostics.
+	if d.validateNaNInf {
+		var k int
+		var row, col int
+		for k = 0; k < total; k++ {
+			if err := d.validateValue(data[k]); err != nil {
+				// Convert linear index to coordinates in a deterministic way.
+				row = k / d.c
+				col = k - row*d.c
+				return denseErrorf(ctxFill, row, col, err)
+			}
+		}
+	}
+
+	// Validate: internal invariant guard to avoid panics on malformed receivers.
+	if len(d.data) != total {
+		return ErrInvalidDimensions
+	}
+
+	// Execute: overwrite the entire buffer deterministically.
+	copy(d.data, data)
+
+	// Finalize: success.
 	return nil
 }
 
@@ -415,14 +612,23 @@ func (m *Dense) Set(row, col int, v float64) error {
 // AI-Hints:
 //   - For structural copy with transform, consider Apply on clone.
 func (m *Dense) Clone() Matrix {
-	cp := make([]float64, len(m.data)) // allocate same length
-	copy(cp, m.data)                   // deep copy bytes
+	// Validate: nil receiver clone should not panic; it has no meaningful result.
+	if m == nil {
+		return nil
+	}
+	// Prepare: preserve the "zero-sized => nil backing slice" invariant for determinism.
+	var cp []float64
+	if len(m.data) != 0 {
+		cp = make([]float64, len(m.data)) // allocate same length
+		copy(cp, m.data)                  // deep copy values
+	}
 
 	return &Dense{
-		r:              m.r,
-		c:              m.c,
-		data:           cp,
-		validateNaNInf: m.validateNaNInf, // preserve guard policy
+		r:                 m.r,
+		c:                 m.c,
+		data:              cp,
+		validateNaNInf:    m.validateNaNInf,    // preserve guard policy
+		allowInfDistances: m.allowInfDistances, // critical for distance-policy matrices
 	}
 }
 
@@ -446,6 +652,11 @@ func (m *Dense) Clone() Matrix {
 // AI-Hints:
 //   - For large matrices prefer printing a few rows/cols or summarize.
 func (m *Dense) String() string {
+	// Guard against nil receiver to avoid accidental panics in diagnostics paths.
+	if m == nil {
+		return "<nil Dense>\n"
+	}
+
 	var b strings.Builder
 	var i, j, base int
 	for i = 0; i < m.r; i++ { // iterate rows deterministically
@@ -498,20 +709,25 @@ func (m *Dense) String() string {
 // AI-Hints:
 //   - Use when the result must be independent (e.g., transform downstream).
 func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
+	// Validate: nil receiver must not panic; report a sentinel instead.
+	if m == nil {
+		return nil, ErrNilMatrix
+	}
 	rp := len(rowsIdx) // result rows
 	cp := len(colsIdx) // result cols
 	// Zero-area: legal Dense, shared policy
 	if rp == 0 || cp == 0 {
 		return &Dense{
-			r:              rp,
-			c:              cp,
-			data:           make([]float64, 0),
-			validateNaNInf: m.validateNaNInf,
+			r:                 rp,
+			c:                 cp,
+			data:              nil, // deterministic nil buffer for zero-sized shape
+			validateNaNInf:    m.validateNaNInf,
+			allowInfDistances: m.allowInfDistances,
 		}, nil
 	}
 
-	// Allocate the result with the strict constructor.
-	res, err := NewDense(rp, cp)
+	// Allocate the result with the same numeric policy as the base matrix.
+	res, err := newDenseWithPolicy(rp, cp, m.validateNaNInf, m.allowInfDistances)
 	if err != nil {
 		return nil, err
 	}
@@ -547,24 +763,40 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 //   - Read-only visitor; stops early when f returns false.
 //
 // Implementation:
-//   - Stage 1: nested loops - double for-loop over rows then cols; compute base offset per row.
-//   - Stage 2: call f on each element; stop when f returns false.
+//   - Stage 1: validate receiver and callback; bail out on nil.
+//   - Stage 2: nested loops over rows and columns in row-major order.
+//   - Stage 3: invoke f for each element and terminate early when it
+//     returns false.
 //
 // Behavior highlights:
-//   - Read-only with respect to the callback; no allocations; deterministic order.
+//   - Read-only with respect to the callback; no allocations.
+//   - Deterministic traversal order: i from 0..Rows()-1, j from 0..Cols()-1.
+//   - Safe for zero-sized matrices (callback is never invoked).
 //
 // Inputs:
-//   - f: callback returning continue/stop flag (false to stop early).
+//   - f: callback that receives coordinates and value; returns false
+//     to signal early termination.
 //
 // Determinism:
-//   - Fixed i→j order.
+//   - Fixed i→j iteration order for all shapes.
 //
 // Complexity:
-//   - Time O(r*c), Space O(1).
+//   - Time O(r*c) in the worst case (when f always returns true).
+//   - Space O(1).
+//
+// Notes:
+//   - For mutation, use Apply instead; Do is intended for aggregation,
+//     statistics, and diagnostics.
 //
 // AI-Hints:
-//   - Use to accumulate stats without temporary allocations.
+//   - Use Do to implement custom reductions (sums, norms, scans) without
+//     allocating intermediate slices or matrices.
 func (m *Dense) Do(f func(i, j int, v float64) bool) {
+	// Guard against nil receiver or callback to avoid accidental panics.
+	if m == nil || f == nil {
+		return
+	}
+
 	var i, j, base int // predeclare loop counters and base offset
 	var v float64      // temporary for current value
 
@@ -611,17 +843,21 @@ func (m *Dense) Do(f func(i, j int, v float64) bool) {
 // AI-Hints:
 //   - Keep transforms pure; avoid capturing external mutable state.
 func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
+	// Validate: nil receiver must not panic on the public surface.
+	if m == nil {
+		return ErrNilMatrix
+	}
 	var i, j, base int // predeclare loop counters and base offset
 	var v, nv float64  // old and new values
 
 	for i = 0; i < m.r; i++ { // iterate rows
 		base = i * m.c            // base offset for row i
 		for j = 0; j < m.c; j++ { // iterate columns
-			v = m.data[base+j]       // read current value
-			nv = f(i, j, v)          // compute new value
-			if m.validateNaNInf && ( // enforce numeric policy if enabled
-			math.IsNaN(nv) || math.IsInf(nv, 0)) {
-				return denseErrorf(ctxApply, i, j, ErrNaNInf) // wrap with coordinates
+			v = m.data[base+j] // read current value
+			nv = f(i, j, v)    // compute new value
+			// Validate: enforce numeric policy via the single-source helper.
+			if err := m.validateValue(nv); err != nil {
+				return denseErrorf(ctxApply, i, j, err) // wrap with coordinates
 			}
 			m.data[base+j] = nv // write back new value
 		}
@@ -662,6 +898,10 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 // AI-Hints:
 //   - Use for sliding-window ops; copy only when lifetime must be independent.
 func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
+	// Validate: nil receiver must not panic; View cannot exist without a base.
+	if m == nil {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrNilMatrix)
+	}
 	if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
 		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
 	}
@@ -707,6 +947,10 @@ func (v *MatrixView) Cols() int { return v.c }
 // Complexity:
 //   - Time O(1), Space O(1).
 func (v *MatrixView) At(i, j int) (float64, error) {
+	// Validate: nil view or nil base must not panic.
+	if v == nil || v.base == nil {
+		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrNilMatrix)
+	}
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
 		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrOutOfRange)
 	}
@@ -715,28 +959,60 @@ func (v *MatrixView) At(i, j int) (float64, error) {
 	return v.base.data[(v.r0+i)*v.base.c+(v.c0+j)], nil
 }
 
-// Set writes element (i,j) in the view, honoring the base numeric policy.
-// MAIN DESCRIPTION:
-//   - Safe write-through into the base buffer with policy enforcement.
+// Set MAIN DESCRIPTION (2+ lines, no marketing).
+// Writes (i,j) in the view and forwards numeric-policy enforcement to the base Dense.
 //
 // Implementation:
-//   - Stage 1: check bounds.
-//   - Stage 2: validate finite when base policy is enabled.
-//   - Stage 3: write-through into base.data.
+//   - Stage 1: Validate receiver/base and bounds in view coordinates.
+//   - Stage 2: Validate value via base numeric policy.
+//   - Stage 3: Translate coordinates and write-through into base storage.
 //
 // Behavior highlights:
-//   - Shares the base Dense policy; no separate flags in the view.
+//   - Deterministic: fixed checks and a single write.
+//   - Policy-consistent: uses base.validateValue exactly once.
+//
+// Inputs:
+//   - i, j: view-local coordinates.
+//   - val : value to store.
+//
+// Returns:
+//   - error: nil on success.
+//
+// Errors:
+//   - ErrNilMatrix: if view or base is nil.
+//   - ErrOutOfRange: if (i,j) is outside the view.
+//   - ErrNaNInf: if value violates base numeric policy.
+//
+// Determinism:
+//   - Stable check order; stable error cause.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
+//
+// Notes:
+//   - View shares storage with base; mutations are visible in the base Dense.
+//
+// AI-Hints:
+//   - Allocate distance-policy bases when the view must allow +Inf.
 func (v *MatrixView) Set(i, j int, val float64) error {
+	// Validate: nil view or nil base must not panic.
+	if v == nil || v.base == nil {
+		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNilMatrix)
+	}
+
+	// Validate: enforce view bounds first (more intuitive error for callers).
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
 		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrOutOfRange)
 	}
-	if v.base.validateNaNInf && (math.IsNaN(val) || math.IsInf(val, 0)) {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNaNInf)
-	}
-	v.base.data[(v.r0+i)*v.base.c+(v.c0+j)] = val // write through
 
+	// Validate: enforce base numeric policy exactly once.
+	if err := v.base.validateValue(val); err != nil {
+		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, err)
+	}
+
+	// Execute: translate to base coordinates and write-through.
+	v.base.data[(v.r0+i)*v.base.c+(v.c0+j)] = val
+
+	// Finalize: success.
 	return nil
 }

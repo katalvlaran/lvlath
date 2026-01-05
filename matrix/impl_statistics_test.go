@@ -10,6 +10,8 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
+const epsTight = 1e-12
+
 // ------------------------------
 // CenterColumns / CenterRows
 // ------------------------------
@@ -45,7 +47,7 @@ func TestCenterColumns_SmallAndFallback(t *testing.T) {
 			sum += MustAt(t, Yf, i, j)
 		}
 		avg = sum / 2
-		if math.Abs(avg) > 1e-12 {
+		if math.Abs(avg) > epsTight {
 			t.Fatalf("col %d not centered: avg=%g", j, avg)
 		}
 	}
@@ -80,7 +82,7 @@ func TestCenterRows_SmallAndFallback(t *testing.T) {
 			sum += MustAt(t, Yf, i, j)
 		}
 		avg = sum / 3
-		if math.Abs(avg) > 1e-12 {
+		if math.Abs(avg) > epsTight {
 			t.Fatalf("row %d not centered: avg=%g", i, avg)
 		}
 	}
@@ -88,8 +90,8 @@ func TestCenterRows_SmallAndFallback(t *testing.T) {
 
 func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 	t.Parallel()
-	// 0×3 and 2×0
-	X1, _ := matrix.NewDenseZeroOK(0, 3)
+
+	X1, _ := matrix.NewDense(0, 3)
 	Y1, m1, err := matrix.CenterColumns(X1)
 	if err != nil {
 		t.Fatalf("0x3: %v", err)
@@ -98,13 +100,35 @@ func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 		t.Fatalf("shape mismatch 0x3")
 	}
 
-	X2, _ := matrix.NewDenseZeroOK(2, 0)
+	X2, _ := matrix.NewDense(2, 0)
 	Y2, m2, err := matrix.CenterColumns(X2)
 	if err != nil {
 		t.Fatalf("2x0: %v", err)
 	}
 	if Y2.Rows() != 2 || Y2.Cols() != 0 || len(m2) != 0 {
 		t.Fatalf("shape mismatch 2x0")
+	}
+}
+
+func TestCenterRows_ZeroSizeSafe(t *testing.T) {
+	t.Parallel()
+
+	X1, _ := matrix.NewDense(0, 3)
+	Y1, m1, err := matrix.CenterRows(X1)
+	if err != nil {
+		t.Fatalf("0x3: %v", err)
+	}
+	if Y1.Rows() != 0 || Y1.Cols() != 3 || len(m1) != 0 {
+		t.Fatalf("shape mismatch 0x3 (row means must be len=rows=0)")
+	}
+
+	X2, _ := matrix.NewDense(2, 0)
+	Y2, m2, err := matrix.CenterRows(X2)
+	if err != nil {
+		t.Fatalf("2x0: %v", err)
+	}
+	if Y2.Rows() != 2 || Y2.Cols() != 0 || len(m2) != 2 {
+		t.Fatalf("shape mismatch 2x0 (row means must be len=rows=2)")
 	}
 }
 
@@ -115,6 +139,7 @@ func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 func TestNormalizeRowsL1_Basics(t *testing.T) {
 	t.Parallel()
 
+	// Row 0 is truly degenerate (all zeros).
 	X := NewFilledDense(t, 3, 3, []float64{
 		0, 0, 0, // zero row
 		1, -1, 3,
@@ -133,7 +158,7 @@ func TestNormalizeRowsL1_Basics(t *testing.T) {
 			t.Fatalf("row0 changed")
 		}
 	}
-	if math.Abs(norms[0]) > 0 {
+	if norms[0] != 0 {
 		t.Fatalf("row0 norm must be 0")
 	}
 	// Check ||row||_1 == 1 (within eps).
@@ -148,7 +173,7 @@ func TestNormalizeRowsL1_Basics(t *testing.T) {
 			}
 			s += v
 		}
-		if math.Abs(s-1) > 1e-12 {
+		if math.Abs(s-1) > epsTight {
 			t.Fatalf("row %d L1=%g, want 1", i, s)
 		}
 	}
@@ -157,15 +182,18 @@ func TestNormalizeRowsL1_Basics(t *testing.T) {
 func TestNormalizeRowsL2_Basics(t *testing.T) {
 	t.Parallel()
 
+	// Row 0 is truly degenerate (all zeros).
 	X := NewFilledDense(t, 2, 3, []float64{
-		0, 0, 0, // zero row
+		0, 0, 0,
 		3, 4, 0, // norm 5
 	})
+
 	Y, norms, err := matrix.NormalizeRowsL2(X)
 	if err != nil {
 		t.Fatalf("NormalizeRowsL2: %v", err)
 	}
-	// row0 remains zeros
+
+	// Row 0 remains zeros and its norm is 0.
 	var j int
 	for j = 0; j < 3; j++ {
 		if MustAt(t, Y, 0, j) != 0 {
@@ -175,14 +203,37 @@ func TestNormalizeRowsL2_Basics(t *testing.T) {
 	if norms[0] != 0 {
 		t.Fatalf("row0 norm want 0, got %g", norms[0])
 	}
-	// row1 becomes unit L2
+
+	// Row 1 becomes unit L2.
 	sq := 0.0
 	for j = 0; j < 3; j++ {
 		v := MustAt(t, Y, 1, j)
 		sq += v * v
 	}
-	if math.Abs(math.Sqrt(sq)-1) > 1e-12 {
+	if math.Abs(math.Sqrt(sq)-1) > epsTight {
 		t.Fatalf("row1 L2 not ~1")
+	}
+}
+
+func TestNormalizeRows_ZeroSizeSafe(t *testing.T) {
+	t.Parallel()
+
+	X1, _ := matrix.NewDense(0, 3)
+	Y1, n1, err := matrix.NormalizeRowsL1(X1)
+	if err != nil {
+		t.Fatalf("L1 0x3: %v", err)
+	}
+	if Y1.Rows() != 0 || Y1.Cols() != 3 || len(n1) != 0 {
+		t.Fatalf("L1 0x3 shape mismatch")
+	}
+
+	X2, _ := matrix.NewDense(2, 0)
+	Y2, n2, err := matrix.NormalizeRowsL2(X2)
+	if err != nil {
+		t.Fatalf("L2 2x0: %v", err)
+	}
+	if Y2.Rows() != 2 || Y2.Cols() != 0 || len(n2) != 2 {
+		t.Fatalf("L2 2x0 shape mismatch")
 	}
 }
 
@@ -221,22 +272,23 @@ func TestCovariance_Symmetric_DiagMatchesVariance(t *testing.T) {
 			}
 		}
 	}
+
 	// diagonal equals sample variance of centered columns
-	// compute directly
 	r := 4
 	// manual var for each column
 	var i int
-	var sum, xij, varj, got float64
+	var sum, xij, d, got float64
 	for j = 0; j < 3; j++ {
 		sum = 0.0
 		for i = 0; i < r; i++ {
 			xij = MustAt(t, X, i, j)
-			sum += (xij - means[j]) * (xij - means[j])
+			d = xij - means[j]
+			sum += d * d
 		}
-		varj = sum / float64(r-1)
+		wantVar := sum / float64(r-1)
 		got = MustAt(t, Cov, j, j)
-		if math.Abs(got-varj) > 1e-12 {
-			t.Fatalf("var[%d]: got=%g want=%g", j, got, varj)
+		if math.Abs(got-wantVar) > epsTight {
+			t.Fatalf("var[%d]: got=%g want=%g", j, got, wantVar)
 		}
 	}
 }
@@ -263,7 +315,7 @@ func TestCovariance_FallbackMatchesFast(t *testing.T) {
 	if err != nil {
 		t.Fatalf("slow: %v", err)
 	}
-	CompareClose(t, Cf, Cs, 1e-12, 1e-12)
+	CompareClose(t, Cf, Cs, epsTight, epsTight)
 }
 
 // ------------------------------
@@ -299,13 +351,14 @@ func TestCorrelation_Basics_DiagAndSymmetry(t *testing.T) {
 			}
 		}
 	}
-	if math.Abs(MustAt(t, Corr, 0, 0)-1) > 1e-12 {
+
+	if math.Abs(MustAt(t, Corr, 0, 0)-1) > epsTight {
 		t.Fatalf("diag[0] != 1")
 	}
-	if math.Abs(MustAt(t, Corr, 1, 1)-1) > 1e-12 {
+	if math.Abs(MustAt(t, Corr, 1, 1)-1) > epsTight {
 		t.Fatalf("diag[1] != 1")
 	}
-	if math.Abs(MustAt(t, Corr, 2, 2)-0) > 1e-12 {
+	if math.Abs(MustAt(t, Corr, 2, 2)-0) > epsTight {
 		t.Fatalf("diag[2] != 0 for degenerate")
 	}
 }
@@ -331,14 +384,14 @@ func TestCorrelation_ScaleInvariance_AndFallback(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Corr(7X): %v", err)
 	}
-	CompareClose(t, C1, C2, 1e-12, 1e-12)
+	CompareClose(t, C1, C2, epsTight, epsTight)
 
 	// Fallback path equality
 	Cs, _, _, err := matrix.Correlation(hide{X})
 	if err != nil {
 		t.Fatalf("Corr slow: %v", err)
 	}
-	CompareClose(t, C1, Cs, 1e-12, 1e-12)
+	CompareClose(t, C1, Cs, epsTight, epsTight)
 }
 
 func TestCorrelation_RowsLessThan2_Error(t *testing.T) {

@@ -95,3 +95,7 @@ var ErrNotSymmetric = ErrAsymmetry // Deprecated: use ErrAsymmetry.
 // ErrEigenFailed historically named the eigen failure sentinel.
 // Alias to unified ErrMatrixEigenFailed for non-breaking migration.
 var ErrEigenFailed = ErrMatrixEigenFailed // Deprecated: use ErrMatrixEigenFailed.
+
+// ErrNotSquare historically named square-shape violation.
+// Alias to unified ErrNonSquare for non-breaking migration.
+var ErrNotSquare = ErrNonSquare // Deprecated: use ErrNonSquare.

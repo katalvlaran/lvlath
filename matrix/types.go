@@ -12,9 +12,9 @@ package matrix
 type VertexID string // string-based ID (stable lex order)
 
 // Weight represents an edge weight for adapters/numeric ingestion.
-// Numeric policy: values MUST be finite. NaN/Inf are rejected by builders
-// and dense storage (see ErrNaNInf). No sign or range restriction is
-// imposed here beyond finiteness.
+// Contract:
+//   - When numeric validation is enabled, values must be finite (no NaN/±Inf).
+//   - No sign or range restriction is imposed here beyond finiteness.
 type Weight float64 // enforced via ValidateNaNInf policy
 
 // pairKey is an ordered pair (u,v) used to de-duplicate parallel edges under
@@ -28,13 +28,17 @@ type pairKey struct {
 }
 
 // Matrix represents a two-dimensional mutable array of float64 values.
-// We KEEP the interface to preserve current callers, while.
 //
-// Rationale:
-//   - Minimal churn (options/errors refactor only).
-//   - Tests and existing impl_* likely depend on the interface.
+// Contract:
+//   - Matrix may be zero-size (0×0, 0×N, N×0).
+//   - At/Set MUST return ErrOutOfRange on invalid indices.
+//   - Set may additionally return ErrNaNInf when numeric policy rejects a value.
+//   - Clone returns a deep copy independent of the original.
 //
-// Complexity notes: all methods are expected O(1) except Clone (O(r*c)).
+// Complexity notes:
+//   - Rows/Cols: O(1)
+//   - At/Set: O(1)
+//   - Clone: expected O(r*c) for dense implementations.
 type Matrix interface {
 	// Rows returns the number of rows in the matrix.
 	// Complexity: O(1).

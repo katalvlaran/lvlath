@@ -66,3 +66,49 @@ type Matrix interface {
 	// Complexity: O(rows*cols).
 	Clone() Matrix
 }
+
+// Nilable MAIN DESCRIPTION (2+ lines, no marketing).
+// Provides an explicit, reflect-free mechanism to treat typed-nil receivers
+// stored inside a Matrix interface as nil during validation.
+//
+// Implementation:
+//   - Stage 1: Callers pass a Matrix interface to validators (e.g., ValidateNotNil).
+//   - Stage 2: If the dynamic value implements Nilable, validators call IsNil().
+//   - Stage 3: If IsNil reports true, validators return ErrNilMatrix.
+//
+// Behavior highlights:
+//   - Avoids reflect in hot, foundational validators.
+//   - Keeps nil-detection O(1) and deterministic.
+//   - Optional: implementations that do not provide IsNil() are treated normally.
+//
+// Inputs:
+//   - (receiver): the concrete Matrix implementation (often a pointer type).
+//
+// Returns:
+//   - bool: true if the receiver should be treated as nil.
+//
+// Errors:
+//   - None. IsNil MUST NOT panic and MUST NOT allocate.
+//
+// Determinism:
+//   - Deterministic and side-effect free (required).
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Go interfaces may hold typed nil pointers:
+//     var d *Dense = nil
+//     var m Matrix = d
+//     m != nil  // true
+//     Nilable allows validators to detect this case without reflect.
+//
+// AI-Hints:
+//   - Implement IsNil() on pointer-backed Matrix types (e.g., *Dense) as:
+//     func (m *T) IsNil() bool { return m == nil }
+//   - Keep IsNil pure and cheap; do not inspect internal buffers or perform deep checks.
+type Nilable interface {
+	// IsNil reports whether the receiver should be treated as nil.
+	// It MUST be side-effect free and deterministic.
+	IsNil() bool
+}

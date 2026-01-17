@@ -52,7 +52,9 @@ func TestFloydWarshall_Errors(t *testing.T) {
 	// non-square → ErrDimensionMismatch
 	ns, _ := matrix.NewDense(3, 4)
 	err = matrix.FloydWarshall(ns)
-	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+
+	//AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, err, matrix.ErrNonSquare)
 }
 
 // Classic CLRS example (5×5, directed, with negative edges but no negative cycles).

@@ -70,6 +70,33 @@ func TestIncidence_Blueprint(t *testing.T) {
 	}
 }
 
+// TestIncidence_EmptyGraph_Degenerate validates that empty graphs are a valid degenerate case.
+func TestIncidence_EmptyGraph_Degenerate(t *testing.T) {
+	t.Parallel()
+
+	g := core.NewGraph()
+	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	if err != nil {
+		t.Fatalf("NewIncidenceMatrix(empty): %v", err)
+	}
+	if im == nil {
+		t.Fatalf("NewIncidenceMatrix(empty) returned nil")
+	}
+
+	// Counts must be 0 without errors.
+	if n, err := im.VertexCount(); err != nil || n != 0 {
+		t.Fatalf("VertexCount(empty): got (%d,%v), want (0,nil)", n, err)
+	}
+	if m, err := im.EdgeCount(); err != nil || m != 0 {
+		t.Fatalf("EdgeCount(empty): got (%d,%v), want (0,nil)", m, err)
+	}
+
+	// Per-vertex query must fail with ErrUnknownVertex (no vertices exist).
+	if _, err := im.VertexIncidence("X"); !errors.Is(err, matrix.ErrUnknownVertex) {
+		t.Fatalf("VertexIncidence(empty): want ErrUnknownVertex, got %v", err)
+	}
+}
+
 // Table-driven coverage for per-vertex incidence rows on a path graph.
 func TestVertexIncidence_TableDriven(t *testing.T) {
 	t.Parallel()

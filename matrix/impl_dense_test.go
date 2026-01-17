@@ -90,6 +90,17 @@ func TestRowsColsShape(t *testing.T) {
 	}
 }
 
+// TestValidateSquare_ErrNonSquare ensures non-square matrices fail with ErrNonSquare.
+func TestValidateSquare_ErrNonSquare(t *testing.T) {
+	m, err := matrix.NewDense(2, 3)
+	if err != nil {
+		t.Fatalf("NewDense: %v", err)
+	}
+	if err = matrix.ValidateSquare(m); !errors.Is(err, matrix.ErrNonSquare) {
+		t.Fatalf("ValidateSquare(2x3): want ErrNonSquare, got %v", err)
+	}
+}
+
 // TestAtSetOutOfRange exercises ErrOutOfRange on invalid indices (no panics).
 func TestAtSetOutOfRange(t *testing.T) {
 	m, err := matrix.NewDense(2, 2)
@@ -350,10 +361,9 @@ func TestViewBoundsAndMutation(t *testing.T) {
 	}
 
 	// Invalid: window exceeds bounds
-	if _, err = m.View(1, 1, 3, 3); !errors.Is(err, matrix.ErrBadShape) {
-		t.Fatalf("View out of bounds must return ErrBadShape; got %v", err)
+	if _, err = m.View(1, 1, 3, 3); !errors.Is(err, matrix.ErrOutOfRange) {
+		t.Fatalf("View out of bounds must return ErrOutOfRange; got %v", err)
 	}
-
 	// Valid 2x2 view from (1,1)
 	view, err := m.View(1, 1, 2, 2)
 	if err != nil {

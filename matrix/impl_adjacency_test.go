@@ -484,6 +484,50 @@ func TestAdjacency_NoEdges(t *testing.T) {
 	}
 }
 
+// TestAdjacency_ZeroWeightEdge_TreatedAsNoEdge illustrates the "0 == no-edge" adjacency contract.
+func TestAdjacency_ZeroWeightEdge_TreatedAsNoEdge(t *testing.T) {
+	t.Parallel()
+
+	// Weighted+directed graph: we keep weights in the adjacency cells when weighted-mode is effective.
+	// We include one non-zero edge to avoid "all-zero weights" downgrade to binary adjacency.
+	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	_ = g.AddVertex("A")
+	_ = g.AddVertex("B")
+	_ = g.AddVertex("C")
+
+	// The edge under test: weight=0 is indistinguishable from "no edge" in 0/weight adjacency.
+	_, _ = g.AddEdge("A", "B", 0)
+	// A non-zero edge to preserve weighted-mode behavior.
+	_, _ = g.AddEdge("B", "C", 1)
+
+	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted()))
+	if err != nil {
+		t.Fatalf("NewAdjacencyMatrix: %v", err)
+	}
+
+	// Neighbors must treat A->B (0) as absent.
+	nb, err := am.Neighbors("A")
+	if err != nil {
+		t.Fatalf("Neighbors(A): %v", err)
+	}
+	if len(nb) != 0 {
+		t.Fatalf("Neighbors(A): got %v, want empty (0-weight treated as no-edge)", nb)
+	}
+
+	// Default export thresholding must not materialize A->B (0).
+	g2, err := am.ToGraph()
+	if err != nil {
+		t.Fatalf("ToGraph: %v", err)
+	}
+	em := edgesMap(g2)
+	if _, ok := em[[2]string{"A", "B"}]; ok {
+		t.Fatalf("export must not include A->B when weight is 0")
+	}
+	if w, ok := em[[2]string{"B", "C"}]; !ok || w != 1 {
+		t.Fatalf("export must include B->C with weight=1; ok=%v w=%v", ok, w)
+	}
+}
+
 func TestAdjacency_SingleVertex(t *testing.T) {
 	t.Parallel()
 
@@ -532,6 +576,42 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	want := []float64{2, 1, 1, 0}
 	if AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
+	}
+}
+
+// TestAdjacency_EmptyGraph_Degenerate validates that empty graphs are a valid degenerate case.
+func TestAdjacency_EmptyGraph_Degenerate(t *testing.T) {
+	t.Parallel()
+
+	g := core.NewGraph()
+	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
+	if err != nil {
+		t.Fatalf("NewAdjacencyMatrix(empty): %v", err)
+	}
+	if am == nil {
+		t.Fatalf("NewAdjacencyMatrix(empty) returned nil")
+	}
+
+	// VertexCount must be 0 without errors.
+	if n, err := am.VertexCount(); err != nil || n != 0 {
+		t.Fatalf("VertexCount(empty): got (%d,%v), want (0,nil)", n, err)
+	}
+
+	// Neighbors on any ID must be ErrUnknownVertex (no vertices exist).
+	if _, err := am.Neighbors("X"); !errors.Is(err, matrix.ErrUnknownVertex) {
+		t.Fatalf("Neighbors(empty): want ErrUnknownVertex, got %v", err)
+	}
+
+	// Export must produce an empty graph (no vertices, no edges).
+	g2, err := am.ToGraph()
+	if err != nil {
+		t.Fatalf("ToGraph(empty): %v", err)
+	}
+	if len(g2.Vertices()) != 0 {
+		t.Fatalf("export empty vertices: got %d, want 0", len(g2.Vertices()))
+	}
+	if len(g2.Edges()) != 0 {
+		t.Fatalf("export empty edges: got %d, want 0", len(g2.Edges()))
 	}
 }
 

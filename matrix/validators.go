@@ -152,6 +152,7 @@ func validateBounds(lo, hi float64) (float64, float64, error) {
 //
 // Implementation:
 //   - Stage 1: Check interface value against nil.
+//   - Stage 2 (optional): If m implements Nilable, consult m.IsNil() to detect typed-nil.
 //
 // Behavior highlights:
 //   - Canonical nil-guard for all composite validators.
@@ -164,6 +165,7 @@ func validateBounds(lo, hi float64) (float64, float64, error) {
 //
 // Errors:
 //   - ErrNilMatrix if m == nil.
+//   - ErrNilMatrix if m is a typed-nil inside interface AND implements Nilable.
 //
 // Determinism:
 //   - Deterministic.
@@ -179,6 +181,12 @@ func validateBounds(lo, hi float64) (float64, float64, error) {
 func ValidateNotNil(m Matrix) error {
 	// If the matrix is nil, fail with the unified sentinel.
 	if m == nil {
+		return ErrNilMatrix
+	}
+
+	// Optional typed-nil detection without reflect:
+	// if the implementation provides Nilable, trust its IsNil().
+	if n, ok := m.(Nilable); ok && n.IsNil() {
 		return ErrNilMatrix
 	}
 
@@ -239,10 +247,7 @@ func ValidateSameShape(a, b Matrix) error {
 //
 // Errors:
 //   - ErrNilMatrix if m is nil.
-//   - ErrDimensionMismatch if Rows != Cols.
-//
-// Determinism:
-//   - Deterministic.
+//   - ErrNonSquare if Rows != Cols.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
@@ -258,7 +263,8 @@ func ValidateSquare(m Matrix) error {
 	}
 	// Check the square condition explicitly.
 	if m.Rows() != m.Cols() {
-		return ErrDimensionMismatch
+		return ErrNonSquare
+		// return ErrDimensionMismatch
 	}
 
 	return nil
@@ -366,7 +372,7 @@ func ValidateBinarySameShape(a, b Matrix) error {
 //   - nil on success.
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch.
+//   - ErrNilMatrix, ErrNonSquare.
 //
 // Determinism:
 //   - Deterministic.
@@ -446,7 +452,7 @@ func ValidateMulCompatible(a, b Matrix) error {
 //   - nil on success.
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch from structure checks.
+//   - ErrNilMatrix, ErrNonSquare from structure checks..
 //   - ErrNaNInf if tol is NaN/±Inf or if any compared entry is non-finite.
 //   - ErrAsymmetry if symmetry violation exceeds tol.
 //
@@ -525,7 +531,7 @@ func ValidateSymmetric(m Matrix, tol float64) error {
 //   - bool: true if all off-diagonal entries are within tol.
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch from structure checks.
+//   - ErrNilMatrix, ErrNonSquare from structure checks.
 //   - ErrNaNInf if tol is NaN/±Inf or if any inspected entry is non-finite.
 //
 // Determinism:
@@ -594,8 +600,8 @@ func IsZeroOffDiagonal(m Matrix, tol float64) (bool, error) {
 //   - nil on success.
 //
 // Errors:
-//   - ErrNilMatrix if wrapper or Mat is nil.
-//   - ErrDimensionMismatch if Mat is not square or index metadata contradicts dimensions.
+//   - ErrNonSquare if Mat is not square.
+//   - ErrDimensionMismatch if index metadata contradicts dimensions.
 //
 // Determinism:
 //   - Deterministic.

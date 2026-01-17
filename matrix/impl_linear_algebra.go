@@ -665,7 +665,7 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 //   - Matrix: Q whose columns are eigenvectors.
 //
 // Errors:
-//   - ErrDimensionMismatch (non-square), ErrAsymmetry (not symmetric within tol),
+//   - ErrNonSquare (non-square), ErrAsymmetry (not symmetric within tol),
 //     ErrMatrixEigenFailed (max off-diagonal ≥ tol after maxIter).
 //
 // Determinism:
@@ -939,7 +939,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 //
 // Errors:
 //   - ErrNilMatrix         (ValidateNotNil).
-//   - ErrDimensionMismatch (ValidateSquare).
+//   - ErrNonSquare         (ValidateSquare).
 //   - ErrSingular          (detected during backward substitution when U[i,i] == 0).
 //   - Propagated LU errors (from LU validation/allocation).
 //   - Allocation errors    (from NewDense).
@@ -1096,7 +1096,7 @@ func Inverse(m Matrix) (Matrix, error) {
 //   - Matrix: U (upper triangular).
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch, ErrSingular (if U[i,i]==0 during factorization).
+//   - ErrNilMatrix, ErrNonSquare, ErrSingular (if U[i,i]==0 during factorization).
 //
 // Determinism:
 //   - Fixed i→{j≥i} for U, then {j>i}→i for L.
@@ -1256,7 +1256,7 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 //   - Matrix: R (upper triangular after reflections).
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch.
+//   - ErrNilMatrix, ErrNonSquare.
 //
 // Determinism:
 //   - Fixed k→{i,j} visitation; stable column-wise accumulation.

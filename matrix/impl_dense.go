@@ -120,6 +120,40 @@ func (m *Dense) validateValue(v float64) error {
 	return nil
 }
 
+// IsNil MAIN DESCRIPTION (2+ lines, no marketing).
+// Reports whether the receiver is a typed-nil *Dense and therefore must be
+// treated as nil when stored inside the Matrix interface.
+//
+// Implementation:
+//   - Stage 1: Compare the receiver pointer to nil.
+//   - Stage 2: Return the result without dereferencing.
+//
+// Behavior highlights:
+//   - Safe for typed-nil inside interfaces (no panic).
+//   - Reflect-free nil detection used by ValidateNotNil via Nilable.
+//
+// Inputs:
+//   - (receiver) *Dense: may be nil.
+//
+// Returns:
+//   - bool: true iff receiver == nil.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This method must remain trivial; do not add deep validation here.
+//
+// AI-Hints:
+//   - Implement the same pattern on any other pointer-backed Matrix types in this package.
+func (m *Dense) IsNil() bool { return m == nil }
+
 // Dense is a contiguous row-major matrix implementation.
 // Implementation:
 //   - Stage 1: Store shape (r,c) and data buffer (len=r*c).
@@ -731,8 +765,6 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 	if err != nil {
 		return nil, err
 	}
-	// Preserve numeric policy from the base (critical for consistency).
-	res.validateNaNInf = m.validateNaNInf
 
 	// Deterministic double loop; direct offset math in both matrices.
 	var i, j int
@@ -902,10 +934,29 @@ func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
 	if m == nil {
 		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrNilMatrix)
 	}
-	if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
-		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
+	//if r0 < 0 || c0 < 0 || rows < 0 || cols < 0 || r0+rows > m.r || c0+cols > m.c {
+	//	return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrBadShape)
+	//}
+	// Dimensions of the window must be non-negative.
+	if rows < 0 || cols < 0 {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrInvalidDimensions)
 	}
 
+	// Offsets are indices; negative offsets are out-of-range.
+	if r0 < 0 || c0 < 0 {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrOutOfRange)
+	}
+
+	// Offsets beyond the base bounds are out-of-range.
+	// NOTE: r0==m.r is allowed only when rows==0 (zero-height view), similarly for c0.
+	if r0 > m.r || c0 > m.c {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrOutOfRange)
+	}
+
+	// Window exceeding base bounds is out-of-range.
+	if r0+rows > m.r || c0+cols > m.c {
+		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrOutOfRange)
+	}
 	return &MatrixView{
 		base: m,    // share storage
 		r0:   r0,   // top row in base

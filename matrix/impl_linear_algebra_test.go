@@ -1110,7 +1110,8 @@ func TestEigen_Errors(t *testing.T) {
 	// non-square → ErrDimensionMismatch
 	ns := MustDense(t, 3, 4)
 	_, _, err = matrix.Eigen(ns, 1e-10, 50)
-	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, err, matrix.ErrNonSquare)
 
 	// not symmetric within tol → ErrNotSymmetric
 	asym := MustDense(t, 3, 3)
@@ -1300,7 +1301,8 @@ func TestInverse_Errors(t *testing.T) {
 	// non-square → ErrDimensionMismatch
 	ns := MustDense(t, 3, 4)
 	_, err = matrix.Inverse(ns)
-	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, err, matrix.ErrNonSquare)
 
 	// singular → ErrSingular (two equal strings)
 	sing := NewFilledDense(t, 3, 3, []float64{1, 2, 3, 1, 2, 3, 0, 1, 4})
@@ -1589,7 +1591,8 @@ func TestLU_Errors(t *testing.T) {
 	// non-square → ErrDimensionMismatch
 	ns := MustDense(t, 3, 4)
 	_, _, err = matrix.LU(ns)
-	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, err, matrix.ErrNonSquare)
 }
 
 // Basic (3×3): pick L,U explicitly (Doolittle form, diag(L)=1), set A=L*U,
@@ -1802,7 +1805,8 @@ func TestQR_Errors(t *testing.T) {
 	// non-square → ErrDimensionMismatch
 	ns := MustDense(t, 3, 4)
 	_, _, err = matrix.QR(ns)
-	AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, err, matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, err, matrix.ErrNonSquare)
 }
 
 // Classic 3×3 Householder example (well-known benchmark):

@@ -430,7 +430,18 @@ func covariance(X Matrix) (Matrix, []float64, error) {
 
 	// Stage 1 (Validate shape): need r>=2 and c>0 for a meaningful sample covariance.
 	r, c := X.Rows(), X.Cols()
-	if r < 2 || c == 0 {
+
+	// Empty feature-set policy:
+	// If there are no columns (c==0), the covariance is a valid degenerate 0×0 matrix.
+	if c == 0 {
+		z, err := NewDense(0, 0)
+		if err != nil {
+			return nil, nil, matrixErrorf(opCovariance, err)
+		}
+		return z, make([]float64, 0), nil
+	}
+	// Sample covariance requires at least two observations when c>0.
+	if r < 2 {
 		return nil, nil, matrixErrorf(opCovariance, ErrDimensionMismatch)
 	}
 
@@ -498,7 +509,17 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 
 	// Stage 1 (Validate shape): need r>=2 and c>0.
 	r, c := X.Rows(), X.Cols()
-	if r < 2 || c == 0 {
+	// Empty feature-set policy:
+	// If there are no columns (c==0), the correlation is a valid degenerate 0×0 matrix.
+	if c == 0 {
+		z, err := NewDense(0, 0)
+		if err != nil {
+			return nil, nil, nil, matrixErrorf(opCorrelation, err)
+		}
+		return z, make([]float64, 0), make([]float64, 0), nil
+	}
+	// Sample correlation requires at least two observations when c>0.
+	if r < 2 {
 		return nil, nil, nil, matrixErrorf(opCorrelation, ErrDimensionMismatch)
 	}
 

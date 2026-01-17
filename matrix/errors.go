@@ -20,9 +20,27 @@ import "errors"
 // shape/index/NaN -> graph nil -> dimension mismatch -> structural violations
 // -> export limitations (ErrMatrixNotImplemented).
 
+// SHAPE vs DIMENSIONS (IMPORTANT)
+// -------------------------------
+// We intentionally KEEP ErrInvalidDimensions and ErrBadShape as DISTINCT classes.
+// They are close but not the same:
+//   - ErrInvalidDimensions: invalid size parameters (negative, or otherwise impossible sizes).
+//   - ErrBadShape: shape is structurally invalid for an operation (e.g., non-square required,
+//     invalid view window, incompatible "shape contract" not expressible by a simple mismatch).
+//
+// Rationale:
+//   - Different failure classes matter to callers and to tests.
+//   - Avoid "smart" errors.Is coupling between independent sentinels (it becomes brittle fast).
+
 var (
-	// ErrBadShape is returned when requested shape is invalid (e.g., r<=0 or c<=0).
-	// Algorithms must validate dense creation before allocation.
+	// ErrInvalidDimensions indicates invalid dimension parameters.
+	// Negative sizes are always invalid. Some builders may additionally enforce
+	// "non-empty" rules as part of their own contract; if they do, they should
+	// still use this class (invalid dimension request).
+	ErrInvalidDimensions = errors.New("matrix: invalid dimensions")
+
+	// ErrBadShape indicates that a requested/observed shape violates a structural
+	// contract for an operation (beyond a simple operand mismatch).
 	ErrBadShape = errors.New("matrix: invalid shape")
 
 	// ErrOutOfRange indicates that an index (row or column) is outside valid bounds.
@@ -75,9 +93,6 @@ var (
 
 	// ErrInvalidWeight - edge weight is NaN or ±Inf at ingestion stage.
 	ErrInvalidWeight = errors.New("matrix: invalid edge weight")
-
-	// ErrInvalidDimensions indicates that requested matrix dimensions are non-positive.
-	ErrInvalidDimensions = errors.New("matrix: dimensions must be > 0")
 )
 
 // BACKWARD-COMPATIBILITY ALIASES (kept to avoid breaking current callers).

@@ -16,11 +16,17 @@ import (
 
 // --- Adjacency tests ---
 
-// TestBuildDenseAdjacency_EmptyVertices validates that empty vertex list triggers ErrInvalidDimensions.
+// TestBuildDenseAdjacency_EmptyVertices validates that empty vertices are a valid degenerate case.
 func TestBuildDenseAdjacency_EmptyVertices(t *testing.T) {
-	_, _, err := matrix.BuildDenseAdjacency([]string{}, nil, matrix.NewMatrixOptions())
-	if !errors.Is(err, matrix.ErrInvalidDimensions) {
-		t.Fatalf("want ErrInvalidDimensions, got %v", err)
+	idx, mat, err := matrix.BuildDenseAdjacency([]string{}, nil, matrix.NewMatrixOptions())
+	if err != nil {
+		t.Fatalf("BuildDenseAdjacency(empty): %v", err)
+	}
+	if len(idx) != 0 {
+		t.Fatalf("idx size: got %d, want 0", len(idx))
+	}
+	if mat.Rows() != 0 || mat.Cols() != 0 {
+		t.Fatalf("shape: got %dx%d, want 0x0", mat.Rows(), mat.Cols())
 	}
 }
 
@@ -248,11 +254,20 @@ func TestBuildDenseAdjacency_UnknownVertex(t *testing.T) {
 
 // --- Incidence tests ---
 
-// TestBuildDenseIncidence_EmptyVertices validates ErrInvalidDimensions for zero vertices.
+// TestBuildDenseIncidence_EmptyVertices validates that empty vertices are a valid degenerate case.
 func TestBuildDenseIncidence_EmptyVertices(t *testing.T) {
-	_, _, _, err := matrix.BuildDenseIncidence([]string{}, nil, matrix.NewMatrixOptions())
-	if !errors.Is(err, matrix.ErrInvalidDimensions) {
-		t.Fatalf("want ErrInvalidDimensions, got %v", err)
+	idx, cols, mat, err := matrix.BuildDenseIncidence([]string{}, nil, matrix.NewMatrixOptions())
+	if err != nil {
+		t.Fatalf("BuildDenseIncidence(empty): %v", err)
+	}
+	if len(idx) != 0 {
+		t.Fatalf("idx size: got %d, want 0", len(idx))
+	}
+	if len(cols) != 0 {
+		t.Fatalf("cols size: got %d, want 0", len(cols))
+	}
+	if mat.Rows() != 0 || mat.Cols() != 0 {
+		t.Fatalf("shape: got %dx%d, want 0x0", mat.Rows(), mat.Cols())
 	}
 }
 

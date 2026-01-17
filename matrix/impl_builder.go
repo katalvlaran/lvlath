@@ -108,7 +108,7 @@ func isLexSorted(s []string) bool {
 // Returns:
 //   - vidx: VertexID→index map (row==col index).
 //   - mat: V×V dense adjacency.
-//   - err: ErrInvalidDimensions (empty vertices), ErrUnknownVertex, ErrInvalidWeight, shape/set errors.
+//   - err: ErrInvalidDimensions (edges present with 0 vertices), ErrUnknownVertex, ErrInvalidWeight, shape/set errors.
 //
 // Determinism:
 //   - Fixed loops and write order; deterministic output for same inputs/options.
@@ -118,6 +118,21 @@ func isLexSorted(s []string) bool {
 //
 // Notes:
 //   - Unweighted mode writes 1 for present edges; weighted mode uses edge weights.
+//   - Empty graphs:
+//     When vertices is empty and edges is also empty, this function returns a valid
+//     0×0 Dense adjacency and an empty index map. This matches the Matrix contract
+//     that allows zero-sized shapes and enables “empty graph” pipelines without
+//     special-casing at call sites.
+//   - IMPORTANT (0-weight edges):
+//     In a normal adjacency matrix (MetricClosure=false), the sentinel for “no edge”
+//     is unreachableWeight (currently 0). Therefore, an edge with weight 0 is
+//     indistinguishable from “no edge” at the matrix level.
+//     As a consequence, adjacency-level consumers (e.g., Neighbors, default ToGraph
+//     thresholding) treat 0-valued entries as absent edges.
+//     If your domain requires meaningful 0-weight edges, consider:
+//     (a) using MetricClosure mode (+Inf is “no edge”), or
+//     (b) encoding presence separately (binary adjacency + external weights), or
+//     (c) shifting/offsetting weights so present edges are strictly positive.
 //
 // AI-Hints:
 //   - Use MetricClosure to turn adjacency into distances (+Inf as unreachable), diag forced to 0.
@@ -128,11 +143,32 @@ func BuildDenseAdjacency(
 ) (map[string]int, *Dense, error) {
 	// --- Stage 1: Validate vertices and build index map ---
 
-	// vertices must exist (empty graph is a valid degenerate case only if we want 0×0),
-	// but we adopt a strict policy here: empty vertex set is considered bad shape to
-	// avoid accidental empty allocations downstream. Adjust if you need 0×0 matrices.
+	// Empty graph handling:
+	//   - vertices==0 and edges==0 ⇒ valid 0×0 adjacency (degenerate case).
+	//   - vertices==0 and edges>0  ⇒ invalid input (edges cannot reference vertices).
 	if len(vertices) == 0 {
-		return nil, nil, fmt.Errorf("BuildDenseAdjacency: empty vertex set: %w", ErrInvalidDimensions)
+		if len(edges) != 0 {
+			return nil, nil, fmt.Errorf(
+				"BuildDenseAdjacency: empty vertex set with %d edges: %w",
+				len(edges), ErrInvalidDimensions,
+			)
+		}
+		// Allocate the degenerate matrix using a policy consistent with opts.metricClose.
+		// Note: for 0×0 there are no entries, but we keep flags coherent for callers.
+		var (
+			mat *Dense
+			err error
+		)
+		if opts.metricClose {
+			mat, err = newDenseWithPolicy(0, 0, true, true)
+		} else {
+			mat, err = NewDense(0, 0)
+		}
+		if err != nil {
+			return nil, nil, fmt.Errorf("BuildDenseAdjacency: NewDense(0,0): %w", err)
+		}
+		// Return a non-nil empty map to make “empty index” explicit to callers.
+		return make(map[string]int), mat, nil
 	}
 	V := len(vertices)
 
@@ -311,7 +347,7 @@ func BuildDenseAdjacency(
 //   - vidx: VertexID→row index.
 //   - cols: effective column-aligned edges after filtering/dedup.
 //   - mat: V×E' dense with entries in {−1,0,+1} (and +2 for undirected loops).
-//   - err: ErrInvalidDimensions (empty vertices), ErrUnknownVertex, dense Set/shape errors.
+//   - err: ErrInvalidDimensions (edges present with 0 vertices), ErrUnknownVertex, dense Set/shape errors.
 //
 // Determinism:
 //   - Stable rows/columns given stable inputs/options.
@@ -325,6 +361,10 @@ func BuildDenseAdjacency(
 //   - When AllowMulti=false, the first edge between a given pair of vertices
 //     wins and subsequent parallel edges are ignored at the column level.
 //   - When AllowMulti=true, each edge is assigned its own column.
+//   - Empty graphs:
+//     When vertices is empty and edges is also empty, this function returns a valid
+//     0×0 Dense incidence and empty metadata slices/maps. This matches the Matrix
+//     contract allowing zero-sized shapes and avoids forcing callers to special-case.
 //
 // AI-Hints:
 //   - Use AllowMulti=false to get a canonical set of columns without duplicates.
@@ -335,9 +375,23 @@ func BuildDenseIncidence(
 ) (map[string]int, []*core.Edge, *Dense, error) {
 	// --- Stage 1: Validate and index ---
 
-	// Empty vertex set is considered invalid shape for incidence (no rows).
+	// Empty graph handling:
+	//   - vertices==0 and edges==0 ⇒ valid 0×0 incidence (degenerate case).
+	//   - vertices==0 and edges>0  ⇒ invalid input (edges cannot be represented without vertices).
 	if len(vertices) == 0 {
-		return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: empty vertex set: %w", ErrInvalidDimensions)
+		if len(edges) != 0 {
+			return nil, nil, nil, fmt.Errorf(
+				"BuildDenseIncidence: empty vertex set with %d edges: %w",
+				len(edges), ErrInvalidDimensions,
+			)
+		}
+		// Allocate a degenerate 0×0 Dense; NewDense represents zero-area with nil backing slice.
+		mat, err := NewDense(0, 0)
+		if err != nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: NewDense(0,0): %w", err)
+		}
+		// Return explicit empty metadata.
+		return make(map[string]int), make([]*core.Edge, 0), mat, nil
 	}
 	V := len(vertices)
 	// Build a stable vertex→row index map in the provided order; check duplicates defensively.

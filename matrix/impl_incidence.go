@@ -75,6 +75,9 @@ type IncidenceMatrix struct {
 // Behavior highlights:
 //   - No panics for user errors; only sentinel errors with context.
 //   - Edge weights are ignored by design; the matrix encodes topology only.
+//   - Empty graphs are supported:
+//     If g has 0 vertices (and therefore 0 edges), the result is a valid 0×0 matrix
+//     with empty VertexIndex and empty Edges. This is a legal degenerate case.
 //
 // Inputs:
 //   - g: source graph (must be non-nil).

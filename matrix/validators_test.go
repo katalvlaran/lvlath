@@ -63,7 +63,8 @@ func TestValidateSquare(t *testing.T) {
 	}
 
 	nsq, _ := matrix.NewDense(3, 4)
-	AssertErrorIs(t, matrix.ValidateSquare(nsq), matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, matrix.ValidateSquare(nsq), matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, matrix.ValidateSquare(nsq), matrix.ErrNonSquare)
 	AssertErrorIs(t, matrix.ValidateSquare(nil), matrix.ErrNilMatrix)
 }
 
@@ -102,7 +103,8 @@ func TestValidateSquareNonNil(t *testing.T) {
 	AssertErrorIs(t, matrix.ValidateSquareNonNil(nil), matrix.ErrNilMatrix)
 
 	nsq, _ := matrix.NewDense(2, 3)
-	AssertErrorIs(t, matrix.ValidateSquareNonNil(nsq), matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, matrix.ValidateSquareNonNil(nsq), matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, matrix.ValidateSquareNonNil(nsq), matrix.ErrNonSquare)
 }
 
 func TestValidateMulCompatible(t *testing.T) {
@@ -173,7 +175,8 @@ func TestValidateGraphAdjacency_Structural(t *testing.T) {
 	// Non-square Mat.
 	nsq, _ := matrix.NewDense(2, 3)
 	gNonSquare := &matrix.AdjacencyMatrix{Mat: nsq}
-	AssertErrorIs(t, matrix.ValidateGraphAdjacency(gNonSquare), matrix.ErrDimensionMismatch)
+	//AssertErrorIs(t, matrix.ValidateGraphAdjacency(gNonSquare), matrix.ErrDimensionMismatch)
+	AssertErrorIs(t, matrix.ValidateGraphAdjacency(gNonSquare), matrix.ErrNonSquare)
 
 	// Square ok.
 	g := &matrix.AdjacencyMatrix{Mat: IdentityDense(t, 2)}

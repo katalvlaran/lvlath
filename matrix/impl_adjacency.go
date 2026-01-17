@@ -98,6 +98,7 @@ func NewAdjacencyMatrix(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 
 	// Finalize reverse index
 	rev := make([]string, len(vertices))
+	//copy(rev, vertices)
 	for id, i := range idx {
 		rev[i] = id
 	}
@@ -202,7 +203,9 @@ func (am *AdjacencyMatrix) VertexCount() (int, error) {
 //   - Time O(n), Space O(k) for k neighbors.
 //
 // Notes:
-//   - We treat +Inf as “no edge”; NaN is not expected in adjacency.
+//   - Normal adjacency uses unreachableWeight (currently 0) to represent “no edge”.
+//     Therefore, a 0-valued entry is treated as absent and is NOT returned as a neighbor.
+//   - +Inf is also treated as “no edge” (distance/metric-closure semantics); NaN is not expected.
 //
 // AI-Hints:
 //   - Use WithWeighted/WithBinary builders to control adjacency semantics before calling.
@@ -247,10 +250,13 @@ func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Neighbors: At(%d,%d): %w", srcIdx, colIdx, err)
 		}
-		// skip missing or infinite edges
-		if w == 0 || isNonFinite(w) {
+		// Skip “no edge” sentinels:
+		//   - unreachableWeight (normal adjacency no-edge sentinel),
+		//   - any non-finite value (+Inf used by distance matrices).
+		if w == unreachableWeight || isNonFinite(w) {
 			continue
 		}
+
 		// map index → vertex
 		vid = am.vertexByIndex[colIdx]
 		neighbors = append(neighbors, vid)
@@ -329,6 +335,10 @@ func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, 
 //   - Threshold is strict (a[i,j] > threshold).
 //   - keepWeights casts a[i,j] to float64 (truncate toward zero); binary emits weight=1.
 //   - Orientation is inherited from the original build options (am.opts.directed).
+//   - IMPORTANT (0-weight entries):
+//     With the default strict thresholding and normal adjacency semantics, a value of 0
+//     is treated as “no edge” and will not be exported unless a caller explicitly sets
+//     a negative threshold. This matches Neighbors behavior, which also skips 0-valued entries.
 //
 // Inputs:
 //   - optFns ...Option: optional export overrides (edge threshold, weight policy).

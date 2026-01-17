@@ -244,6 +244,8 @@ func MetricClosure(am *AdjacencyMatrix) error {
 // BuildMetricClosure constructs adjacency from g and then converts it to metric-closure
 // (Floyd–Warshall in-place). It marks the returned adjacency as metricClose=true
 // so ToGraph() refuses exporting distances as edges.
+// Notes:
+//   - Empty graphs are supported: the result is a valid 0×0 distance matrix.
 //
 // AI-Hints:
 //   - Use for TSP/DTW pipelines where you want pairwise shortest-path distances immediately.
@@ -279,6 +281,7 @@ func BuildMetricClosure(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 
 // BuildAdjacency constructs a deterministic adjacency matrix from a core.Graph.
 // Thin alias to NewAdjacencyMatrix; exposed in API to improve discoverability.
+// Notes: Empty graphs (0 vertices) are supported and produce a valid 0×0 adjacency.
 // AI-Hints: Pass Options that match your graph semantics (directed/loops/multi/weighted).
 func BuildAdjacency(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 	return NewAdjacencyMatrix(g, opts)

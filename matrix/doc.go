@@ -10,7 +10,10 @@
 // # Philosophy
 //
 // - Determinism first: loops use fixed orders; outputs are bit-stable across runs.
-// - Clear contracts: +Inf means “no edge” in adjacency/distances; diagonal must be 0 for APSP.
+// - Clear contracts:
+//   - Normal adjacency uses 0 as “no edge”, therefore 0-weight edges are indistinguishable from missing edges.
+//   - Distance/MetricClosure uses +Inf as “no edge”; diagonal is forced to 0 for APSP.
+//
 // - Single source of truth: fast-paths on *Dense live in canonical kernels; fallbacks match behavior.
 // - No silent policy drift: validation is explicit (dimension/shape/nil/singularity).
 //

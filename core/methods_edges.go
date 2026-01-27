@@ -137,21 +137,55 @@ func (g *Graph) RemoveEdge(eid string) error {
 	return nil
 }
 
-// HasEdge reports whether at least one edge from→to exists.
+// HasEdge reports whether at least one edge exists from 'from' to 'to'.
+// It is safe to call with unknown vertex IDs; missing adjacency buckets return false.
+// Implementation:
+//   - Stage 1: Reject empty IDs early (fast-path, no locks).
+//   - Stage 2: Acquire muEdgeAdj read lock for a stable adjacency snapshot.
+//   - Stage 3: Probe adjacency buckets defensively and return membership.
 //
-// Determinism: constant-time membership via nested maps; no allocations.
-// Works for undirected graphs as AddEdge mirrors adjacency automatically.
-// Complexity: O(1).
-// Concurrency: read lock on muEdgeAdj.
+// Behavior highlights:
+//   - Undirected edges are mirrored on insertion, so HasEdge works in both directions.
+//   - Missing vertices or missing adjacency buckets return false (never panic).
+//
+// Inputs:
+//   - from: source vertex ID (non-empty for meaningful queries).
+//   - to: destination vertex ID (non-empty for meaningful queries).
+//
+// Returns:
+//   - bool: true if at least one edge from->to exists, otherwise false.
+//
+// Errors:
+//   - N/A (pure query; never returns sentinel errors).
+//
+// Determinism:
+//   - Deterministic; relies only on map membership (no iteration order).
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Uses adjacency buckets instead of scanning edges for performance.
+//
+// AI-Hints:
+//   - Use HasEdge as an O(1) membership check; do not build temporary slices just to test existence.
+//   - For undirected graphs, checking (to,from) is equivalent due to mirrored adjacency.
 func (g *Graph) HasEdge(from, to string) bool {
-	// AI-HINT: O(1) membership by adjacency; undirected edges are mirrored, so HasEdge works both ways.
+	// AI-HINT: O(1) membership by adjacency; unknown vertices must return false (never panic).
 	if from == "" || to == "" {
 		return false
 	}
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	return len(g.adjacencyList[from][to]) > 0
+	// Probe the first-level bucket defensively to avoid relying on implicit nil-map behavior.
+	inner, ok := g.adjacencyList[from]
+	if !ok || inner == nil {
+		return false
+	}
+
+	// Second-level probe is safe even if inner[to] is nil; len(nil)==0 by contract.
+	return len(inner[to]) > 0
 }
 
 // GetEdge returns a pointer to the Edge with the given edgeID if it exists,

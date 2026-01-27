@@ -11,6 +11,12 @@
 
 package core
 
+import "sync/atomic"
+
+// viewEdgeWeightZero is the canonical weight value used by views that enforce unweighted semantics.
+// It is a named constant to make "forced zero weight" intentional and grep-friendly.
+const viewEdgeWeightZero float64 = 0
+
 // UnweightedView returns a new Graph with identical topology but with all edge
 // weights set to zero and the weighted flag turned off. The input graph is not
 // mutated. Edge IDs and directedness are preserved.
@@ -42,10 +48,14 @@ func UnweightedView(g *Graph) *Graph {
 
 	// Copy edges with zero weight, preserving IDs and directedness.
 	g.muEdgeAdj.RLock()
+	// Snapshot the edge ID counter under the same lock as the edge catalog snapshot.
+	// This ensures the view continues generating IDs strictly after the last ID used by 'g'.
+	srcNextEdgeID := atomic.LoadUint64(&g.nextEdgeID)
 	var eid string
 	var e, ne *Edge
 	for eid, e = range g.edges {
-		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: 0, Directed: e.Directed}
+		// Force weight to zero regardless of the source weight; directedness and IDs are preserved.
+		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: viewEdgeWeightZero, Directed: e.Directed}
 		out.edges[eid] = ne
 		ensureAdjacency(out, ne.From, ne.To)
 		out.adjacencyList[ne.From][ne.To][eid] = struct{}{}
@@ -55,6 +65,9 @@ func UnweightedView(g *Graph) *Graph {
 		}
 	}
 	g.muEdgeAdj.RUnlock()
+
+	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
+	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)
 
 	return out
 }
@@ -97,6 +110,10 @@ func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 
 	// Copy only edges whose endpoints are both kept; preserve ID and directedness.
 	g.muEdgeAdj.RLock()
+	// Snapshot the edge ID counter under the same lock as the edge catalog snapshot.
+	// Even if the induced subgraph filters out some edges, carrying the counter forward
+	// prevents reusing historical IDs and keeps monotonicity aligned with the source graph.
+	srcNextEdgeID := atomic.LoadUint64(&g.nextEdgeID)
 	var eid string
 	var e, ne *Edge
 	for eid, e = range g.edges {
@@ -113,6 +130,9 @@ func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 		}
 	}
 	g.muEdgeAdj.RUnlock()
+
+	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
+	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)
 
 	return out
 }

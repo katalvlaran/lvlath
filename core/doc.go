@@ -34,6 +34,7 @@
 //  1. Deterministic ordering (public contract):
 //     Vertices()            → IDs sorted lex asc
 //     Edges()               → by Edge.ID asc
+//     - Order is lexicographic over strings (e.g., "e10" sorts between "e1" and "e2").
 //     NeighborIDs(id)       → IDs sorted lex asc
 //     Algorithms rely on this stability; tests must assume it.
 //  2. Sentinel errors only; compare with errors.Is. No fmt-wrapping of sentinels.
@@ -120,8 +121,11 @@
 //
 //   - CloneEmpty() - copy flags + vertices, no edges, carry nextEdgeID
 //   - Clone()      - deep copy (flags + vertices + edges + adjacency), carry nextEdgeID
-//   - UnweightedView(g) - same topology, weight=0, Weighted()=false
-//   - InducedSubgraph(g, keep) - keep subset of vertices + incident edges
+//   - UnweightedView(g) - same topology, weight=0, Weighted()=false.
+//     Preserves Edge.ID values and carries the edge-ID counter to prevent collisions
+//     if you later add edges to the derived graph.
+//   - InducedSubgraph(g, keep) - keep subset of vertices + incident edges.
+//     Preserves Edge.ID values and carries the edge-ID counter for the same reason.
 //
 // -----------------------------------------------------------------------------
 // -- COMPLEXITY SUMMARY -------------------------------------------------------
@@ -157,11 +161,18 @@
 //   - Cloning preserves textual Edge.ID sequence via nextEdgeID carry-over.
 //     If you Clone() then AddEdge(), the new edge ID continues monotonic growth.
 //
+//   - Stats() returns a snapshot suitable for diagnostics and metrics.
+//     If the graph is mutated concurrently, Stats() may reflect a moving target;
+//     treat it as best-effort and avoid building correctness-critical logic on it.
+//
 //   - Concurrency model is simple: public methods take care of locking internally.
 //     Do not hold external locks around core methods; let the package manage locks.
 //
 //   - If you only need a subset or weightless view - use InducedSubgraph/UnweightedView.
 //     They do NOT mutate the input graph.
+//
+//     They preserve Edge.ID values and keep future AddEdge() IDs unique by carrying
+//     the internal edge-ID counter forward.
 //
 // -----------------------------------------------------------------------------
 // -- See also: docs/CORE.md for algorithmic notes, proofs, and extended examples.

@@ -40,6 +40,12 @@ const (
 	VertexBase = "Base"
 )
 
+// Common edge IDs used across core tests (avoid magic strings in test bodies).
+const (
+	EdgeIDMissing = "edge-id-missing"
+	EdgeIDFirst   = "e1"
+)
+
 // Common weights used across core tests (avoid magic numbers in test bodies).
 const (
 	Weight0 = 0
@@ -48,6 +54,14 @@ const (
 	Weight3 = 3
 	Weight5 = 5
 	Weight7 = 7
+)
+
+// Common cardinalities used across core tests (avoid magic numbers in test bodies).
+const (
+	Count0 = 0
+	Count1 = 1
+	Count2 = 2
+	Count3 = 3
 )
 
 // Common concurrency sizes used across core tests (avoid magic numbers in test bodies).

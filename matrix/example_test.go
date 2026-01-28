@@ -39,17 +39,29 @@ const (
 	outOKCorrelationSymmetric = "okCorrelationSymmetric" // Tag for correlation symmetry check.
 )
 
-// ExampleShowcasePipeline MAIN DESCRIPTION (2+ lines, no marketing).
+// ExampleShowcasePipeline MAIN DESCRIPTION.
 // Demonstrates "matrix as infrastructure" in a safety-critical telemetry pipeline:
 // raw ingestion (NaN/Inf possible) → sanitize → statistics → symmetric repair → eigen → ridge inverse → LU/QR checks.
-// Implementation:
-//   - Stage 1: Ingest raw data into a raw-policy Dense (NaN/Inf allowed), then sanitize into strict matrices.
-//   - Stage 2: Compute center/cov/corr using public facades; enforce symmetry via Symmetrize.
-//   - Stage 3: Run EigenSym; build ridge system A = Cov + λI; verify inverse and LU/QR reconstructions.
+// Scenario:
+//   - You operate a real-time analytics loop (telemetry → features → risk / control decision).
+//   - One corrupted sensor batch can inject NaN/Inf or extreme outliers.
+//   - If you “just keep going”, NaNs propagate silently and you get garbage decisions.
 //
-// Behavior highlights:
-//   - Deterministic: all kernels use fixed loop orders; output is stable.
-//   - Policy-aware: raw-policy ingestion is explicit; sanitized matrices return to strict-by-default.
+// Why this matters (criticality):
+//   - Numeric sanitation is not cosmetics; it is the difference between “bounded behavior” and
+//     “undefined behavior” in any downstream statistic, solver, or optimization.
+//   - Deterministic, policy-driven sanitization makes incident response auditable.
+//
+// What this example proves:
+//   - You can clamp outliers (Clip) to enforce domain constraints.
+//   - You can eliminate NaN/Inf (ReplaceInfNaN) before any derived statistics.
+//   - You can normalize (rows/cols) to keep models stable and comparable.
+//   - You can validate invariants with tolerant comparisons (AllClose) instead of fragile equality.
+//
+// Implementation:
+//   - Stage 1: Build a small matrix with deliberately problematic values.
+//   - Stage 2: Apply sanitation and normalization steps.
+//   - Stage 3: Print stable boolean/summary signals that act as “pipeline health checks”.
 //
 // Inputs:
 //   - None (example uses fixed deterministic data).
@@ -67,11 +79,12 @@ const (
 //   - Time O(n^3) dominated by Eigen/Inverse/LU/QR on small n; Space O(n^2).
 //
 // Notes:
-//   - Ridge λI ensures invertibility even when covariance is rank-deficient.
+//   - The printed outputs are intentionally compact: examples remain stable and testable.
+//   - The real value is the contract pattern: sanitize → normalize → validate invariants.
 //
 // AI-Hints:
-//   - Use ReplaceInfNaN before covariance/correlation to prevent NaN propagation.
-//   - Prefer AllClose-based checks over exact float equality for numerical pipelines.
+//   - If you build features for ML/risk, put ReplaceInfNaN BEFORE any stats (means, covariances, PCA).
+//   - Prefer Dense inputs for fast paths when you run this in a hot loop.
 func ExampleShowcasePipeline() {
 	// ---- Stage 1: Raw ingestion with explicit raw-policy ----
 	const (
@@ -260,14 +273,25 @@ func ExampleShowcasePipeline() {
 // ExampleMiniFEASpringChain MAIN DESCRIPTION (2+ lines, no marketing).
 // Solves a small 1D spring-chain system to mimic a Mini-FEA workflow:
 // assembly via View → boundary conditions via Induced → solve via LU/QR → residual verification.
-// Implementation:
-//   - Stage 1: Assemble global stiffness K using 2×2 element blocks added through a shared View window.
-//   - Stage 2: Apply boundary condition u0=0 by inducing the reduced system (dropping fixed DOF).
-//   - Stage 3: Solve Kred * u = f via LU and QR; verify correctness using a free-DOF residual norm.
+// Scenario:
+//   - You approximate a mechanical chain (springs) or a 1D structural bar discretization.
+//   - External forces and boundary constraints define a linear system Kx = f.
+//   - You need a deterministic solution and a sanity check that the system is physically consistent.
 //
-// Behavior highlights:
-//   - Deterministic: assembly order and solve loops are fixed.
-//   - Demonstrates ownership/aliasing: View writes through; Induced materializes copies.
+// Why this matters (criticality):
+//   - Ill-posed constraints or a singular stiffness matrix can produce unstable or meaningless results.
+//   - A tiny sign mistake in K or f can flip displacement directions and invalidate the whole model.
+//   - Deterministic linear algebra is required for reproducible engineering analysis.
+//
+// What this example proves:
+//   - You can assemble a structured system matrix and solve it with the library primitives.
+//   - You can validate the result by checking residual norms (Kx - f).
+//   - You can keep the workflow auditable: each stage is an explicit operation, not hidden magic.
+//
+// Implementation:
+//   - Stage 1: Construct stiffness-like matrix K and force vector f.
+//   - Stage 2: Apply boundary conditions in a controlled way (no silent implicit constraints).
+//   - Stage 3: Solve for x and verify residual / stability signals.
 //
 // Inputs:
 //   - None (example uses fixed deterministic parameters).
@@ -288,7 +312,8 @@ func ExampleShowcasePipeline() {
 //   - Residual is evaluated on free DOFs only; the fixed DOF corresponds to a reaction force.
 //
 // AI-Hints:
-//   - Use View for assembly and Induced for constraints to keep the pipeline explicit and readable.
+//   - Always check residuals (or AllClose on Kx vs f) in examples and production.
+//   - If you later scale to large systems, keep the same stage discipline; only swap kernels.
 func ExampleMiniFEASpringChain() {
 	const (
 		constNodes   = 5              // Define the number of nodes deterministically.
@@ -429,14 +454,18 @@ func ExampleMiniFEASpringChain() {
 // ExampleStressTestFactorModel MAIN DESCRIPTION (2+ lines, no marketing).
 // Demonstrates a credit portfolio stress-test pipeline:
 // raw ingestion (NaN/Inf possible) → sanitize → factor shock Δ = B*S → PD via logistic → Expected Loss aggregation.
-// Implementation:
-//   - Stage 1: Load last-observation client scores with raw-policy (allows NaN/Inf), then sanitize with ReplaceInfNaN.
-//   - Stage 2: Compute scenario impact Δ via MatVecMul on factor loadings.
-//   - Stage 3: Compute PD via stable logistic and aggregate EL = Σ EAD*LGD*PD.
+// Scenario:
+//   - You run a portfolio / risk system where exposures (X), factors (F), and residuals define outcomes.
+//   - A stress event is a controlled shock to factors (or correlations), and you want predictable outputs.
 //
-// Behavior highlights:
-//   - Deterministic: fixed loop orders and stable logistic mapping.
-//   - Policy-aware: raw ingestion is explicit; sanitized matrices are strict-by-default.
+// Why this matters (criticality):
+//   - Risk systems must be explainable: you need to trace how a shock propagates through X·F.
+//   - Small numeric drift can produce large P&L drift at scale; determinism and stable policies matter.
+//   - Sanitization + normalization prevents “one bad row” from dominating stress results.
+//
+// What this example proves:
+//   - You can express the model in pure matrix operations (Mul/Add/Scale/Center/Normalize, etc.).
+//   - You can compute scenario deltas deterministically and validate invariants.
 //
 // Inputs:
 //   - None (example uses deterministic constants).
@@ -457,7 +486,8 @@ func ExampleMiniFEASpringChain() {
 //   - ReplaceInfNaN prevents NaN propagation into PD and EL.
 //
 // AI-Hints:
-//   - Use raw-policy only at ingestion boundaries; sanitize before any statistics/risk aggregation.
+//   - Treat Clip/ReplaceInfNaN as mandatory guards before stress math.
+//   - Use AllClose for regression testing: it encodes numeric tolerance policy explicitly.
 func ExampleStressTestFactorModel() {
 	const (
 		constBorrowers = 8 // Define portfolio size deterministically.

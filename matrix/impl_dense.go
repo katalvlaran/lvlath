@@ -130,7 +130,7 @@ func (m *Dense) validateValue(v float64) error {
 //
 // Behavior highlights:
 //   - Safe for typed-nil inside interfaces (no panic).
-//   - Reflect-free nil detection used by ValidateNotNil via Nilable.
+//   - Reflect-free nil detection used by ValidateNotNil via core.Nilable.
 //
 // Inputs:
 //   - (receiver) *Dense: may be nil.

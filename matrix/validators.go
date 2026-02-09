@@ -19,6 +19,8 @@ package matrix
 
 import (
 	"math"
+
+	"github.com/katalvlaran/lvlath/core"
 )
 
 // zeroTol is a tiny tolerance used only internally for guards where appropriate.
@@ -152,7 +154,7 @@ func validateBounds(lo, hi float64) (float64, float64, error) {
 //
 // Implementation:
 //   - Stage 1: Check interface value against nil.
-//   - Stage 2 (optional): If m implements Nilable, consult m.IsNil() to detect typed-nil.
+//   - Stage 2 (optional): If m implements core.Nilable, consult m.IsNil() to detect typed-nil.
 //
 // Behavior highlights:
 //   - Canonical nil-guard for all composite validators.
@@ -165,7 +167,7 @@ func validateBounds(lo, hi float64) (float64, float64, error) {
 //
 // Errors:
 //   - ErrNilMatrix if m == nil.
-//   - ErrNilMatrix if m is a typed-nil inside interface AND implements Nilable.
+//   - ErrNilMatrix if m is a typed-nil inside interface AND implements core.Nilable.
 //
 // Determinism:
 //   - Deterministic.
@@ -185,8 +187,8 @@ func ValidateNotNil(m Matrix) error {
 	}
 
 	// Optional typed-nil detection without reflect:
-	// if the implementation provides Nilable, trust its IsNil().
-	if n, ok := m.(Nilable); ok && n.IsNil() {
+	// if the implementation provides core.Nilable, trust its IsNil().
+	if n, ok := m.(core.Nilable); ok && n.IsNil() {
 		return ErrNilMatrix
 	}
 

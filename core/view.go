@@ -17,11 +17,42 @@ import "sync/atomic"
 // It is a named constant to make "forced zero weight" intentional and grep-friendly.
 const viewEdgeWeightZero float64 = 0
 
-// UnweightedView returns a new Graph with identical topology but with all edge
-// weights set to zero and the weighted flag turned off. The input graph is not
-// mutated. Edge IDs and directedness are preserved.
+// UnweightedView creates a non-mutating view of the input graph where weights are forced to 0
+// and the resulting graph reports Weighted()==false, while preserving topology and IDs.
 //
-// Complexity: O(V + E). Concurrency: read locks only on source.
+// Implementation:
+//   - Stage 1: Create a new Graph that matches g's orientation/multi/loop/mixed policies,
+//     but intentionally does NOT enable WithWeighted().
+//   - Stage 2: Snapshot and copy vertices under muVert.RLock (shallow metadata pointer copy).
+//   - Stage 3: Snapshot and copy edges under muEdgeAdj.RLock, forcing Weight=0 for every edge.
+//   - Stage 4: Carry over nextEdgeID to ensure future AddEdge() IDs cannot collide with copied IDs.
+//
+// Behavior highlights:
+//   - Does not mutate the source graph.
+//   - Preserves Edge.ID and Directed for every edge; only Weight is changed.
+//   - Preserves determinism rules of the core package (ordering is defined by public APIs).
+//
+// Inputs:
+//   - g: source graph (must be non-nil by caller convention).
+//
+// Returns:
+//   - *Graph: a new graph instance with identical topology and Weight forced to zero.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed source snapshot; uses read locks for stable catalogs.
+//
+// Complexity:
+//   - Time O(V+E), Space O(V+E) for the copied catalogs.
+//
+// Notes:
+//   - This is a *view* implemented as a copy: the returned graph is independent and mutable.
+//   - Vertex.Metadata is shallow-copied (pointer copy); if deep-copy is required, callers must do it externally.
+//
+// AI-Hints:
+//   - Use UnweightedView when an algorithm requires zero weights but you must preserve original weights elsewhere.
 func UnweightedView(g *Graph) *Graph {
 	// AI-HINT: Useful when algorithms require zero weights without touching original graph.
 
@@ -72,11 +103,42 @@ func UnweightedView(g *Graph) *Graph {
 	return out
 }
 
-// InducedSubgraph returns a new Graph induced by the set "keep" of vertex IDs:
-// the result contains only vertices v where keep[v] is true, and all edges whose
-// endpoints are both in keep. The input graph is not mutated.
+// InducedSubgraph creates a non-mutating induced subgraph containing only vertices selected by keep,
+// and only edges whose endpoints are both selected.
 //
-// Complexity: O(V + E). Concurrency: read locks only on source.
+// Implementation:
+//   - Stage 1: Create a new Graph that matches g's configuration flags.
+//   - Stage 2: Snapshot and copy only kept vertices under muVert.RLock.
+//   - Stage 3: Snapshot and copy only edges with both endpoints kept under muEdgeAdj.RLock.
+//   - Stage 4: Carry over nextEdgeID to preserve future auto-ID uniqueness.
+//
+// Behavior highlights:
+//   - Does not mutate the source graph.
+//   - Preserves Edge.ID, Directed, and Weight for retained edges.
+//   - Drops all edges that cross the cut (one endpoint not kept).
+//
+// Inputs:
+//   - g: source graph (must be non-nil by caller convention).
+//   - keep: map of vertex IDs to retain; keep[id]==true means "retain id".
+//
+// Returns:
+//   - *Graph: a new graph containing only the induced topology.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed source snapshot; uses read locks for stable catalogs.
+//
+// Complexity:
+//   - Time O(V+E), Space O(V'+E') where V'/E' are retained sizes.
+//
+// Notes:
+//   - The order of iteration over keep is irrelevant; retention is membership-based.
+//   - Vertex.Metadata is shallow-copied (pointer copy).
+//
+// AI-Hints:
+//   - Use InducedSubgraph to focus algorithms on a region of interest without changing the original graph.
 func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 	// AI-HINT: Build problem-specific slices of the graph without side effects on 'g'.
 

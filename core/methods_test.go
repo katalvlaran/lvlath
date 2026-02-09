@@ -64,9 +64,9 @@ func TestGraph_AddRemoveVertex(t *testing.T) {
 	// Stage 3: Add a valid vertex and validate membership query.
 	{
 		// Add VertexA.
-		MustNoError(t, g.AddVertex(VertexA), "AddVertex(A)")
+		MustErrorNil(t, g.AddVertex(VertexA), "AddVertex(A)")
 		// Verify VertexA is present.
-		MustTrue(t, g.HasVertex(VertexA), "HasVertex(A) after AddVertex(A)")
+		MustEqualBool(t, g.HasVertex(VertexA), true, "HasVertex(A) after AddVertex(A)")
 	}
 
 	// Stage 4: Duplicate AddVertex must be a no-op (no error, no count change).
@@ -74,7 +74,7 @@ func TestGraph_AddRemoveVertex(t *testing.T) {
 		// Snapshot vertex count before duplicate insert.
 		before := len(g.Vertices())
 		// Re-add VertexA (must not error).
-		MustNoError(t, g.AddVertex(VertexA), "AddVertex(A) duplicate")
+		MustErrorNil(t, g.AddVertex(VertexA), "AddVertex(A) duplicate")
 		// Snapshot vertex count after duplicate insert.
 		after := len(g.Vertices())
 		// Enforce no-op count invariant.
@@ -98,9 +98,9 @@ func TestGraph_AddRemoveVertex(t *testing.T) {
 	// Stage 6: Remove existing vertex and validate membership query.
 	{
 		// Remove VertexA.
-		MustNoError(t, g.RemoveVertex(VertexA), "RemoveVertex(A)")
+		MustErrorNil(t, g.RemoveVertex(VertexA), "RemoveVertex(A)")
 		// Verify VertexA is absent after removal.
-		MustFalse(t, g.HasVertex(VertexA), "HasVertex(A) after RemoveVertex(A)")
+		MustEqualBool(t, g.HasVertex(VertexA), false, "HasVertex(A) after RemoveVertex(A)")
 	}
 }
 
@@ -154,9 +154,9 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 	// Add weighted edge.
 	_, err = g.AddEdge(VertexA, VertexB, Weight7)
 	// Must succeed.
-	MustNoError(t, err, "AddEdge(A,B,7) on weighted graph")
+	MustErrorNil(t, err, "AddEdge(A,B,7) on weighted graph")
 	// Membership query must succeed via adjacency.
-	MustTrue(t, g.HasEdge(VertexA, VertexB), "HasEdge(A,B) after AddEdge(A,B,7)")
+	MustEqualBool(t, g.HasEdge(VertexA, VertexB), true, "HasEdge(A,B) after AddEdge(A,B,7)")
 
 	// Stage 3: Default graph disallows self-loops.
 	// Create default graph (loops disabled).
@@ -172,18 +172,18 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 	// Add self-loop.
 	loopID, err := g.AddEdge(VertexX, VertexX, Weight0)
 	// Must succeed.
-	MustNoError(t, err, "AddEdge(X,X,0) when loops enabled")
+	MustErrorNil(t, err, "AddEdge(X,X,0) when loops enabled")
 	// ID must be non-empty (format is not a contract here).
-	MustNonEmptyString(t, loopID, "AddEdge(X,X,0) must return non-empty edge ID")
+	MustNotEqualString(t, loopID, "", "AddEdge(X,X,0) must return non-empty edge ID")
 	// Membership query must be true.
-	MustTrue(t, g.HasEdge(VertexX, VertexX), "HasEdge(X,X) after adding self-loop")
+	MustEqualBool(t, g.HasEdge(VertexX, VertexX), true, "HasEdge(X,X) after adding self-loop")
 
 	// Stage 5: Multi-edge disallowed by default (second edge with same endpoints must error).
 	// Create default graph (multi-edges disabled).
 	g = core.NewGraph()
 	// Add first edge (must succeed).
 	_, err = g.AddEdge(VertexA, VertexB, Weight0)
-	MustNoError(t, err, "first AddEdge(A,B,0) on default graph")
+	MustErrorNil(t, err, "first AddEdge(A,B,0) on default graph")
 	// Add second parallel edge (must fail).
 	_, err = g.AddEdge(VertexA, VertexB, Weight0)
 	MustErrorIs(t, err, core.ErrMultiEdgeNotAllowed, "second AddEdge(A,B,0) on default graph")
@@ -193,10 +193,10 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 	g = core.NewGraph(core.WithMultiEdges(), core.WithWeighted(), core.WithLoops())
 	// Add first edge.
 	e1, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "first AddEdge(A,B,1) on multigraph")
+	MustErrorNil(t, err, "first AddEdge(A,B,1) on multigraph")
 	// Add second parallel edge.
 	e2, err := g.AddEdge(VertexA, VertexB, Weight2)
-	MustNoError(t, err, "second AddEdge(A,B,2) on multigraph")
+	MustErrorNil(t, err, "second AddEdge(A,B,2) on multigraph")
 	// Parallel edges must produce distinct IDs.
 	MustNotEqualString(t, e1, e2, "parallel AddEdge(A,B,*) must return distinct IDs when multi-edges enabled")
 }
@@ -246,12 +246,12 @@ func TestGraph_MixedEdgesDirectedOverride(t *testing.T) {
 		g := core.NewMixedGraph()
 		// Add an edge overriding directedness to true.
 		eid, err := g.AddEdge(VertexX, VertexY, Weight0, core.WithEdgeDirected(true))
-		MustNoError(t, err, "AddEdge(X,Y,0,WithEdgeDirected(true)) on mixed graph")
+		MustErrorNil(t, err, "AddEdge(X,Y,0,WithEdgeDirected(true)) on mixed graph")
 		// Read back the edge by ID.
 		e, err := g.GetEdge(eid)
-		MustNoError(t, err, "GetEdge(eid) on mixed graph")
+		MustErrorNil(t, err, "GetEdge(eid) on mixed graph")
 		// Validate per-edge directedness override effect.
-		MustTrue(t, e.Directed, "mixed edge must have Directed=true after WithEdgeDirected(true)")
+		MustEqualBool(t, e.Directed, true, "mixed edge must have Directed=true after WithEdgeDirected(true)")
 	}
 }
 
@@ -291,24 +291,24 @@ func TestGraph_RemoveEdge(t *testing.T) {
 
 	// Add edge A-B to later remove.
 	eidAB, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "AddEdge(A,B,1) setup")
+	MustErrorNil(t, err, "AddEdge(A,B,1) setup")
 
 	// Add edge B-C to ensure unrelated edges remain.
 	_, err = g.AddEdge(VertexB, VertexC, Weight2)
-	MustNoError(t, err, "AddEdge(B,C,2) setup")
+	MustErrorNil(t, err, "AddEdge(B,C,2) setup")
 
 	// Stage 2: Removing a non-existent edge must yield ErrEdgeNotFound.
 	err = g.RemoveEdge(EdgeIDMissing)
 	MustErrorIs(t, err, core.ErrEdgeNotFound, "RemoveEdge(missing)")
 	// Stage 3: Remove existing A-B and verify undirected adjacency cleanup.
-	MustNoError(t, g.RemoveEdge(eidAB), "RemoveEdge(eidAB)")
+	MustErrorNil(t, g.RemoveEdge(eidAB), "RemoveEdge(eidAB)")
 
 	// Verify forward adjacency removed.
-	MustFalse(t, g.HasEdge(VertexA, VertexB), "HasEdge(A,B) after RemoveEdge(eidAB)")
+	MustEqualBool(t, g.HasEdge(VertexA, VertexB), false, "HasEdge(A,B) after RemoveEdge(eidAB)")
 	// Verify mirror adjacency removed in undirected graph.
-	MustFalse(t, g.HasEdge(VertexB, VertexA), "HasEdge(B,A) after RemoveEdge(eidAB)")
+	MustEqualBool(t, g.HasEdge(VertexB, VertexA), false, "HasEdge(B,A) after RemoveEdge(eidAB)")
 	// Verify unrelated edge remains.
-	MustTrue(t, g.HasEdge(VertexB, VertexC), "HasEdge(B,C) after RemoveEdge(eidAB)")
+	MustEqualBool(t, g.HasEdge(VertexB, VertexC), true, "HasEdge(B,C) after RemoveEdge(eidAB)")
 }
 
 // TestGraph_StatsSnapshot VERIFIES GraphStats matches graph counts, flags, and directed/undirected tallies.
@@ -346,15 +346,15 @@ func TestGraph_StatsSnapshot(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMixedEdges())
 
 	// Stage 2: Add vertices explicitly so VertexCount is deterministic.
-	MustNoError(t, g.AddVertex(VertexA), "AddVertex(A) setup for Stats()")
-	MustNoError(t, g.AddVertex(VertexB), "AddVertex(B) setup for Stats()")
-	MustNoError(t, g.AddVertex(VertexC), "AddVertex(C) setup for Stats()")
+	MustErrorNil(t, g.AddVertex(VertexA), "AddVertex(A) setup for Stats()")
+	MustErrorNil(t, g.AddVertex(VertexB), "AddVertex(B) setup for Stats()")
+	MustErrorNil(t, g.AddVertex(VertexC), "AddVertex(C) setup for Stats()")
 
 	// Stage 3: Add one undirected edge (default) and one directed override edge.
 	_, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "AddEdge(A,B,1) undirected default on mixed graph")
+	MustErrorNil(t, err, "AddEdge(A,B,1) undirected default on mixed graph")
 	_, err = g.AddEdge(VertexB, VertexC, Weight2, core.WithEdgeDirected(true))
-	MustNoError(t, err, "AddEdge(B,C,2,WithEdgeDirected(true)) on mixed graph")
+	MustErrorNil(t, err, "AddEdge(B,C,2,WithEdgeDirected(true)) on mixed graph")
 
 	// Stage 4: Read stats snapshot.
 	s := g.Stats()
@@ -364,11 +364,11 @@ func TestGraph_StatsSnapshot(t *testing.T) {
 	MustEqualInt(t, s.EdgeCount, g.EdgeCount(), "Stats.EdgeCount must match EdgeCount()")
 
 	// Stage 4: Flags must reflect constructor options.
-	MustFalse(t, s.DirectedDefault, "Stats.DirectedDefault must be false for WithDirected(false)")
-	MustTrue(t, s.Weighted, "Stats.Weighted must be true for WithWeighted()")
-	MustTrue(t, s.MixedMode, "Stats.MixedMode must be true for WithMixedEdges()")
-	MustFalse(t, s.AllowsMulti, "Stats.AllowsMulti must be false when WithMultiEdges() is not set")
-	MustFalse(t, s.AllowsLoops, "Stats.AllowsLoops must be false when WithLoops() is not set")
+	MustEqualBool(t, s.DirectedDefault, false, "Stats.DirectedDefault must be false for WithDirected(false)")
+	MustEqualBool(t, s.Weighted, true, "Stats.Weighted must be true for WithWeighted()")
+	MustEqualBool(t, s.MixedMode, true, "Stats.MixedMode must be true for WithMixedEdges()")
+	MustEqualBool(t, s.AllowsMulti, false, "Stats.AllowsMulti must be false when WithMultiEdges() is not set")
+	MustEqualBool(t, s.AllowsLoops, false, "Stats.AllowsLoops must be false when WithLoops() is not set")
 
 	// Stage 4: Directed/undirected edge tallies must match this construction.
 	MustEqualInt(t, s.DirectedEdgeCount, Count1, "Stats.DirectedEdgeCount must be 1 (one override-directed edge)")
@@ -412,7 +412,7 @@ func TestGraph_ClearPreservesFlagsAndResetsState(t *testing.T) {
 
 	// Add one edge to ensure the graph is non-empty before Clear().
 	_, err := g.AddEdge(VertexA, VertexB, Weight5)
-	MustNoError(t, err, "AddEdge(A,B,5) setup for Clear()")
+	MustErrorNil(t, err, "AddEdge(A,B,5) setup for Clear()")
 
 	// Stage 2: Clear the graph.
 	g.Clear()
@@ -422,13 +422,13 @@ func TestGraph_ClearPreservesFlagsAndResetsState(t *testing.T) {
 	MustEqualInt(t, g.EdgeCount(), Count0, "EdgeCount() after Clear()")
 
 	// Stage 3: Flags must be preserved.
-	MustTrue(t, g.Directed(), "Directed() must be preserved after Clear()")
-	MustTrue(t, g.Weighted(), "Weighted() must be preserved after Clear()")
-	MustTrue(t, g.Multigraph(), "Multigraph() must be preserved after Clear()")
+	MustEqualBool(t, g.Directed(), true, "Directed() must be preserved after Clear()")
+	MustEqualBool(t, g.Weighted(), true, "Weighted() must be preserved after Clear()")
+	MustEqualBool(t, g.Multigraph(), true, "Multigraph() must be preserved after Clear()")
 
 	// Stage 4: First edge ID after Clear must reset to "e1".
 	eid, err := g.AddEdge(VertexA, VertexB, Weight5)
-	MustNoError(t, err, "AddEdge(A,B,5) after Clear()")
+	MustErrorNil(t, err, "AddEdge(A,B,5) after Clear()")
 	MustEqualString(t, eid, EdgeIDFirst, "first edge ID after Clear() must be EdgeIDFirst")
 }
 
@@ -470,18 +470,18 @@ func TestGraph_Queries(t *testing.T) {
 	g := core.NewGraph(core.WithWeighted(), core.WithLoops())
 
 	// Stage 2: Add one undirected edge V1–V2 and one self-loop V1–V1.
-	MustNoError(t, g.AddVertex(VertexV1), "AddVertex(V1)")
+	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1)")
 	_, err := g.AddEdge(VertexV1, VertexV2, Weight0)
-	MustNoError(t, err, "AddEdge(V1,V2,0)")
+	MustErrorNil(t, err, "AddEdge(V1,V2,0)")
 	_, err = g.AddEdge(VertexV1, VertexV1, Weight1)
-	MustNoError(t, err, "AddEdge(V1,V1,1)")
+	MustErrorNil(t, err, "AddEdge(V1,V1,1)")
 
 	// Stage 3: Undirected edge must be mirrored for membership queries.
-	MustTrue(t, g.HasEdge(VertexV2, VertexV1), "HasEdge(V2,V1) mirror for undirected edge")
+	MustEqualBool(t, g.HasEdge(VertexV2, VertexV1), true, "HasEdge(V2,V1) mirror for undirected edge")
 
 	// Stage 4: Neighbors must return edges sorted by Edge.ID.
 	nbs, err := g.Neighbors(VertexV1)
-	MustNoError(t, err, "Neighbors(V1)")
+	MustErrorNil(t, err, "Neighbors(V1)")
 
 	// Extract neighbor IDs in returned order.
 	ids := make([]string, 0, len(nbs))
@@ -539,9 +539,9 @@ func TestGraph_CloneEmptyAndClone(t *testing.T) {
 
 	// Add two parallel edges so clone has non-trivial inventory.
 	eid1, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "AddEdge(A,B,1)")
+	MustErrorNil(t, err, "AddEdge(A,B,1)")
 	_, err = g.AddEdge(VertexA, VertexB, Weight2)
-	MustNoError(t, err, "AddEdge(A,B,2)")
+	MustErrorNil(t, err, "AddEdge(A,B,2)")
 
 	// Stage 2: CloneEmpty must preserve vertices and have zero edges.
 	ce := g.CloneEmpty()
@@ -555,14 +555,14 @@ func TestGraph_CloneEmptyAndClone(t *testing.T) {
 
 	// Stage 4: Deep-copy contract: cloned edge objects must not alias original objects.
 	origEdge, err := g.GetEdge(eid1)
-	MustNoError(t, err, "GetEdge(eid1) on original graph")
+	MustErrorNil(t, err, "GetEdge(eid1) on original graph")
 	cloneEdge, err := c.GetEdge(eid1)
-	MustNoError(t, err, "GetEdge(eid1) on cloned graph")
+	MustErrorNil(t, err, "GetEdge(eid1) on cloned graph")
 
 	// Verify pointers differ (deep copy).
-	MustTrue(t, origEdge != cloneEdge, "Clone deep-copy: edge pointers must not alias")
+	MustEqualBool(t, origEdge != cloneEdge, true, "Clone deep-copy: edge pointers must not alias")
 	// Verify scalar value preserved (exact int-like weight).
-	MustTrue(t, origEdge.Weight == cloneEdge.Weight, "Clone deep-copy: edge weights must be preserved")
+	MustEqualBool(t, origEdge.Weight == cloneEdge.Weight, true, "Clone deep-copy: edge weights must be preserved")
 }
 
 // TestGraph_LoopsAndDirection VERIFIES self-loop behavior in undirected vs directed graphs.
@@ -601,11 +601,11 @@ func TestGraph_LoopsAndDirection(t *testing.T) {
 
 		// Add self-loop on X.
 		eid, err := g.AddEdge(VertexX, VertexX, Weight0)
-		MustNoError(t, err, "AddEdge(X,X,0) undirected loops-enabled")
+		MustErrorNil(t, err, "AddEdge(X,X,0) undirected loops-enabled")
 
 		// Neighbors(X) must return the loop exactly once.
 		nbs, err := g.Neighbors(VertexX)
-		MustNoError(t, err, "Neighbors(X) undirected loop")
+		MustErrorNil(t, err, "Neighbors(X) undirected loop")
 		MustEqualInt(t, len(nbs), Count1, "Neighbors(X) undirected self-loop appears once")
 
 		// Edges() must yield exactly one edge for a self-loop.
@@ -621,15 +621,15 @@ func TestGraph_LoopsAndDirection(t *testing.T) {
 
 		// Add self-loop on Y.
 		eid, err := g.AddEdge(VertexY, VertexY, Weight0)
-		MustNoError(t, err, "AddEdge(Y,Y,0) directed loops-enabled")
+		MustErrorNil(t, err, "AddEdge(Y,Y,0) directed loops-enabled")
 
 		// Neighbors(Y) must return the loop once.
 		nbs, err := g.Neighbors(VertexY)
-		MustNoError(t, err, "Neighbors(Y) directed loop")
+		MustErrorNil(t, err, "Neighbors(Y) directed loop")
 		MustEqualInt(t, len(nbs), Count1, "Neighbors(Y) directed self-loop appears once")
 
 		// Directed flag must be true for directed self-loop edge.
-		MustTrue(t, nbs[0].Directed, "Neighbors(Y)[0].Directed must be true in directed graph")
+		MustEqualBool(t, nbs[0].Directed, true, "Neighbors(Y)[0].Directed must be true in directed graph")
 		// ID must match AddEdge return.
 		MustEqualString(t, nbs[0].ID, eid, "Neighbors(Y)[0].ID equals AddEdge returned ID (directed loop)")
 	}
@@ -671,22 +671,22 @@ func TestGraph_MultiEdges(t *testing.T) {
 
 	// Stage 2: Add parallel edges A-B with different weights.
 	e1, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "AddEdge(A,B,1)")
+	MustErrorNil(t, err, "AddEdge(A,B,1)")
 	e2, err := g.AddEdge(VertexA, VertexB, Weight2)
-	MustNoError(t, err, "AddEdge(A,B,2)")
+	MustErrorNil(t, err, "AddEdge(A,B,2)")
 
 	// Stage 3: IDs must differ.
 	MustNotEqualString(t, e1, e2, "parallel edges must produce distinct IDs")
 
 	// Stage 4: Validate stored weights by reading edges back by ID.
 	edge1, err := g.GetEdge(e1)
-	MustNoError(t, err, "GetEdge(e1)")
+	MustErrorNil(t, err, "GetEdge(e1)")
 	edge2, err := g.GetEdge(e2)
-	MustNoError(t, err, "GetEdge(e2)")
+	MustErrorNil(t, err, "GetEdge(e2)")
 
 	// Compare weights exactly (integer-like float64 constants).
-	MustTrue(t, edge1.Weight == float64(Weight1), "edge1 weight must equal 1")
-	MustTrue(t, edge2.Weight == float64(Weight2), "edge2 weight must equal 2")
+	MustEqualBool(t, edge1.Weight == float64(Weight1), true, "edge1 weight must equal 1")
+	MustEqualBool(t, edge2.Weight == float64(Weight2), true, "edge2 weight must equal 2")
 }
 
 // TestGraph_HasEdgeUnknownVertices ANCHORS the contract: HasEdge must be safe for unknown vertex IDs.
@@ -721,7 +721,7 @@ func TestGraph_HasEdgeUnknownVertices(t *testing.T) {
 	// Stage 1: Querying an empty graph with unknown vertices must be safe and return false.
 	g := core.NewGraph()
 	// Stage 2: Validate predicate result.
-	MustFalse(t, g.HasEdge(VertexU, VertexV), "HasEdge(U,V) on unknown vertices must be false")
+	MustEqualBool(t, g.HasEdge(VertexU, VertexV), false, "HasEdge(U,V) on unknown vertices must be false")
 }
 
 // TestGraph_UnweightedViewCarriesNextEdgeID VERIFIES UnweightedView preserves edge-ID counter to avoid collisions.
@@ -761,30 +761,30 @@ func TestGraph_UnweightedViewCarriesNextEdgeID(t *testing.T) {
 
 	// Add first weighted edge and retain its ID.
 	eid1, err := src.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "src.AddEdge(A,B,1)")
+	MustErrorNil(t, err, "src.AddEdge(A,B,1)")
 	// Add second weighted edge to further advance the counter.
 	_, err = src.AddEdge(VertexB, VertexC, Weight2)
-	MustNoError(t, err, "src.AddEdge(B,C,2)")
+	MustErrorNil(t, err, "src.AddEdge(B,C,2)")
 
 	// Stage 2: Build the unweighted view and validate Weighted()==false.
 	view := core.UnweightedView(src)
-	MustFalse(t, view.Weighted(), "UnweightedView(src) must return an unweighted graph")
+	MustEqualBool(t, view.Weighted(), false, "UnweightedView(src) must return an unweighted graph")
 
 	// Stage 3: Validate forced weight=0 for copied edges.
 	e1, err := view.GetEdge(eid1)
-	MustNoError(t, err, "view.GetEdge(eid1)")
-	MustTrue(t, e1.Weight == float64(Weight0), "UnweightedView must force copied edge weights to 0")
+	MustErrorNil(t, err, "view.GetEdge(eid1)")
+	MustEqualBool(t, e1.Weight == float64(Weight0), true, "UnweightedView must force copied edge weights to 0")
 
 	// Stage 4: AddEdge must not reuse an existing edge ID in the view.
 	before := view.EdgeCount()
 	newID, err := view.AddEdge(VertexX, VertexY, Weight0)
-	MustNoError(t, err, "view.AddEdge(X,Y,0)")
+	MustErrorNil(t, err, "view.AddEdge(X,Y,0)")
 	MustEqualInt(t, view.EdgeCount(), before+Count1, "AddEdge on view must increase edge count by 1")
 	MustNotEqualString(t, newID, eid1, "AddEdge on view must not collide with copied edge IDs")
 
 	// Stage 5: Previously copied edge must still exist and keep endpoints.
 	e1After, err := view.GetEdge(eid1)
-	MustNoError(t, err, "view.GetEdge(eid1) after adding new edge")
+	MustErrorNil(t, err, "view.GetEdge(eid1) after adding new edge")
 	MustEqualString(t, e1After.From, e1.From, "copied edge From must be preserved after AddEdge on view")
 	MustEqualString(t, e1After.To, e1.To, "copied edge To must be preserved after AddEdge on view")
 }
@@ -826,15 +826,15 @@ func TestGraph_UnweightedViewFunctionalSnapshot(t *testing.T) {
 
 	// Add two edges with non-zero weights.
 	id1, err := src.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "src.AddEdge(A,B,1)")
+	MustErrorNil(t, err, "src.AddEdge(A,B,1)")
 	id2, err := src.AddEdge(VertexB, VertexC, Weight7)
-	MustNoError(t, err, "src.AddEdge(B,C,7)")
+	MustErrorNil(t, err, "src.AddEdge(B,C,7)")
 
 	// Stage 2: Build view.
 	view := core.UnweightedView(src)
 
 	// Stage 3: Inventories must match; view must be unweighted.
-	MustFalse(t, view.Weighted(), "UnweightedView must return Weighted()==false")
+	MustEqualBool(t, view.Weighted(), false, "UnweightedView must return Weighted()==false")
 	MustSameStringSet(t, view.Vertices(), src.Vertices(), "UnweightedView must preserve vertex ID set")
 	MustSameStringSet(t, ExtractEdgeIDs(view.Edges()), ExtractEdgeIDs(src.Edges()), "UnweightedView must preserve edge ID set")
 
@@ -842,20 +842,20 @@ func TestGraph_UnweightedViewFunctionalSnapshot(t *testing.T) {
 	ids := []string{id1, id2}
 	for _, eid := range ids {
 		orig, err := src.GetEdge(eid)
-		MustNoError(t, err, "src.GetEdge(eid)")
+		MustErrorNil(t, err, "src.GetEdge(eid)")
 		cpy, err := view.GetEdge(eid)
-		MustNoError(t, err, "view.GetEdge(eid)")
+		MustErrorNil(t, err, "view.GetEdge(eid)")
 
 		MustEqualString(t, cpy.From, orig.From, "UnweightedView must preserve Edge.From")
 		MustEqualString(t, cpy.To, orig.To, "UnweightedView must preserve Edge.To")
-		MustTrue(t, cpy.Directed == orig.Directed, "UnweightedView must preserve Edge.Directed")
-		MustTrue(t, cpy.Weight == float64(Weight0), "UnweightedView must force Edge.Weight==0")
+		MustEqualBool(t, cpy.Directed == orig.Directed, true, "UnweightedView must preserve Edge.Directed")
+		MustEqualBool(t, cpy.Weight == float64(Weight0), true, "UnweightedView must force Edge.Weight==0")
 	}
 
 	// Stage 5: Mutating view must not mutate src.
 	before := src.EdgeCount()
 	_, err = view.AddEdge(VertexX, VertexY, Weight0)
-	MustNoError(t, err, "view.AddEdge(X,Y,0)")
+	MustErrorNil(t, err, "view.AddEdge(X,Y,0)")
 	MustEqualInt(t, src.EdgeCount(), before, "mutating view must not change src.EdgeCount()")
 }
 
@@ -895,10 +895,10 @@ func TestGraph_InducedSubgraphCarriesNextEdgeID(t *testing.T) {
 
 	// Add edge A-B and retain its ID (it must be included in keep={A,B}).
 	eidAB, err := src.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "src.AddEdge(A,B,1)")
+	MustErrorNil(t, err, "src.AddEdge(A,B,1)")
 	// Add edge B-C (will be excluded by keep={A,B}).
 	_, err = src.AddEdge(VertexB, VertexC, Weight2)
-	MustNoError(t, err, "src.AddEdge(B,C,2)")
+	MustErrorNil(t, err, "src.AddEdge(B,C,2)")
 
 	// Stage 2: Keep only {A,B}; induced subgraph must keep exactly the A-B edge.
 	keep := map[string]bool{VertexA: true, VertexB: true}
@@ -907,18 +907,18 @@ func TestGraph_InducedSubgraphCarriesNextEdgeID(t *testing.T) {
 	MustEqualInt(t, sub.EdgeCount(), Count1, "InducedSubgraph keep={A,B} must keep exactly 1 edge")
 
 	eAB, err := sub.GetEdge(eidAB)
-	MustNoError(t, err, "sub.GetEdge(eidAB)")
+	MustErrorNil(t, err, "sub.GetEdge(eidAB)")
 
 	// Stage 3: AddEdge must not reuse an existing kept edge ID.
 	before := sub.EdgeCount()
 	newID, err := sub.AddEdge(VertexA, VertexD, Weight3)
-	MustNoError(t, err, "sub.AddEdge(A,D,3)")
+	MustErrorNil(t, err, "sub.AddEdge(A,D,3)")
 	MustEqualInt(t, sub.EdgeCount(), before+Count1, "AddEdge on subgraph must increase edge count by 1")
 	MustNotEqualString(t, newID, eidAB, "new subgraph edge ID must not collide with kept eidAB")
 
 	// Stage 4: Previously kept edge must still exist and keep endpoints.
 	eABAfter, err := sub.GetEdge(eidAB)
-	MustNoError(t, err, "sub.GetEdge(eidAB) after adding new edge")
+	MustErrorNil(t, err, "sub.GetEdge(eidAB) after adding new edge")
 	MustEqualString(t, eABAfter.From, eAB.From, "kept edge From must be preserved after AddEdge on subgraph")
 	MustEqualString(t, eABAfter.To, eAB.To, "kept edge To must be preserved after AddEdge on subgraph")
 }
@@ -958,11 +958,11 @@ func TestGraph_InducedSubgraphFunctionalCorrectness(t *testing.T) {
 	src := core.NewGraph(core.WithWeighted())
 
 	_, err := src.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "src.AddEdge(A,B,1)")
+	MustErrorNil(t, err, "src.AddEdge(A,B,1)")
 	_, err = src.AddEdge(VertexB, VertexC, Weight2)
-	MustNoError(t, err, "src.AddEdge(B,C,2)")
+	MustErrorNil(t, err, "src.AddEdge(B,C,2)")
 	idAC, err := src.AddEdge(VertexA, VertexC, Weight3)
-	MustNoError(t, err, "src.AddEdge(A,C,3)")
+	MustErrorNil(t, err, "src.AddEdge(A,C,3)")
 
 	// Stage 2: Induce keep={A,C}.
 	keep := map[string]bool{VertexA: true, VertexC: true}
@@ -974,14 +974,14 @@ func TestGraph_InducedSubgraphFunctionalCorrectness(t *testing.T) {
 	// Stage 4: Only A-C edge remains and preserves weight.
 	MustEqualInt(t, sub.EdgeCount(), Count1, "InducedSubgraph keep={A,C} must keep exactly 1 edge")
 	e, err := sub.GetEdge(idAC)
-	MustNoError(t, err, "sub.GetEdge(idAC)")
+	MustErrorNil(t, err, "sub.GetEdge(idAC)")
 	MustEqualString(t, e.From, VertexA, "kept edge must have From==A")
 	MustEqualString(t, e.To, VertexC, "kept edge must have To==C")
-	MustTrue(t, e.Weight == float64(Weight3), "kept edge must preserve Weight==3")
+	MustEqualBool(t, e.Weight == float64(Weight3), true, "kept edge must preserve Weight==3")
 
 	// Edges incident to removed vertex must not exist (and predicate must be safe).
-	MustFalse(t, sub.HasEdge(VertexA, VertexB), "sub.HasEdge(A,B) must be false when B is not kept")
-	MustFalse(t, sub.HasEdge(VertexB, VertexC), "sub.HasEdge(B,C) must be false when B is not kept")
+	MustEqualBool(t, sub.HasEdge(VertexA, VertexB), false, "sub.HasEdge(A,B) must be false when B is not kept")
+	MustEqualBool(t, sub.HasEdge(VertexB, VertexC), false, "sub.HasEdge(B,C) must be false when B is not kept")
 }
 
 // TestGraph_EdgesAreSorted ANCHORS the contract: Edges() must be sorted by Edge.ID ascending.
@@ -1018,14 +1018,62 @@ func TestGraph_EdgesAreSorted(t *testing.T) {
 
 	// Add three parallel edges.
 	_, err := g.AddEdge(VertexA, VertexB, Weight1)
-	MustNoError(t, err, "AddEdge(A,B,1)")
+	MustErrorNil(t, err, "AddEdge(A,B,1)")
 	_, err = g.AddEdge(VertexA, VertexB, Weight2)
-	MustNoError(t, err, "AddEdge(A,B,2)")
+	MustErrorNil(t, err, "AddEdge(A,B,2)")
 	_, err = g.AddEdge(VertexA, VertexB, Weight3)
-	MustNoError(t, err, "AddEdge(A,B,3)")
+	MustErrorNil(t, err, "AddEdge(A,B,3)")
 
 	// Stage 2: Validate stable sorted order by Edge.ID (lexicographic).
 	ees := g.Edges()
 	ids := ExtractEdgeIDs(ees)
 	MustSortedStrings(t, ids, "Edges() IDs must be sorted asc")
+}
+
+// TestGraph_AddEdge_WithID_OK verifies that AddEdge honors WithID for a unique, non-empty edge identifier and that
+// the created edge is addressable through the edge catalog under that exact ID.
+//
+// Implementation:
+//   - Stage 1: Construct a default Graph (unweighted, undirected).
+//   - Stage 2: AddEdge(A,B,0,WithID(customID)) and assert it succeeds.
+//   - Stage 3: Assert the returned edge ID equals customID (no auto-ID fallback).
+//   - Stage 4: Lookup via GetEdge(customID) and assert Edge.ID == customID.
+//   - Stage 5: Assert HasEdge(A,B) reflects the insertion.
+//
+// Behavior highlights:
+//   - Confirms that WithID bypasses auto-generated IDs for that edge.
+//   - Confirms catalog key consistency: returned ID == GetEdge lookup key == Edge.ID field.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - The test fails if AddEdge returns an error, if the returned ID mismatches,
+//     if GetEdge cannot retrieve the edge, or if HasEdge does not observe the insertion.
+//
+// Determinism:
+//   - Deterministic: explicit ID and deterministic catalog operations; no iteration-order dependencies.
+//
+// Complexity:
+//   - Time O(1) average per operation, Space O(1) (excluding graph allocations).
+//
+// Notes:
+//   - Uses Weight0 to satisfy the default unweighted graph constraint.
+//
+// AI-Hints:
+//   - Use WithID to create stable external references (golden tests, trace correlation, interop).
+func TestGraph_AddEdge_WithID_OK(t *testing.T) {
+	g := core.NewGraph()
+	eid, err := g.AddEdge(VertexA, VertexB, Weight0, core.WithID("customID123"))
+	MustErrorNil(t, err, "AddEdge(A,B,0,WithID) should succeed with unique ID")
+	MustEqualString(t, eid, "customID123", "returned edge ID should match provided ID")
+	// Check the edge is retrievable and has the correct ID
+	e, err := g.GetEdge("customID123")
+	MustErrorNil(t, err, "GetEdgeByID(customID123) after AddEdge")
+	MustNotNil(t, e, "GetEdgeByID should return an Edge")
+	MustEqualString(t, e.ID, "customID123", "Edge.ID should be the custom ID")
+	MustEqualBool(t, g.HasEdge(VertexA, VertexB), true, "HasEdge(A,B) should reflect the new edge")
 }

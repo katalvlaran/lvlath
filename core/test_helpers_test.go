@@ -10,6 +10,7 @@ package core_test
 
 import (
 	"errors"
+	"fmt"
 	"sort"
 	"testing"
 
@@ -48,12 +49,12 @@ const (
 
 // Common weights used across core tests (avoid magic numbers in test bodies).
 const (
-	Weight0 = 0
-	Weight1 = 1
-	Weight2 = 2
-	Weight3 = 3
-	Weight5 = 5
-	Weight7 = 7
+	Weight0 float64 = 0
+	Weight1 float64 = 1
+	Weight2 float64 = 2
+	Weight3 float64 = 3
+	Weight5 float64 = 5
+	Weight7 float64 = 7
 )
 
 // Common cardinalities used across core tests (avoid magic numbers in test bodies).
@@ -102,25 +103,142 @@ const (
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - This is a TEST-FIXTURE constructor; it intentionally does not belong to production API.
-//   - Keeping it in test_helpers_test.go makes the test policy centralized and auditable.
+//   - This is a test fixture constructor; it intentionally does not belong to production API.
+//   - Keep it here to centralize test policy and avoid boilerplate.
 //
 // AI-Hints:
-//   - Use NewGraphFull when you need maximum feature surface with minimal boilerplate.
-//   - For strict-policy tests, prefer building graphs explicitly (NewGraph + options) to isolate constraints.
+//   - Use NewGraphFull when you need maximum feature surface with minimal setup.
+//   - For strict-policy tests, prefer building graphs explicitly to isolate constraints.
 func NewGraphFull() *core.Graph {
 	return core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 }
 
-// MustNoError FAILS the test if err != nil.
+// MustNotNil fails the test if val is nil, including "typed nil" values stored in interfaces.
+// This helper is reflect-free and uses core.Nilable when available.
 //
 // Implementation:
-//   - Stage 1: If err == nil, return immediately.
-//   - Stage 2: Mark helper and abort via t.Fatalf with operation context.
+//   - Stage 1: Reject untyped nil (val == nil).
+//   - Stage 2: If val implements core.Nilable, call IsNil() to detect typed-nil receivers.
+//   - Stage 3: For a small set of common nilable containers used in core tests, check nil directly.
+//   - Stage 4: If nil is detected, fail with a type-rich message.
 //
 // Behavior highlights:
-//   - Makes error sites explicit and consistent.
-//   - Keeps test code focused on contracts, not boilerplate.
+//   - Reflect-free and O(1) on the hot path.
+//   - Produces actionable failures by printing the concrete dynamic type.
+//
+// Inputs:
+//   - t: test context.
+//   - val: value to validate (often *core.Graph, *core.Edge, slices, maps).
+//   - op: short operation label for failure context.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if val is nil (untyped or typed nil).
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This helper is intentionally conservative: it does not attempt to detect arbitrary typed nils
+//     for every possible type without reflection.
+//   - Prefer implementing core.Nilable on pointer-backed types that commonly appear behind interfaces.
+//
+// AI-Hints:
+//   - If you hit a typed-nil that is not detected, make that type implement core.Nilable in production code.
+func MustNotNil(t *testing.T, val any, op string) {
+	t.Helper()
+
+	// Stage 1: Unyped nil interface check.
+	if val == nil {
+		failNil(t, op, "untyped nil", val)
+		return
+	}
+
+	// Stage 2: Typed nil check via core.Nilable (the preferred, reflect-free mechanism).
+	if n, ok := val.(core.Nilable); ok && n.IsNil() {
+		failNil(t, op, "typed nil via core.Nilable", val)
+		return
+	}
+
+	// Stage 3: Small, explicit set of common nilable containers used in tests.
+	switch v := val.(type) {
+	case error:
+		// A nil concrete error inside an interface is usually caught by val==nil,
+		// but we keep this branch to make intent explicit for tests.
+		if v == nil {
+			failNil(t, op, "typed nil error", val)
+			return
+		}
+	case *int, *int64, *float64:
+		if v == nil {
+			failNil(t, op, "nil *int|*int64|*float64", val)
+			return
+		}
+	case []string:
+		if v == nil {
+			failNil(t, op, "nil []string slice", val)
+			return
+		}
+	case []int64:
+		if v == nil {
+			failNil(t, op, "nil []int64 slice", val)
+			return
+		}
+	case []float64:
+		if v == nil {
+			failNil(t, op, "nil []float64 slice", val)
+			return
+		}
+	case []*core.Edge:
+		if v == nil {
+			failNil(t, op, "nil []*core.Edge slice", val)
+			return
+		}
+	case []*core.Vertex:
+		if v == nil {
+			failNil(t, op, "nil []*core.Vertex slice", val)
+			return
+		}
+	case map[string]*core.Vertex:
+		if v == nil {
+			failNil(t, op, "nil map[string]*core.Vertex", val)
+			return
+		}
+	case map[string]*core.Edge:
+		if v == nil {
+			failNil(t, op, "nil map[string]*core.Edge", val)
+			return
+		}
+	}
+}
+
+// failNil fails with a type-rich nil diagnosis.
+// This is internal to test helpers to keep messages consistent and deterministic.
+func failNil(t *testing.T, op string, reason string, val any) {
+	t.Helper()
+
+	// %T prints the concrete dynamic type, which is critical for typed-nil debugging.
+	if val == nil {
+		t.Fatalf("FAILED [%s]: received <nil> (%s)", op, reason)
+		return
+	}
+	t.Fatalf("FAILED [%s]: received nil-like value (%s); dynamic_type=%T", op, reason, val)
+}
+
+// MustErrorNil MAIN DESCRIPTION.
+// MustErrorNil fails the test if err != nil.
+//
+// Implementation:
+//   - Stage 1: If err == nil, return.
+//   - Stage 2: Abort via t.Fatalf with operation context.
+//
+// Behavior highlights:
+//   - Keeps error checks explicit and consistent without third-party frameworks.
 //
 // Inputs:
 //   - t: *testing.T.
@@ -139,12 +257,9 @@ func NewGraphFull() *core.Graph {
 // Complexity:
 //   - Time O(1), Space O(1).
 //
-// Notes:
-//   - Keep op stable and descriptive; avoid long formatted strings.
-//
 // AI-Hints:
-//   - Prefer operation-like labels for op (call signatures) to speed up failure triage.
-func MustNoError(t *testing.T, err error, op string) {
+//   - Prefer call-signature labels for op to speed up failure triage.
+func MustErrorNil(t *testing.T, err error, op string) {
 	t.Helper()
 
 	if err == nil {
@@ -154,14 +269,14 @@ func MustNoError(t *testing.T, err error, op string) {
 	t.Fatalf("%s: unexpected error: %v", op, err)
 }
 
-// MustErrorIs FAILS the test if !errors.Is(err, target).
+// MustErrorIs fails the test if !errors.Is(err, target).
 //
 // Implementation:
 //   - Stage 1: Evaluate errors.Is(err, target).
-//   - Stage 2: t.Fatalf with target and actual error.
+//   - Stage 2: Abort via t.Fatalf with target and actual error.
 //
 // Behavior highlights:
-//   - Enforces sentinel-error contracts precisely.
+//   - Enforces sentinel-error contracts precisely (core.Err*).
 //
 // Inputs:
 //   - t: *testing.T.
@@ -179,13 +294,10 @@ func MustNoError(t *testing.T, err error, op string) {
 //   - Deterministic.
 //
 // Complexity:
-//   - Time O(depth) of wrapped error chain, Space O(1).
-//
-// Notes:
-//   - Use only for sentinel-style contracts (core.Err*).
+//   - Time O(depth of wrapped chain), Space O(1).
 //
 // AI-Hints:
-//   - When adding new sentinel errors, update tests to assert errors.Is, not string matching.
+//   - Assert errors.Is for sentinels; do not string-compare error messages.
 func MustErrorIs(t *testing.T, err error, target error, op string) {
 	t.Helper()
 
@@ -196,25 +308,22 @@ func MustErrorIs(t *testing.T, err error, target error, op string) {
 	t.Fatalf("%s: want errors.Is(err,%v)=true; got err=%v", op, target, err)
 }
 
-// MustTrue FAILS the test if cond is false.
+// MustEqualBool fails the test if got != want.
 //
 // Implementation:
-//   - Stage 1: If cond is true, return.
-//   - Stage 2: t.Fatalf with op.
-//
-// Behavior highlights:
-//   - Minimizes repetitive "if !x { t.Fatalf }" patterns.
+//   - Stage 1: Compare booleans.
+//   - Stage 2: Abort via t.Fatalf with got/want.
 //
 // Inputs:
 //   - t: *testing.T.
-//   - cond: predicate.
+//   - got, want: boolean values.
 //   - op: operation label.
 //
 // Returns:
 //   - None.
 //
 // Errors:
-//   - Fatal test failure if cond==false.
+//   - Fatal test failure on mismatch.
 //
 // Determinism:
 //   - Deterministic.
@@ -222,60 +331,16 @@ func MustErrorIs(t *testing.T, err error, target error, op string) {
 // Complexity:
 //   - Time O(1), Space O(1).
 //
-// Notes:
-//   - Use op to describe the invariant, not the mechanism.
-//
 // AI-Hints:
-//   - Prefer naming the invariant: "Vertices() must be sorted", "HasEdge must be safe", etc.
-func MustTrue(t *testing.T, cond bool, op string) {
+//   - Use this instead of ad-hoc MustTrue/MustFalse helpers for centralized style.
+func MustEqualBool(t *testing.T, got, want bool, op string) {
 	t.Helper()
 
-	if cond {
+	if got == want {
 		return
 	}
 
-	t.Fatalf("%s: predicate is false", op)
-}
-
-// MustFalse FAILS the test if cond is true.
-//
-// Implementation:
-//   - Stage 1: If cond is false, return.
-//   - Stage 2: t.Fatalf with op.
-//
-// Behavior highlights:
-//   - Symmetric to MustTrue.
-//
-// Inputs:
-//   - t: *testing.T.
-//   - cond: predicate.
-//   - op: operation label.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal test failure if cond==true.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - Keep op describing the expected falsehood.
-//
-// AI-Hints:
-//   - Use for negative contracts: "duplicate AddVertex must not change count", "HasEdge on unknown vertices must be false".
-func MustFalse(t *testing.T, cond bool, op string) {
-	t.Helper()
-
-	if !cond {
-		return
-	}
-
-	t.Fatalf("%s: predicate is true", op)
+	t.Fatalf("%s: got=%t want=%t", op, got, want)
 }
 
 // MustEqualInt FAILS if got != want.
@@ -319,6 +384,99 @@ func MustEqualInt(t *testing.T, got, want int, op string) {
 	t.Fatalf("%s: got=%d want=%d", op, got, want)
 }
 
+// MustEqualInt64 fails the test if got != want for int64 values.
+//
+// Implementation:
+//   - Stage 1: Mark as helper to attribute failures to the caller.
+//   - Stage 2: Compare got and want.
+//   - Stage 3: Fail via t.Fatalf with a stable, parseable message on mismatch.
+//
+// Behavior highlights:
+//   - Exact integer equality check with zero allocations.
+//   - Failure message includes both values for fast triage.
+//
+// Inputs:
+//   - t: test context.
+//   - got: observed int64 value.
+//   - want: expected int64 value.
+//   - op: short operation label describing the contract under test.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if got != want.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Prefer this helper for counts and sizes represented as int64.
+//   - Keep op stable (e.g., "EdgeID numeric suffix", "Atomic counter value").
+//
+// AI-Hints:
+//   - Use MustEqualInt64 for deterministic counters to avoid lossy casting to int on 32-bit targets.
+func MustEqualInt64(t *testing.T, got, want int64, op string) {
+	t.Helper()
+
+	if got == want {
+		return
+	}
+
+	t.Fatalf("%s: got=%d want=%d", op, got, want)
+}
+
+// MustEqualFloat64 fails the test if got != want for float64 values (exact equality).
+//
+// Implementation:
+//   - Stage 1: Mark as helper to attribute failures to the caller.
+//   - Stage 2: Compare got and want exactly.
+//   - Stage 3: Fail via t.Fatalf with both values on mismatch.
+//
+// Behavior highlights:
+//   - Exact comparison: no epsilon, no tolerance policy ambiguity.
+//   - Useful when exact equality is a strict contract (e.g., sentinel constants, intentionally exact values).
+//
+// Inputs:
+//   - t: test context.
+//   - got: observed float64 value.
+//   - want: expected float64 value.
+//   - op: short operation label describing the contract under test.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if got != want.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This helper intentionally does NOT implement tolerance logic.
+//   - If a value is the result of floating-point arithmetic where rounding is expected,
+//     define a dedicated helper like MustFloat64WithinEpsilon(t, got, want, eps, op)
+//     with an explicit epsilon argument.
+//
+// AI-Hints:
+//   - Use exact float checks only when the value is known to be representable exactly
+//     (e.g., 0, 1, 2, powers of two) or when the contract requires exact bitwise stability.
+func MustEqualFloat64(t *testing.T, got, want float64, op string) {
+	t.Helper()
+
+	if got == want {
+		return
+	}
+
+	t.Fatalf("%s: got=%g want=%g", op, got, want)
+}
+
 // MustEqualString FAILS if got != want.
 //
 // Implementation:
@@ -360,99 +518,37 @@ func MustEqualString(t *testing.T, got, want string, op string) {
 	t.Fatalf("%s: got=%q want=%q", op, got, want)
 }
 
-// MustNotEqualString FAILS if got == notWant.
+// MustNotEqualString FAILS if got == want.
 //
 // Implementation:
 //   - Stage 1: Compare strings.
-//   - Stage 2: t.Fatalf when equal.
+//   - Stage 2: t.Fatalf with got/want.
 //
 // Behavior highlights:
-//   - Used to assert non-colliding edge IDs.
+//   - Explicit, readable comparisons.
 //
 // Inputs:
 //   - t: *testing.T.
-//   - got, notWant: strings.
+//   - got, want: strings.
 //   - op: operation label.
 //
-// Returns:
-//   - None.
-//
 // Errors:
-//   - Fatal test failure when equal.
+//   - Fatal test failure on mismatch.
 //
 // Determinism:
 //   - Deterministic.
 //
 // Complexity:
 //   - Time O(n) compare, Space O(1).
-//
-// Notes:
-//   - Keep op describing the collision you are preventing.
-//
-// AI-Hints:
-//   - For view/subgraph ID-carry tests: assert newID != copiedID.
-func MustNotEqualString(t *testing.T, got, notWant string, op string) {
+func MustNotEqualString(t *testing.T, got, want string, op string) {
 	t.Helper()
 
-	if got != notWant {
+	if got != want {
 		return
 	}
 
-	t.Fatalf("%s: got=%q must_not_equal=%q", op, got, notWant)
+	t.Fatalf("%s: got=%q want=%q", op, got, want)
 }
-
-// MustNonEmptyString FAILS if s == "".
-//
-// Implementation:
-//   - Stage 1: Check non-empty.
-//   - Stage 2: t.Fatalf on empty.
-//
-// Behavior highlights:
-//   - Used for ID generation contracts.
-//
-// Inputs:
-//   - t: *testing.T.
-//   - s: string to validate.
-//   - op: operation label.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal test failure if s is empty.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - Useful when ID format is not part of the contract but non-emptiness is.
-//
-// AI-Hints:
-//   - Prefer this over checking prefixes unless prefix is an explicit API contract.
-func MustNonEmptyString(t *testing.T, s string, op string) {
-	t.Helper()
-
-	if s != "" {
-		return
-	}
-
-	t.Fatalf("%s: expected non-empty string", op)
-}
-
-//// MustLenInt validates the expected length for slices/maps/strings where len(x) is meaningful.
-//func MustLenInt(t *testing.T, gotLen, wantLen int) {
-//	t.Helper()
-//	msg := fmt.Sprintf(format, args...)
-//	if gotLen == wantLen {
-//		return
-//	}
-//	t.Fatalf(format, args...)
-//
-//	Must(t, gotLen == wantLen, "%s: got_len=%d want_len=%d", msg, gotLen, wantLen)
-//}
 
 // MustSortedStrings FAILS if ids are not sorted ascending.
 //
@@ -586,11 +682,11 @@ func ExtractEdgeIDs(edges []*core.Edge) []string {
 	return out
 }
 
-// MustNoErrorsFromChan FAILS the test if any non-nil error is received.
+// MustAllErrorsNil fails the test if any non-nil error is received from errCh.
 //
 // Implementation:
 //   - Stage 1: Range over errCh until it is closed.
-//   - Stage 2: On first non-nil error, fail via t.Fatalf.
+//   - Stage 2: On the first non-nil error, fail via t.Fatalf.
 //
 // Behavior highlights:
 //   - Enforces the rule "no *testing.T usage inside goroutines":
@@ -598,7 +694,7 @@ func ExtractEdgeIDs(edges []*core.Edge) []string {
 //
 // Inputs:
 //   - t: *testing.T.
-//   - errCh: receive-only channel of errors (must be closed by caller).
+//   - errCh: receive-only channel of errors (must be closed by the caller).
 //   - op: operation label describing the concurrent scenario.
 //
 // Returns:
@@ -608,18 +704,14 @@ func ExtractEdgeIDs(edges []*core.Edge) []string {
 //   - Fatal test failure if any error is non-nil.
 //
 // Determinism:
-//   - Deterministic for a fixed schedule of produced errors.
+//   - Deterministic for a fixed produced error sequence.
 //
 // Complexity:
-//   - Time O(k) where k is number of channel items, Space O(1).
-//
-// Notes:
-//   - If your concurrent scenario permits certain sentinel outcomes (e.g., ErrEdgeNotFound),
-//     filter them before sending to errCh.
+//   - Time O(k), Space O(1).
 //
 // AI-Hints:
 //   - In concurrent tests, send only unexpected errors to errCh to keep failures signal-rich.
-func MustNoErrorsFromChan(t *testing.T, errCh <-chan error, op string) {
+func MustAllErrorsNil(t *testing.T, errCh <-chan error, op string) {
 	t.Helper()
 
 	for err := range errCh {
@@ -628,4 +720,27 @@ func MustNoErrorsFromChan(t *testing.T, errCh <-chan error, op string) {
 		}
 		t.Fatalf("%s: unexpected concurrent error: %v", op, err)
 	}
+}
+
+// MustPanic asserts that f panics and that the panic value stringifies to expectedMsg.
+//
+// Notes:
+//   - Use only for programmer-error contracts (e.g., construction-time option misuse).
+//   - core runtime API must not require panics for user input.
+func MustPanic(t *testing.T, f func(), expectedMsg string, op string) {
+	t.Helper()
+
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatalf("%s: expected panic, but no panic occurred", op)
+		}
+
+		msg := fmt.Sprint(r) // convert recovered value to string
+		if msg != expectedMsg {
+			t.Fatalf("%s: expected panic message %q, got %q", op, expectedMsg, msg)
+		}
+	}()
+
+	f() // execute the function expected to panic
 }

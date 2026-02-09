@@ -18,16 +18,37 @@ package core
 //       All operations are deterministic and concurrency-safe per the locking
 //       model described in types.go (muVert, muEdgeAdj).
 
-// NewMixedGraph constructs a new Graph with mixed-mode enabled and then applies
-// any additional GraphOption values deterministically (left-to-right).
+// NewMixedGraph creates a new Graph that allows per-edge directedness overrides via EdgeOption,
+// while preserving deterministic option application order.
 //
-// Rationale:
-//   - Mixed-mode allows per-edge directedness overrides via WithEdgeDirected.
-//   - This helper is sugar for NewGraph(WithMixedEdges(), opts...).
-//   - Keeping option order stable preserves determinism for all callers.
+// Implementation:
+//   - Stage 1: Prepend WithMixedEdges() to the caller-provided options.
+//   - Stage 2: Delegate to NewGraph(...) to allocate and apply options deterministically.
 //
-// Complexity: O(1) allocations + O(len(opts)) option applications.
-// Concurrency: safe to call from multiple goroutines; it creates a fresh object.
+// Behavior highlights:
+//   - Enables WithEdgeDirected(...) on AddEdge; without mixed-mode this is rejected.
+//   - Does not mutate the caller's opts slice (no hidden side-effects).
+//
+// Inputs:
+//   - opts: additional GraphOption values applied after enabling mixed-mode.
+//
+// Returns:
+//   - *Graph: a fresh configured instance with allowMixed enabled.
+//
+// Errors:
+//   - None (construction is infallible by contract; option argument validation is internal).
+//
+// Determinism:
+//   - Options are applied left-to-right, with WithMixedEdges() always first.
+//
+// Complexity:
+//   - Time O(len(opts)), Space O(len(opts)) for the composed options slice.
+//
+// Notes:
+//   - Prefer this constructor when you plan to mix directed and undirected edges in one graph.
+//
+// AI-Hints:
+//   - Use NewMixedGraph(...) instead of remembering to prepend WithMixedEdges() manually.
 func NewMixedGraph(opts ...GraphOption) *Graph {
 	// AI-HINT: Prefer this constructor if you plan per-edge directed overrides.
 	//          Without mixed mode, AddEdge(..., WithEdgeDirected(...)) returns ErrMixedEdgesNotAllowed.
@@ -42,15 +63,33 @@ func NewMixedGraph(opts ...GraphOption) *Graph {
 	return NewGraph(mixed...)
 }
 
-// Weighted reports whether the graph treats edge weights as meaningful.
+// Weighted reports the construction-time "weighted" capability flag.
+// If false, AddEdge rejects non-zero weights with ErrBadWeight.
 //
-// Contract:
-//   - Returns the construction-time flag (immutable after NewGraph).
-//   - Read is protected by muVert for consistent visibility.
-//   - No allocations, no mutations.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock to observe configuration consistently.
+//   - Stage 2: Return the immutable flag value.
 //
-// Complexity: O(1).
-// Concurrency: safe; uses read lock.
+// Behavior highlights:
+//   - Pure query: no mutation, no iteration, no allocations.
+//
+// Returns:
+//   - bool: true if non-zero weights are permitted.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph instance (flags are immutable after construction).
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This reports a policy flag, not whether any stored edge currently has Weight != 0.
+//
+// AI-Hints:
+//   - Gate weighted algorithms by g.Weighted() before reading edge.Weight.
 func (g *Graph) Weighted() bool {
 	// AI-HINT: If this returns false, AddEdge with non-zero weight returns ErrBadWeight.
 	g.muVert.RLock()         // acquire read lock on vertex/config state
@@ -59,15 +98,34 @@ func (g *Graph) Weighted() bool {
 	return g.weighted
 }
 
-// Directed reports whether new edges default to directed.
+// Directed reports the graph-wide default directedness applied to newly created edges.
+// Per-edge overrides require mixed-mode (MixedEdges()==true).
 //
-// Contract:
-//   - Returns the construction-time flag (immutable after NewGraph).
-//   - Read is protected by muVert for consistent visibility.
-//   - No allocations, no mutations.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock to observe configuration consistently.
+//   - Stage 2: Return the immutable default directedness flag.
 //
-// Complexity: O(1).
-// Concurrency: safe; uses read lock.
+// Behavior highlights:
+//   - Pure policy query: does not scan edges.
+//
+// Returns:
+//   - bool: true if new edges default to directed orientation.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph instance.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This does not indicate whether the graph currently contains directed edges
+//     (use HasDirectedEdges() or Stats().DirectedEdgeCount for that).
+//
+// AI-Hints:
+//   - Use g.Directed() to decide default edge semantics when generating topology programmatically.
 func (g *Graph) Directed() bool {
 	// AI-HINT: Default orientation for new edges; does NOT count current directed edges.
 	g.muVert.RLock()         // acquire read lock on vertex/config state
@@ -76,15 +134,30 @@ func (g *Graph) Directed() bool {
 	return g.directed
 }
 
-// Looped reports whether the graph's edges could be looped.
+// Looped reports whether self-loops (from==to) are permitted by policy.
+// If false, AddEdge(v,v,...) rejects the operation with ErrLoopNotAllowed.
 //
-// Contract:
-//   - Returns the construction-time flag (immutable after NewGraph).
-//   - Read is protected by muVert for consistent visibility.
-//   - No allocations, no mutations.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock to observe configuration consistently.
+//   - Stage 2: Return the immutable loops policy flag.
 //
-// Complexity: O(1).
-// Concurrency: safe; uses read lock.
+// Returns:
+//   - bool: true if self-loops are permitted.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph instance.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This is a policy flag; existing self-loops can only exist if this was enabled at creation time.
+//
+// AI-Hints:
+//   - Gate loop-sensitive algorithms by g.Looped() before assuming v->v edges may exist.
 func (g *Graph) Looped() bool {
 	// AI-HINT: If false, AddEdge(v,v,...) returns ErrLoopNotAllowed.
 	g.muVert.RLock()         // acquire read lock on vertex/config state
@@ -93,15 +166,30 @@ func (g *Graph) Looped() bool {
 	return g.allowLoops
 }
 
-// Multigraph reports whether this Graph permits parallel edges (multi-edges).
+// Multigraph reports whether parallel edges between the same endpoints are permitted by policy.
+// If false, AddEdge(from,to,...) rejects duplicates with ErrMultiEdgeNotAllowed.
 //
-// Contract:
-//   - Returns the construction-time flag (immutable after NewGraph).
-//   - Read is protected by muVert for consistent visibility.
-//   - No allocations, no mutations.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock to observe configuration consistently.
+//   - Stage 2: Return the immutable multi-edge policy flag.
 //
-// Complexity: O(1).
-// Concurrency: safe; uses read lock.
+// Returns:
+//   - bool: true if parallel edges are permitted.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph instance.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Multi-edge checks in AddEdge are membership checks over adjacency buckets.
+//
+// AI-Hints:
+//   - If you need multi-edges, enable WithMultiEdges() at construction time; this is immutable later.
 func (g *Graph) Multigraph() bool {
 	// AI-HINT: If false, adding a second edge between same endpoints returns ErrMultiEdgeNotAllowed.
 	g.muVert.RLock()         // acquire read lock on vertex/config state
@@ -110,15 +198,30 @@ func (g *Graph) Multigraph() bool {
 	return g.allowMulti // return the immutable configuration flag
 }
 
-// MixedEdges reports whether this Graph permits per-edge directedness overrides.
+// MixedEdges reports whether per-edge Directed overrides are permitted via EdgeOption
+// (specifically WithEdgeDirected(...)) during AddEdge.
 //
-// Contract:
-//   - Returns the construction-time flag (immutable after NewGraph).
-//   - Read is protected by muVert for consistent visibility.
-//   - No allocations, no mutations.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock to observe configuration consistently.
+//   - Stage 2: Return the immutable mixed-mode policy flag.
 //
-// Complexity: O(1).
-// Concurrency: safe; uses read lock.
+// Returns:
+//   - bool: true if per-edge Directed overrides are permitted.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph instance.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - If false, AddEdge(..., WithEdgeDirected(...)) returns ErrMixedEdgesNotAllowed.
+//
+// AI-Hints:
+//   - Prefer NewMixedGraph(...) when you intend to mix directed and undirected edges in one instance.
 func (g *Graph) MixedEdges() bool {
 	// AI-HINT: If false, per-edge overrides (WithEdgeDirected) are rejected with ErrMixedEdgesNotAllowed.
 	g.muVert.RLock()         // acquire read lock on vertex/config state
@@ -127,21 +230,35 @@ func (g *Graph) MixedEdges() bool {
 	return g.allowMixed // return mixed-mode configuration flag
 }
 
-// Stats produces an O(V+E) read-only summary of the graph's configuration and size.
+// Stats produces a deterministic, read-only snapshot of configuration flags and catalog sizes,
+// including a classification of edges by their Directed flag.
 //
-// Semantics:
-//   - DirectedDefault mirrors the graph's default edge orientation.
-//   - Weighted/AllowsMulti/AllowsLoops/MixedMode are construction-time flags.
-//   - VertexCount/EdgeCount reflect catalog sizes at the time of the call.
-//   - DirectedEdgeCount / UndirectedEdgeCount are derived by scanning edge catalog.
+// Implementation:
+//   - Stage 1: Acquire muVert.RLock, snapshot flags and vertex count, then release.
+//   - Stage 2: Acquire muEdgeAdj.RLock, snapshot edge count and scan edges, then release.
 //
-// Locking strategy:
-//   - Acquire muVert.RLock to read flags and vertex count, then release it.
-//   - Acquire muEdgeAdj.RLock to scan edges and compute edge counters.
-//   - Never hold both locks at once to avoid lock-ordering issues and minimize contention.
+// Behavior highlights:
+//   - Avoids holding both locks simultaneously (reduces contention and avoids lock-order hazards).
+//   - Returns a compact value object suitable for diagnostics and admission checks.
 //
-// Complexity: O(V+E).
-// Concurrency: safe; uses read locks only and allocates a small result struct.
+// Returns:
+//   - *GraphStats: immutable-by-convention snapshot of flags and counts.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph state; if the graph is mutated concurrently,
+//     the snapshot reflects a consistent read per phase (flags/vertices, then edges).
+//
+// Complexity:
+//   - Time O(V+E), Space O(1) plus the returned struct.
+//
+// Notes:
+//   - DirectedDefault reports the *default policy*, not whether directed edges exist.
+//
+// AI-Hints:
+//   - Use Stats() to gate algorithms quickly (e.g., ensure Weighted==true before reading weights).
 func (g *Graph) Stats() *GraphStats {
 	// AI-HINT: Deterministic, read-only summary for assertions and tests.
 	//          DirectedEdgeCount/UndirectedEdgeCount scan edge catalog once (O(E)).

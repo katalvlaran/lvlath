@@ -1,33 +1,88 @@
 // File: methods_vertices.go
 // Role: Vertex lifecycle & queries.
+//
 // Determinism:
-//   - Vertices() returns IDs sorted lex asc.
+//   - Vertices() returns IDs sorted lexicographically ascending.
+//
 // Concurrency:
-//   - Vertex catalog protected by muVert; adjacency bootstrap under muEdgeAdj.
-// AI-HINT (file):
-//   - Vertices() returns sorted IDs (lex asc).
-//   - Degree() policy: directed edges contribute to in/out; undirected to undirected; self-loop rules documented below.
-
+//   - Vertex catalog protected by muVert.
+//   - Adjacency bootstrap under muEdgeAdj (to keep adjacency invariants consistent).
+//
+// AI-Hints (file):
+//   - Vertices() is a stable enumeration surface; rely on it for reproducible outputs.
+//   - Degree() follows documented academic policy for loops and directedness.
 package core
 
 import "sort"
 
+// IsNil reports whether the receiver should be treated as nil when stored inside interfaces.
+//
+// Implementation:
+//   - Stage 1: Compare the receiver pointer to nil.
+//   - Stage 2: Return the result without dereferencing.
+//
+// Behavior highlights:
+//   - Safe for typed-nil stored inside interfaces (no panic).
+//   - Reflect-free nil detection used by validators and test helpers via core.Nilable.
+//
+// Returns:
+//   - bool: true iff receiver == nil.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Keep this method trivial; do not add deep validation.
+//
+// AI-Hints:
+//   - Implement the same pattern for other pointer-backed core types that appear behind interfaces.
+func (v *Vertex) IsNil() bool { return v == nil }
+
 // AddVertex inserts a vertex if missing (idempotent).
 //
-// Steps:
-//  1. Validate non-empty ID (ErrEmptyVertexID).
-//  2. Under muVert, check presence; if missing, allocate Vertex and register it.
-//  3. Under muEdgeAdj, lazy-init adjacencyList[id] to keep invariants consistent.
+// Implementation:
+//   - Stage 1: Validate non-empty ID (ErrEmptyVertexID).
+//   - Stage 2: Under muVert write lock, check presence; if missing, allocate Vertex and register it.
+//   - Stage 3: Under muEdgeAdj write lock, bootstrap adjacency buckets so edge methods can rely on invariants.
 //
-// Complexity: O(1) amortized.
-// Concurrency: muVert write lock (catalog), then muEdgeAdj write lock (bootstrap).
+// Behavior highlights:
+//   - Idempotent: adding an existing vertex is a no-op.
+//   - Initializes Metadata map to a non-nil value for convenience in tests and algorithms.
+//
+// Inputs:
+//   - id: vertex identifier; must be non-empty.
+//
+// Returns:
+//   - error: nil on success; ErrEmptyVertexID on invalid input.
+//
+// Errors:
+//   - ErrEmptyVertexID: if id == "".
+//
+// Determinism:
+//   - Deterministic map membership logic; does not depend on iteration order.
+//
+// Complexity:
+//   - Time O(1) amortized, Space O(1) amortized.
+//
+// Notes:
+//   - Lock order is muVert -> muEdgeAdj to avoid lock inversion across vertex/edge code paths.
+//   - The adjacency bootstrap is intentionally minimal; it does not create any edges.
+//
+// AI-Hints:
+//   - Prefer AddVertex in setup when you want explicit vertex presence before adding edges.
 func (g *Graph) AddVertex(id string) error {
 	// AI-HINT: Empty ID returns ErrEmptyVertexID. Idempotent if vertex exists.
-
-	// Validate input: empty IDs are not allowed
 	if id == "" {
 		return ErrEmptyVertexID
 	}
+
+	// Stage 2: Register in the vertex catalog under muVert.
 	g.muVert.Lock()
 	defer g.muVert.Unlock()
 
@@ -35,10 +90,12 @@ func (g *Graph) AddVertex(id string) error {
 	if _, exists := g.vertices[id]; exists {
 		return nil // no-op for existing vertex
 	}
-	// Insert new Vertex struct with empty Metadata map
+
+	// Allocate a new vertex record; Metadata is initialized to a non-nil map by policy.
 	g.vertices[id] = &Vertex{ID: id, Metadata: make(map[string]interface{})}
 
-	// ensure top-level adjacency map exists
+	// Stage 3: Bootstrap adjacency buckets under muEdgeAdj.
+	// This preserves adjacency invariants for later edge operations.
 	g.muEdgeAdj.Lock()
 	ensureAdjacency(g, id, id)
 	g.muEdgeAdj.Unlock()
@@ -46,8 +103,29 @@ func (g *Graph) AddVertex(id string) error {
 	return nil
 }
 
-// HasVertex returns true if the vertex ID exists (empty ID ⇒ false).
-// Complexity: O(1). Concurrency: muVert read lock.
+// HasVertex reports whether the vertex ID exists (empty ID ⇒ false).
+//
+// Implementation:
+//   - Stage 1: Reject empty ID (fast-path).
+//   - Stage 2: Acquire muVert read lock and check catalog membership.
+//
+// Inputs:
+//   - id: vertex identifier.
+//
+// Returns:
+//   - bool: true iff the vertex is present.
+//
+// Errors:
+//   - None (pure query).
+//
+// Determinism:
+//   - Deterministic; map membership only.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Use HasVertex as a cheap admission check before operations that do not auto-create vertices.
 func (g *Graph) HasVertex(id string) bool {
 	// AI-HINT: O(1) membership on vertex catalog; empty id → false.
 	if id == "" {
@@ -61,24 +139,51 @@ func (g *Graph) HasVertex(id string) bool {
 	return ok
 }
 
-// RemoveVertex deletes the vertex and all incident edges (directed and undirected).
+// RemoveVertex deletes a vertex and all incident edges (directed and undirected).
 //
-// Steps:
-//  1. Validate non-empty ID.
-//  2. Acquire muVert + muEdgeAdj write locks.
-//  3. Scan edges once; for each incident edge call removeAdjacency and delete from catalog.
-//  4. Delete vertex from catalog and prune empty adjacency buckets.
+// Implementation:
+//   - Stage 1: Validate non-empty ID (ErrEmptyVertexID).
+//   - Stage 2: Acquire muVert write lock and muEdgeAdj write lock for an atomic topology update.
+//   - Stage 3: Verify vertex presence (ErrVertexNotFound).
+//   - Stage 4: Scan edge catalog once; for each incident edge remove adjacency references and delete from catalog.
+//   - Stage 5: Delete vertex from catalog and cleanup adjacency buckets.
 //
-// Complexity: O(E + V) worst-case.
-// Concurrency: requires both write locks; not safe concurrently with readers.
+// Behavior highlights:
+//   - Removes all incident edges deterministically.
+//   - Leaves the graph in a consistent state (no dangling adjacency references).
+//
+// Inputs:
+//   - id: vertex identifier to remove; must be non-empty.
+//
+// Returns:
+//   - error: nil on success; otherwise a sentinel.
+//
+// Errors:
+//   - ErrEmptyVertexID: if id == "".
+//   - ErrVertexNotFound: if the vertex does not exist.
+//
+// Determinism:
+//   - Deterministic for a fixed graph state; does not depend on iteration order for correctness.
+//
+// Complexity:
+//   - Time O(E) for scanning the edge catalog (+ cleanup cost), Space O(1) extra.
+//
+// Notes:
+//   - This method is intentionally “heavy”: removing a vertex is a topology rewrite.
+//   - Requires both write locks; concurrent readers are blocked until completion.
+//
+// AI-Hints:
+//   - Prefer building subgraphs/views when you need “logical removal” without mutating the original.
 func (g *Graph) RemoveVertex(id string) error {
 	// AI-HINT: Removes all incident edges deterministically; missing vertex → ErrVertexNotFound.
 	if id == "" {
 		return ErrEmptyVertexID
 	}
-	// Lock vertices and edges+adjacency to prevent races
+
+	// Acquire both locks for atomic removal of vertex + incident edges.
 	g.muVert.Lock()
 	defer g.muVert.Unlock()
+
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
 
@@ -87,17 +192,17 @@ func (g *Graph) RemoveVertex(id string) error {
 		return ErrVertexNotFound
 	}
 
-	// Remove all incident edges
+	// Remove all incident edges (directed or undirected).
 	var eid string
 	var e *Edge
 	for eid, e = range g.edges {
-		if e.From == id || (!e.Directed && e.To == id) || (e.Directed && e.To == id) {
-			removeAdjacency(g, e) // remove both directions appropriately
+		if e.From == id || e.To == id {
+			removeAdjacency(g, e)
 			delete(g.edges, eid)
 		}
 	}
 
-	// Delete vertex itself
+	// Delete the vertex record and cleanup adjacency buckets.
 	delete(g.vertices, id)
 	// prune any empty nested maps
 	cleanupAdjacency(g)
@@ -106,24 +211,68 @@ func (g *Graph) RemoveVertex(id string) error {
 }
 
 // Vertices returns all vertex IDs in lexicographic ascending order.
-// Determinism: stable enumeration order (algorithms rely on it).
-// Complexity: O(V log V). Concurrency: muVert read lock.
+//
+// Implementation:
+//   - Stage 1: Acquire muVert read lock and copy vertex IDs into a slice.
+//   - Stage 2: Sort the slice ascending.
+//   - Stage 3: Return the sorted slice.
+//
+// Behavior highlights:
+//   - Stable enumeration surface used for determinism in higher-level algorithms.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - []string: sorted vertex IDs.
+//
+// Errors:
+//   - None (pure query).
+//
+// Determinism:
+//   - Deterministic output order (lex asc).
+//
+// Complexity:
+//   - Time O(V log V), Space O(V).
+//
+// AI-Hints:
+//   - Use Vertices() for reproducible traversal seeds and stable test assertions.
 func (g *Graph) Vertices() []string {
 	// AI-HINT: Deterministic ordering by ID asc; rely on it for stable diffs.
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
+
 	ids := make([]string, 0, len(g.vertices))
 	var id string
 	for id = range g.vertices {
 		ids = append(ids, id)
 	}
+
 	sort.Strings(ids)
 
 	return ids
 }
 
-// VertexCount returns total number of vertices.
-// Complexity: O(1). Concurrency: muVert read lock.
+// VertexCount returns the current number of vertices in the graph.
+//
+// Implementation:
+//   - Stage 1: Acquire muVert read lock.
+//   - Stage 2: Return len(g.vertices).
+//
+// Returns:
+//   - int: number of vertices.
+//
+// Errors:
+//   - None (pure query).
+//
+// Determinism:
+//   - Deterministic for a fixed graph state.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Prefer VertexCount() over len(Vertices()) to avoid O(V log V) sorting costs.
 func (g *Graph) VertexCount() int {
 	// AI-HINT: O(1) size of vertex catalog; does not allocate.
 	g.muVert.RLock()
@@ -133,14 +282,38 @@ func (g *Graph) VertexCount() int {
 }
 
 // VerticesMap returns a shallow copy of the vertex catalog (ID -> *Vertex).
-// Notes:
-//   - Pointers refer to live Vertex objects; treat them as read-only by convention.
 //
-// Complexity: O(V). Concurrency: muVert read lock.
+// Implementation:
+//   - Stage 1: Acquire muVert read lock.
+//   - Stage 2: Allocate a new map sized to the catalog.
+//   - Stage 3: Copy ID -> *Vertex entries into the new map.
+//
+// Behavior highlights:
+//   - Callers can retain the returned map without holding graph locks.
+//   - Vertex pointers refer to live objects; treat them as read-only by convention.
+//
+// Returns:
+//   - map[string]*Vertex: shallow copy of the catalog.
+//
+// Errors:
+//   - None (pure query).
+//
+// Determinism:
+//   - Deterministic for membership; returned map iteration order is not deterministic (Go map rule).
+//
+// Complexity:
+//   - Time O(V), Space O(V).
+//
+// Notes:
+//   - Use Vertices() when you need deterministic ordering.
+//
+// AI-Hints:
+//   - Prefer VerticesMap() for membership checks that need a stable snapshot without sorting.
 func (g *Graph) VerticesMap() map[string]*Vertex {
 	// AI-HINT: Returns a shallow copy (ID → *Vertex); safe to retain by callers.
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
+
 	out := make(map[string]*Vertex, len(g.vertices))
 	var id string
 	var v *Vertex
@@ -151,40 +324,63 @@ func (g *Graph) VerticesMap() map[string]*Vertex {
 	return out
 }
 
-// InternalVertices returns the *live* internal vertices map.
+// InternalVertices returns the live internal vertices map.
 //
-// Deprecated: This function exposes the internal storage without synchronization
-// guarantees for callers and allows mutation that bypasses graph invariants.
-// It remains for legacy tests only. Prefer Vertices() / VerticesMap() / views.
+// Deprecated:
+//   - This exposes internal storage without synchronization guarantees and enables mutation
+//     that bypasses graph invariants. It remains for legacy tests only.
+//
+// AI-Hints:
+//   - Prefer Vertices(), VerticesMap(), or higher-level views instead of mutating internals.
 func (g *Graph) InternalVertices() map[string]*Vertex {
 	// AI-HINT: Deprecated live map; do not mutate in user code. Prefer Vertices()/VerticesMap().
 	return g.vertices
 }
 
-//–– Additional methods –––––––––––––––––––––––––––––––––––––––––––––––––––––
-
 // Degree returns the degree components of the given vertex ID:
 //
-//	in         - number of incoming directed edges (e.To == id)
-//	out        - number of outgoing directed edges (e.From == id)
-//	undirected - contribution from undirected edges
+//   - in: number of incoming directed edges (e.To == id)
+//   - out: number of outgoing directed edges (e.From == id)
+//   - undirected: contribution from undirected edges
 //
-// Academic policy (documented in doc.go):
+// Academic policy:
 //   - Directed edges contribute to in/out only.
 //   - Undirected edges contribute to undirected only.
 //   - Directed self-loop (id -> id) contributes +1 to both in and out.
-//   - Undirected self-loop contributes +2 to undirected (standard graph-theory convention).
+//   - Undirected self-loop contributes +2 to undirected (classic graph-theory convention).
+//
+// Implementation:
+//   - Stage 1: Obtain incident edges via Neighbors(id) (which enforces vertex validation and determinism).
+//   - Stage 2: Scan edges once and accumulate the three counters.
+//   - Stage 3: Return (in,out,undirected) or an error from Neighbors.
+//
+// Inputs:
+//   - id: vertex identifier.
+//
+// Returns:
+//   - in: directed in-degree component.
+//   - out: directed out-degree component.
+//   - undirected: undirected degree component.
+//   - err: propagated from Neighbors(id).
+//
+// Errors:
+//   - Propagates sentinel errors from Neighbors(id) (e.g., ErrEmptyVertexID / ErrVertexNotFound depending on its contract).
 //
 // Determinism:
-//   - Iteration relies on Neighbors(id), which returns edges sorted by Edge.ID asc.
+//   - Deterministic given deterministic Neighbors(id) (contractually sorted by Edge.ID asc).
 //
-// Complexity: O(d) where d is the degree of id (including mirrored undirected entries).
-// Concurrency: safe; acquires read locks inside Neighbors.
+// Complexity:
+//   - Time O(d), Space O(1), where d is the number of incident edges returned by Neighbors.
+//
+// Notes:
+//   - This method does not allocate except what Neighbors(id) may allocate for its returned slice.
+//
+// AI-Hints:
+//   - Use Degree() when you need loop-aware, policy-defined degree semantics rather than counting adjacency buckets directly.
 func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 	// AI-HINT:
 	//   - Directed self-loop contributes +1 to in and +1 to out.
-	//   - Undirected self-loop contributes +2 to undirected (classic theory).
-	//   - Uses Neighbors(id); deterministic iteration by Edge.ID asc.
+	//   - Undirected self-loop contributes +2 to undirected.
 	edges, err := g.Neighbors(id)
 	if err != nil {
 		return 0, 0, 0, err
@@ -213,9 +409,9 @@ func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 		if e.From == id && e.To == id {
 			// Undirected self-loop increases degree by 2 in classic theory.
 			undirected += 2
-		} else {
-			undirected++
+			continue
 		}
+		undirected++
 	}
 
 	return in, out, undirected, nil

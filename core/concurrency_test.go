@@ -74,7 +74,7 @@ func TestConcurrentAddEdge(t *testing.T) {
 	wg.Wait()
 	close(errCh)
 
-	MustNoErrorsFromChan(t, errCh, "Concurrent AddEdge")
+	MustAllErrorsNil(t, errCh, "Concurrent AddEdge")
 
 	var (
 		nbs []*core.Edge
@@ -82,7 +82,7 @@ func TestConcurrentAddEdge(t *testing.T) {
 	)
 
 	nbs, err = g.Neighbors(VertexX)
-	MustNoError(t, err, "Neighbors(X)")
+	MustErrorNil(t, err, "Neighbors(X)")
 	MustEqualInt(t, len(nbs), NConcurrentAdds, "Neighbors(X) length after concurrent AddEdge")
 }
 
@@ -124,7 +124,7 @@ func TestConcurrentAddEdge(t *testing.T) {
 func TestConcurrentAddRemoveEdge(t *testing.T) {
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 
-	MustNoError(t, g.AddVertex(VertexBase), "AddVertex(Base)")
+	MustErrorNil(t, g.AddVertex(VertexBase), "AddVertex(Base)")
 
 	var (
 		wg    sync.WaitGroup
@@ -165,7 +165,7 @@ func TestConcurrentAddRemoveEdge(t *testing.T) {
 	wg.Wait()
 	close(errCh)
 
-	MustNoErrorsFromChan(t, errCh, "Concurrent Add/Remove")
+	MustAllErrorsNil(t, errCh, "Concurrent Add/Remove")
 }
 
 // TestConcurrentNeighborsAndClone VALIDATES concurrent Neighbors and Clone do not race.
@@ -210,7 +210,7 @@ func TestConcurrentNeighborsAndClone(t *testing.T) {
 
 	for i = 0; i < NLoops; i++ {
 		_, err = g.AddEdge(VertexA, VertexA, float64(i))
-		MustNoError(t, err, "AddEdge(A,A,w) setup")
+		MustErrorNil(t, err, "AddEdge(A,A,w) setup")
 	}
 
 	var (
@@ -248,5 +248,5 @@ func TestConcurrentNeighborsAndClone(t *testing.T) {
 	wg.Wait()
 	close(errCh)
 
-	MustNoErrorsFromChan(t, errCh, "Concurrent Neighbors/Clone")
+	MustAllErrorsNil(t, errCh, "Concurrent Neighbors/Clone")
 }

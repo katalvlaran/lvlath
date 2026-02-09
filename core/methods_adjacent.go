@@ -16,29 +16,68 @@ package core
 
 import "sort"
 
-// Neighbors lists *all* edges touching id.
-//   - Directed edges: only those with e.From==id.
-//   - Undirected edges: both directions, but loop appears once.
+// Neighbors returns all edges incident to the given vertex id under the graph's neighborhood policy.
 //
-// Sorted by Edge.ID.
-// Complexity: O(d log d).
+// Neighborhood policy:
+//   - Directed edges: include only edges with e.From == id (outgoing edges).
+//   - Undirected edges: include incident edges (mirrored adjacency is used); self-loops appear once.
+//
+// Implementation:
+//   - Stage 1: Validate id is non-empty (ErrEmptyVertexID).
+//   - Stage 2: Acquire muVert read lock and muEdgeAdj read lock (in that order) for a consistent snapshot.
+//   - Stage 3: Validate vertex existence (ErrVertexNotFound).
+//   - Stage 4: Collect incident edges by scanning adjacencyList[id] buckets and mapping edge IDs to *Edge.
+//   - Stage 5: Sort the result by Edge.ID ascending.
+//   - Stage 6: Return the sorted slice.
+//
+// Behavior highlights:
+//   - Deterministic ordering by Edge.ID ascending.
+//   - Returns pointers to live catalog edges (read-only by convention).
+//   - Safe against concurrent vertex removal due to consistent lock ordering.
+//
+// Inputs:
+//   - id: vertex identifier.
+//
+// Returns:
+//   - []*Edge: incident edges under the defined policy, sorted by Edge.ID asc.
+//   - error: nil on success; otherwise a sentinel error.
+//
+// Errors:
+//   - ErrEmptyVertexID: if id == "".
+//   - ErrVertexNotFound: if the vertex does not exist.
+//
+// Determinism:
+//   - Deterministic order by contract: Edge.ID ascending.
+//
+// Complexity:
+//   - Time O(d log d), Space O(d), where d is the number of incident edges collected.
+//
+// Notes:
+//   - This method does not copy Edge objects; treat returned *Edge as immutable.
+//   - Map key order is irrelevant because final ordering is enforced by sorting.
+//
+// AI-Hints:
+//   - Use Neighbors(id) for deterministic iteration in algorithms.
+//   - Use NeighborIDs(id) when you need unique adjacent vertex IDs rather than edges.
 func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 	// AI-HINT: empty id → ErrEmptyVertexID; missing vertex → ErrVertexNotFound.
 	//          Deterministic order by Edge.ID asc; treat returned *Edge as read-only.
 	if id == "" {
 		return nil, ErrEmptyVertexID
 	}
-	// Ensure vertex exists
+
+	// Acquire locks in the same order as mutators (muVert -> muEdgeAdj) to avoid races
+	// where a vertex disappears between validation and adjacency snapshotting.
 	g.muVert.RLock()
-	if _, ok := g.vertices[id]; !ok {
-		g.muVert.RUnlock()
-		return nil, ErrVertexNotFound
-	}
-	g.muVert.RUnlock()
+	defer g.muVert.RUnlock()
 
 	// Lock edges+adjacency for reading
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
+
+	if _, ok := g.vertices[id]; !ok {
+		return nil, ErrVertexNotFound
+	}
 
 	var out []*Edge
 	// Iterate all "to" maps for this vertex
@@ -48,7 +87,14 @@ func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 	for _, edgeSet := range g.adjacencyList[id] {
 		for eid = range edgeSet {
 			e = g.edges[eid]
-			// For directed, include only if e.From == id
+
+			// Defensive guard: adjacency should not reference missing edges, but keep safety tight.
+			if e.IsNil() {
+				continue
+			}
+			//if e == nil { continue }
+
+			// Directed policy: only outgoing edges.
 			if e.Directed && e.From != id {
 				continue
 			}
@@ -62,23 +108,59 @@ func (g *Graph) Neighbors(id string) ([]*Edge, error) {
 	return out, nil
 }
 
-// NeighborIDs returns unique, sorted vertex IDs adjacent to id.
+// NeighborIDs returns the unique set of vertex IDs adjacent to id, sorted lexicographically ascending.
 //
-//	e.From==id ⇒ include e.To.
-//	e.To==id && !e.Directed ⇒ include e.From.
+// Adjacency policy:
+//   - For each edge returned by Neighbors(id):
+//   - If e.From == id, include e.To.
+//   - Else if !e.Directed and e.To == id, include e.From.
 //
-// Complexity: O(d log d).
+// Implementation:
+//   - Stage 1: Call Neighbors(id) to obtain incident edges and enforce validation.
+//   - Stage 2: Build a set of adjacent vertex IDs.
+//   - Stage 3: Convert the set to a slice and sort lexicographically.
+//   - Stage 4: Return the sorted slice.
+//
+// Behavior highlights:
+//   - Unique output: duplicates are removed.
+//   - Deterministic output order (lex asc).
+//
+// Inputs:
+//   - id: vertex identifier.
+//
+// Returns:
+//   - []string: unique adjacent vertex IDs, sorted lex asc.
+//   - error: propagated from Neighbors(id).
+//
+// Errors:
+//   - Propagates ErrEmptyVertexID / ErrVertexNotFound from Neighbors(id).
+//
+// Determinism:
+//   - Deterministic output order by contract (lex asc).
+//
+// Complexity:
+//   - Time O(d + k log k), Space O(k), where d is incident edges and k is unique neighbors.
+//
+// Notes:
+//   - For directed edges, only outgoing neighbors are included (consistent with Neighbors policy).
+//
+// AI-Hints:
+//   - Use NeighborIDs when building traversal frontiers to avoid edge duplication.
+//   - If you need both in/out neighbors for directed graphs, define a dedicated API explicitly.
 func (g *Graph) NeighborIDs(id string) ([]string, error) {
 	// AI-HINT: Output is unique and sorted (lex asc); relies on Neighbors(id).
 	edges, err := g.Neighbors(id)
 	if err != nil {
 		return nil, err
 	}
+
 	seen := make(map[string]struct{}, len(edges))
 	for _, e := range edges {
 		if e.From == id {
 			seen[e.To] = struct{}{}
-		} else if !e.Directed && e.To == id {
+			continue
+		}
+		if !e.Directed && e.To == id {
 			seen[e.From] = struct{}{}
 		}
 	}
@@ -92,15 +174,41 @@ func (g *Graph) NeighborIDs(id string) ([]string, error) {
 	return ids, nil
 }
 
-// AdjacencyList returns a snapshot mapping each vertex ID to the list of
-// incident edge IDs. For determinism, each slice is sorted by Edge.ID asc.
+// AdjacencyList returns a snapshot mapping each "from" vertex ID to the list of incident edge IDs.
+// Each slice is sorted by Edge.ID ascending for deterministic per-vertex enumeration.
+//
+// Implementation:
+//   - Stage 1: Acquire muEdgeAdj read lock for a stable adjacency snapshot.
+//   - Stage 2: For each from vertex, collect all edge IDs from nested adjacency buckets.
+//   - Stage 3: Sort the collected edge IDs per vertex.
+//   - Stage 4: Return the newly allocated map of slices.
+//
+// Behavior highlights:
+//   - Returned slices are freshly allocated and safe to retain and mutate by the caller.
+//   - Deterministic ordering within each slice (Edge.ID asc).
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - map[string][]string: snapshot from-vertex -> sorted edge ID list.
+//
+// Errors:
+//   - None (pure query).
+//
+// Determinism:
+//   - Per-vertex slices are deterministic (sorted).
+//   - Map key iteration order is not deterministic in Go; callers MUST NOT rely on it.
+//
+// Complexity:
+//   - Time O(V + E + Σ sort(deg(v))), Space O(V + E) for the snapshot.
 //
 // Notes:
-//   - The order of map keys is unspecified in Go; callers must not rely on it.
-//   - Slices are freshly allocated and safe to retain by the caller.
+//   - This is a snapshot of adjacency state; it does not expose internal maps.
+//   - Use Vertices() to obtain deterministic key order if needed.
 //
-// Complexity: O(V + E) to assemble + O(sum_deg log deg) to sort per-vertex slices.
-// Concurrency: safe; holds edges/adjacency read lock for the duration of the snapshot.
+// AI-Hints:
+//   - If you need stable iteration over keys, do: keys := g.Vertices(); then read result[key].
 func (g *Graph) AdjacencyList() map[string][]string {
 	// AI-HINT: Each slice is freshly allocated and sorted; callers may retain and mutate safely.
 	g.muEdgeAdj.RLock()
@@ -122,11 +230,38 @@ func (g *Graph) AdjacencyList() map[string][]string {
 	return result
 }
 
-//–– Helpers ––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-// ensureAdjacency guarantees the presence of nested maps for (from,to).
-// Must be called under muEdgeAdj write lock by mutating code paths.
-// Complexity: O(1) amortized.
+// ensureAdjacency guarantees that adjacencyList[from] and adjacencyList[from][to] are initialized.
+//
+// Implementation:
+//   - Stage 1: If adjacencyList[from] is nil, allocate it.
+//   - Stage 2: If adjacencyList[from][to] is nil, allocate it.
+//
+// Behavior highlights:
+//   - O(1) amortized nested-map initialization.
+//   - No-op when buckets already exist.
+//
+// Inputs:
+//   - g: target graph.
+//   - from: source vertex ID.
+//   - to: destination vertex ID.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1) amortized, Space O(1) amortized.
+//
+// Notes:
+//   - Must be called ONLY under muEdgeAdj write lock by mutating code paths.
+//
+// AI-Hints:
+//   - Keep this helper small and allocation-minimal; it is on mutation hot paths.
 func ensureAdjacency(g *Graph, from, to string) {
 	// AI-HINT: Called only under muEdgeAdj write lock by mutating codepaths.
 	if g.adjacencyList[from] == nil {
@@ -137,12 +272,41 @@ func ensureAdjacency(g *Graph, from, to string) {
 	}
 }
 
-// removeAdjacency deletes e.ID from both directions:
-//   - from→to always;
-//   - if e is undirected and not a self-loop, also to→from.
+// removeAdjacency removes e.ID from adjacency buckets for the edge endpoints.
 //
-// Must be called under muEdgeAdj write lock.
-// Complexity: O(1) average.
+// Removal policy:
+//   - Always remove from e.From -> e.To.
+//   - If the edge is undirected and not a self-loop, also remove from e.To -> e.From.
+//
+// Implementation:
+//   - Stage 1: Delete e.ID from the primary bucket.
+//   - Stage 2: If the bucket becomes empty, prune the nested map entry.
+//   - Stage 3: If undirected non-loop, repeat for the mirrored bucket.
+//
+// Behavior highlights:
+//   - Keeps adjacency buckets compact by pruning empty nested maps.
+//
+// Inputs:
+//   - g: target graph.
+//   - e: edge to unlink (must be non-nil).
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic for a fixed graph state.
+//
+// Complexity:
+//   - Time O(1) average, Space O(1).
+//
+// Notes:
+//   - Must be called ONLY under muEdgeAdj write lock.
+//
+// AI-Hints:
+//   - Always pair catalog deletion (delete(g.edges,e.ID)) with removeAdjacency to avoid dangling adjacency references.
 func removeAdjacency(g *Graph, e *Edge) {
 	// AI-HINT: Removes e.ID from from→to and (if undirected non-loop) to→from; write lock required.
 	if m := g.adjacencyList[e.From][e.To]; m != nil {
@@ -161,9 +325,38 @@ func removeAdjacency(g *Graph, e *Edge) {
 	}
 }
 
-// cleanupAdjacency prunes empty nested maps after removals to keep HasEdge fast.
-// Must be called under muEdgeAdj write lock.
-// Complexity: O(V + E) worst-case when many empty buckets exist.
+// cleanupAdjacency prunes empty nested adjacency buckets after removals.
+//
+// Implementation:
+//   - Stage 1: Scan adjacencyList top-level keys.
+//   - Stage 2: For each nested toMap, remove empty edgeSet buckets.
+//   - Stage 3: Remove top-level entries whose nested map becomes empty.
+//
+// Behavior highlights:
+//   - Maintains compact adjacency structure to keep HasEdge and scans fast.
+//   - Safe to call repeatedly; idempotent relative to empty-state pruning.
+//
+// Inputs:
+//   - g: target graph.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic given a fixed map state.
+//
+// Complexity:
+//   - Time O(V + B) where B is the number of (from,to) buckets scanned; worst-case O(V+E) in dense maps.
+//   - Space O(1).
+//
+// Notes:
+//   - Must be called ONLY under muEdgeAdj write lock.
+//
+// AI-Hints:
+//   - Call cleanupAdjacency after bulk removals (FilterEdges, RemoveVertex) rather than after every single deletion if batching is possible.
 func cleanupAdjacency(g *Graph) {
 	// AI-HINT: Prunes empty buckets after removals; write lock required.
 	for u, toMap := range g.adjacencyList {

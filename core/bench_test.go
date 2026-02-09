@@ -8,8 +8,26 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// BenchmarkAddEdge_Unweighted measures performance of adding edges
-// in an unweighted, undirected graph (default configuration).
+// Benchmark sinks prevent accidental dead-code elimination in microbenchmarks.
+// They must remain package-level to defeat escape analysis assumptions.
+var (
+	benchSinkString string
+	benchSinkEdges  []*core.Edge
+	benchSinkGraph  *core.Graph
+)
+
+// BenchmarkAddEdge_Unweighted measures AddEdge throughput under the default policy (unweighted, undirected),
+// excluding string formatting costs from the timed region.
+//
+// Implementation:
+//   - Stage 1: Precompute destination vertex IDs outside the timer.
+//   - Stage 2: Reset timer and repeatedly call AddEdge("Root", ids[i], 0).
+//
+// Behavior highlights:
+//   - Exercises the unweighted fast-path (weight must be 0).
+//
+// Complexity:
+//   - Per iteration: expected O(1) amortized (hash-map + adjacency updates).
 func BenchmarkAddEdge_Unweighted(b *testing.B) {
 	// Create a new default Graph (undirected, unweighted)
 	g := core.NewGraph()
@@ -17,68 +35,109 @@ func BenchmarkAddEdge_Unweighted(b *testing.B) {
 	b.ReportAllocs()
 	// Reset timer to exclude setup cost
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	var i int
+	ids := make([]string, b.N)
+	for i = 0; i < b.N; i++ {
+		ids[i] = fmt.Sprintf("N%d", i)
+	}
+
+	for i = 0; i < b.N; i++ {
 		// AddEdge uses weight=0 by default to satisfy unweighted constraint
-		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i), 0)
+		id, _ := g.AddEdge("Root", ids[i], 0)
+		benchSinkString = id
 	}
 }
 
-// BenchmarkAddEdge_Weighted measures performance of adding edges
-// in a weighted graph (non-zero weights allowed).
+// BenchmarkAddEdge_Weighted measures AddEdge throughput when weights are enabled, excluding vertex-ID formatting
+// from the timed region.
+//
+// Complexity:
+//   - Per iteration: expected O(1) amortized.
 func BenchmarkAddEdge_Weighted(b *testing.B) {
 	// Create a weighted Graph
 	g := core.NewGraph(core.WithWeighted())
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	var i int
+	ids := make([]string, b.N)
+	for i = 0; i < b.N; i++ {
+		ids[i] = fmt.Sprintf("N%d", i)
+	}
+
+	for i = 0; i < b.N; i++ {
 		// Using i as weight exercises the weighted path
-		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i), float64(i))
+		id, _ := g.AddEdge("Root", ids[i], float64(i))
+		benchSinkString = id
 	}
 }
 
-// BenchmarkAddEdge_MultiEdges measures performance of adding parallel edges
-// when multi-edges are permitted (with weighted enabled here).
+// BenchmarkAddEdge_MultiEdges measures AddEdge under high parallel-edge pressure by repeatedly targeting a small,
+// fixed set of destination vertices while multi-edges are enabled.
+//
+// Complexity:
+//   - Per iteration: expected O(1) amortized.
 func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 	// Create graph allowing multi-edges and weights
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+
+	// Keep endpoint cardinality small to create many parallel edges deterministically.
+	const targets = 100
+	var i int
+	ids := make([]string, targets)
+	for i = 0; i < targets; i++ {
+		ids[i] = fmt.Sprintf("N%d", i)
+	}
+
+	for i = 0; i < b.N; i++ {
 		// Cycle through 100 target nodes to stress many parallel edges
-		_, _ = g.AddEdge("Root", fmt.Sprintf("N%d", i%100), float64(i))
+		id, _ := g.AddEdge("Root", ids[i%targets], float64(i))
+		benchSinkString = id
 	}
 }
 
-// BenchmarkNeighbors measures performance of retrieving neighbors
-// in a star topology on a multi-edge graph.
+// BenchmarkNeighbors measures Neighbors("Center") on a fixed star topology, focusing on the
+// per-call cost of assembling and sorting the neighbor edge slice.
+//
+// Complexity:
+//   - Per iteration: O(d log d), where d is the degree of "Center".
 func BenchmarkNeighbors(b *testing.B) {
 	// Create graph with multi-edge support
 	g := core.NewGraph(core.WithMultiEdges())
 	// Build a star with 1000 leaves: Center→Node{i}
-	for i := 0; i < 1000; i++ {
+	var i int
+	for i = 0; i < 1000; i++ {
 		_, _ = g.AddEdge("Center", fmt.Sprintf("Node%d", i), 0)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i = 0; i < b.N; i++ {
 		// Neighbors should return 1000 edges in O(d log d)
-		_, _ = g.Neighbors("Center")
+		edges, _ := g.Neighbors("Center")
+		benchSinkEdges = edges
 	}
 }
 
-// BenchmarkClone measures performance of cloning a graph
-// containing loops and multi-edges under load.
+// BenchmarkClone measures Clone() cost for a pre-populated graph, focusing on the deep-copy
+// of vertices, edges, and adjacency structures.
+//
+// Complexity:
+//   - Per iteration: O(V+E).
 func BenchmarkClone(b *testing.B) {
 	// Create graph with loops, multi-edges, and weights
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 	// Populate with 1000 edges A→V{i}
-	for i := 0; i < 1000; i++ {
+
+	var i int
+	for i = 0; i < 1000; i++ {
 		_, _ = g.AddEdge("A", fmt.Sprintf("V%d", i), float64(i))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
-	for i := 0; i < b.N; i++ {
+	for i = 0; i < b.N; i++ {
 		// Clone performs O(V+E) copy
-		_ = g.Clone()
+		benchSinkGraph = g.Clone()
 	}
 }

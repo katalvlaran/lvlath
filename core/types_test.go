@@ -51,16 +51,16 @@ import (
 func TestGraph_Options(t *testing.T) {
 	g := NewGraphFull()
 
-	MustFalse(t, g.Directed(), "Directed() default must be false (undirected)")
-	MustTrue(t, g.Weighted(), "Weighted() must be true on NewGraphFull")
-	MustFalse(t, g.HasVertex(VertexEmpty), "HasVertex(empty) must be false")
+	MustEqualBool(t, g.Directed(), false, "Directed() default must be false (undirected)")
+	MustEqualBool(t, g.Weighted(), true, "Weighted() must be true on NewGraphFull")
+	MustEqualBool(t, g.HasVertex(VertexEmpty), false, "HasVertex(empty) must be false")
 
 	dg := core.NewGraph(core.WithDirected(true))
-	MustTrue(t, dg.Directed(), "WithDirected(true) must set Directed()==true")
+	MustEqualBool(t, dg.Directed(), true, "WithDirected(true) must set Directed()==true")
 
 	sg := core.NewGraph()
 	_, err := sg.AddEdge(VertexX, VertexY, Weight0)
-	MustNoError(t, err, "AddEdge(X,Y,0) first on default graph")
+	MustErrorNil(t, err, "AddEdge(X,Y,0) first on default graph")
 
 	_, err = sg.AddEdge(VertexX, VertexY, Weight0)
 	MustErrorIs(t, err, core.ErrMultiEdgeNotAllowed, "AddEdge(X,Y,0) second on default graph")
@@ -105,11 +105,11 @@ func TestGraph_VertexLifecycle(t *testing.T) {
 	err := g.AddVertex(VertexEmpty)
 	MustErrorIs(t, err, core.ErrEmptyVertexID, "AddVertex(empty)")
 
-	MustNoError(t, g.AddVertex(VertexV1), "AddVertex(V1)")
-	MustTrue(t, g.HasVertex(VertexV1), "HasVertex(V1) after AddVertex(V1)")
+	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1)")
+	MustEqualBool(t, g.HasVertex(VertexV1), true, "HasVertex(V1) after AddVertex(V1)")
 
 	before := len(g.Vertices())
-	MustNoError(t, g.AddVertex(VertexV1), "AddVertex(V1) duplicate")
+	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1) duplicate")
 	after := len(g.Vertices())
 	MustEqualInt(t, after, before, "duplicate AddVertex(V1) must not change vertex count")
 
@@ -119,8 +119,8 @@ func TestGraph_VertexLifecycle(t *testing.T) {
 	err = g.RemoveVertex(VertexEmpty)
 	MustErrorIs(t, err, core.ErrEmptyVertexID, "RemoveVertex(empty)")
 
-	MustNoError(t, g.RemoveVertex(VertexV1), "RemoveVertex(V1)")
-	MustFalse(t, g.HasVertex(VertexV1), "HasVertex(V1) after RemoveVertex(V1)")
+	MustErrorNil(t, g.RemoveVertex(VertexV1), "RemoveVertex(V1)")
+	MustEqualBool(t, g.HasVertex(VertexV1), false, "HasVertex(V1) after RemoveVertex(V1)")
 }
 
 // TestGraph_AtomicEdgeIDs ASSERTS concurrent AddEdge yields unique IDs.
@@ -185,7 +185,7 @@ func TestGraph_AtomicEdgeIDs(t *testing.T) {
 	close(idCh)
 	close(errCh)
 
-	MustNoErrorsFromChan(t, errCh, "Atomic edge IDs")
+	MustAllErrorsNil(t, errCh, "Atomic edge IDs")
 
 	ids := make(map[string]struct{}, NAtomicEdgeIDs)
 
@@ -230,14 +230,14 @@ func TestGraph_AtomicEdgeIDs(t *testing.T) {
 func TestGraph_AdjacencyMap(t *testing.T) {
 	g := NewGraphFull()
 
-	MustFalse(t, g.HasEdge(VertexP, VertexQ), "HasEdge(P,Q) on empty graph must be false")
+	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), false, "HasEdge(P,Q) on empty graph must be false")
 
 	eid, err := g.AddEdge(VertexP, VertexQ, Weight0)
-	MustNoError(t, err, "AddEdge(P,Q,0)")
-	MustTrue(t, g.HasEdge(VertexP, VertexQ), "HasEdge(P,Q) after AddEdge(P,Q)")
+	MustErrorNil(t, err, "AddEdge(P,Q,0)")
+	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), true, "HasEdge(P,Q) after AddEdge(P,Q)")
 
-	MustNoError(t, g.RemoveEdge(eid), "RemoveEdge(eid)")
-	MustFalse(t, g.HasEdge(VertexP, VertexQ), "HasEdge(P,Q) after RemoveEdge")
+	MustErrorNil(t, g.RemoveEdge(eid), "RemoveEdge(eid)")
+	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), false, "HasEdge(P,Q) after RemoveEdge")
 }
 
 // TestGraph_CloneMethods ASSERTS CloneEmpty and Clone semantics.
@@ -274,9 +274,9 @@ func TestGraph_CloneMethods(t *testing.T) {
 	g := NewGraphFull()
 
 	eidXY, err := g.AddEdge(VertexX, VertexY, Weight1)
-	MustNoError(t, err, "AddEdge(X,Y,1)")
+	MustErrorNil(t, err, "AddEdge(X,Y,1)")
 	_, err = g.AddEdge(VertexY, VertexY, Weight2)
-	MustNoError(t, err, "AddEdge(Y,Y,2)")
+	MustErrorNil(t, err, "AddEdge(Y,Y,2)")
 
 	ce := g.CloneEmpty()
 	MustSameStringSet(t, g.Vertices(), ce.Vertices(), "CloneEmpty preserves vertices")
@@ -287,12 +287,12 @@ func TestGraph_CloneMethods(t *testing.T) {
 	MustSameStringSet(t, ExtractEdgeIDs(g.Edges()), ExtractEdgeIDs(c.Edges()), "Clone preserves edge IDs")
 
 	orig, err := g.GetEdge(eidXY)
-	MustNoError(t, err, "GetEdge(eidXY) on original")
+	MustErrorNil(t, err, "GetEdge(eidXY) on original")
 
 	cl, err := c.GetEdge(eidXY)
-	MustNoError(t, err, "GetEdge(eidXY) on clone")
+	MustErrorNil(t, err, "GetEdge(eidXY) on clone")
 
-	MustTrue(t, orig != cl, "Clone deep-copy: edge pointers must not alias")
+	MustEqualBool(t, orig != cl, true, "Clone deep-copy: edge pointers must not alias")
 }
 
 // TestGraph_VerticesMapReadOnly ASSERTS VerticesMap returns a safe snapshot.
@@ -329,12 +329,12 @@ func TestGraph_CloneMethods(t *testing.T) {
 func TestGraph_VerticesMapReadOnly(t *testing.T) {
 	g := NewGraphFull()
 
-	MustNoError(t, g.AddVertex("Z"), "AddVertex(Z)")
+	MustErrorNil(t, g.AddVertex("Z"), "AddVertex(Z)")
 
 	vm := g.VerticesMap()
 	vm["NEW"] = &core.Vertex{ID: "NEW"}
 
-	MustFalse(t, g.HasVertex("NEW"), "VerticesMap must be read-only snapshot")
+	MustEqualBool(t, g.HasVertex("NEW"), false, "VerticesMap must be read-only snapshot")
 }
 
 // TestGraph_HasVertexConcurrency ASSERTS concurrent HasVertex/AddVertex does not panic.

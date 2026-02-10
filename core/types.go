@@ -90,6 +90,13 @@ var (
 // Vertex is the canonical node record used by Graph; the unique key is Vertex.ID.
 // Metadata is an opaque, caller-managed payload that the core does not interpret.
 //
+// Memory Policy (Aliasing & Ownership):
+//   - Metadata is a REFERENCE TYPE (map pointer).
+//   - Graph operations (Clone, Views) perform a SHALLOW COPY of this pointer.
+//   - Result: The source graph and its clones/views SHARE the same underlying Metadata maps.
+//   - Modification of Metadata contents in a clone WILL affect the original graph.
+//   - The caller is responsible for deep-copying Metadata if total isolation is required.
+//
 // Implementation:
 //   - Stage 1: Graph stores vertices in a map keyed by Vertex.ID.
 //   - Stage 2: Algorithms treat Metadata as an opaque pointer; Clone is shallow.
@@ -124,8 +131,8 @@ type Vertex struct {
 	// ID uniquely identifies a vertex within a single Graph instance.
 	ID string
 
-	// Metadata holds arbitrary user data. Graph.Clone performs a shallow copy
-	// of this map pointer; if deep-copy is required, callers must handle it externally.
+	// Metadata holds arbitrary user data.
+	// WARNING: Shared mutable state. Clones share this exact pointer.
 	Metadata map[string]interface{}
 }
 
@@ -545,7 +552,6 @@ type Graph struct {
 	adjacencyList map[string]map[string]map[string]struct{}
 }
 
-// GraphStats MAIN DESCRIPTION.
 // GraphStats is a read-only result object summarizing graph state.
 //
 // Implementation:

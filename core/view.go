@@ -14,18 +14,20 @@ package core
 import "sync/atomic"
 
 // viewEdgeWeightZero is the canonical weight value used by views that enforce unweighted semantics.
-// It is a named constant to make "forced zero weight" intentional and grep-friendly.
 const viewEdgeWeightZero float64 = 0
 
 // UnweightedView creates a non-mutating view of the input graph where weights are forced to 0
 // and the resulting graph reports Weighted()==false, while preserving topology and IDs.
 //
 // Implementation:
-//   - Stage 1: Create a new Graph that matches g's orientation/multi/loop/mixed policies,
-//     but intentionally does NOT enable WithWeighted().
-//   - Stage 2: Snapshot and copy vertices under muVert.RLock (shallow metadata pointer copy).
-//   - Stage 3: Snapshot and copy edges under muEdgeAdj.RLock, forcing Weight=0 for every edge.
-//   - Stage 4: Carry over nextEdgeID to ensure future AddEdge() IDs cannot collide with copied IDs.
+//   - Stage 1: Acquire GLOBAL READ LOCK (Vert + EdgeAdj) to ensure atomic snapshot.
+//   - Stage 2: Copy vertices (shallow Metadata).
+//   - Stage 3: Copy edges (forcing Weight=0).
+//   - Stage 4: Release locks.
+//
+// Concurrency snapshot:
+//   - Atomic: The view represents a consistent state at the moment of creation.
+//   - No "gap" between vertex and edge copying.
 //
 // Behavior highlights:
 //   - Does not mutate the source graph.
@@ -54,7 +56,12 @@ const viewEdgeWeightZero float64 = 0
 // AI-Hints:
 //   - Use UnweightedView when an algorithm requires zero weights but you must preserve original weights elsewhere.
 func UnweightedView(g *Graph) *Graph {
-	// AI-HINT: Useful when algorithms require zero weights without touching original graph.
+	// LOCK ORDER: muVert -> muEdgeAdj.
+	// Atomic snapshot requirement: we cannot allow topology changes during copy.
+	g.muVert.RLock()
+	defer g.muVert.RUnlock()
+	g.muEdgeAdj.RLock()
+	defer g.muEdgeAdj.RUnlock()
 
 	// Build a graph with same directedness/mode but unweighted.
 	opts := []GraphOption{WithDirected(g.Directed())}
@@ -70,15 +77,12 @@ func UnweightedView(g *Graph) *Graph {
 	out := NewGraph(opts...)
 
 	// Copy vertices
-	g.muVert.RLock()
+	// ALIASING: Metadata is shared.
 	for id, v := range g.vertices {
 		out.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
 		out.adjacencyList[id] = make(map[string]map[string]struct{})
 	}
-	g.muVert.RUnlock()
 
-	// Copy edges with zero weight, preserving IDs and directedness.
-	g.muEdgeAdj.RLock()
 	// Snapshot the edge ID counter under the same lock as the edge catalog snapshot.
 	// This ensures the view continues generating IDs strictly after the last ID used by 'g'.
 	srcNextEdgeID := atomic.LoadUint64(&g.nextEdgeID)
@@ -90,12 +94,12 @@ func UnweightedView(g *Graph) *Graph {
 		out.edges[eid] = ne
 		ensureAdjacency(out, ne.From, ne.To)
 		out.adjacencyList[ne.From][ne.To][eid] = struct{}{}
+
 		if !ne.Directed && ne.From != ne.To {
 			ensureAdjacency(out, ne.To, ne.From)
 			out.adjacencyList[ne.To][ne.From][eid] = struct{}{}
 		}
 	}
-	g.muEdgeAdj.RUnlock()
 
 	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
 	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)
@@ -103,14 +107,15 @@ func UnweightedView(g *Graph) *Graph {
 	return out
 }
 
-// InducedSubgraph creates a non-mutating induced subgraph containing only vertices selected by keep,
-// and only edges whose endpoints are both selected.
+// InducedSubgraph creates a non-mutating induced subgraph containing only vertices selected by keep.
 //
 // Implementation:
-//   - Stage 1: Create a new Graph that matches g's configuration flags.
-//   - Stage 2: Snapshot and copy only kept vertices under muVert.RLock.
-//   - Stage 3: Snapshot and copy only edges with both endpoints kept under muEdgeAdj.RLock.
-//   - Stage 4: Carry over nextEdgeID to preserve future auto-ID uniqueness.
+//   - Stage 1: Acquire GLOBAL READ LOCK (Vert + EdgeAdj).
+//   - Stage 2: Filter and copy vertices.
+//   - Stage 3: Filter and copy edges (only if both endpoints exist in 'keep').
+//
+// Concurrency snapshot:
+//   - Atomic: Prevents "phantom edges" where an endpoint might be deleted concurrently.
 //
 // Behavior highlights:
 //   - Does not mutate the source graph.
@@ -140,7 +145,11 @@ func UnweightedView(g *Graph) *Graph {
 // AI-Hints:
 //   - Use InducedSubgraph to focus algorithms on a region of interest without changing the original graph.
 func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
-	// AI-HINT: Build problem-specific slices of the graph without side effects on 'g'.
+	// LOCK ORDER: muVert -> muEdgeAdj.
+	g.muVert.RLock()
+	defer g.muVert.RUnlock()
+	g.muEdgeAdj.RLock()
+	defer g.muEdgeAdj.RUnlock()
 
 	// Reuse the same configuration as g (including weighted flag).
 	opts := []GraphOption{WithDirected(g.Directed())}
@@ -158,40 +167,38 @@ func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 	}
 	out := NewGraph(opts...)
 
-	// Copy only kept vertices.
-	g.muVert.RLock()
-	var id string
-	var v *Vertex
-	for id, v = range g.vertices {
+	// Copy kept vertices
+	for id, v := range g.vertices {
 		if keep[id] {
 			out.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
 			out.adjacencyList[id] = make(map[string]map[string]struct{})
 		}
 	}
-	g.muVert.RUnlock()
 
-	// Copy only edges whose endpoints are both kept; preserve ID and directedness.
-	g.muEdgeAdj.RLock()
-	// Snapshot the edge ID counter under the same lock as the edge catalog snapshot.
-	// Even if the induced subgraph filters out some edges, carrying the counter forward
-	// prevents reusing historical IDs and keeps monotonicity aligned with the source graph.
+	// Copy valid edges
 	srcNextEdgeID := atomic.LoadUint64(&g.nextEdgeID)
 	var eid string
 	var e, ne *Edge
+	var ok bool
+
 	for eid, e = range g.edges {
+		// Filter: both endpoints must be in the keep set.
 		if !keep[e.From] || !keep[e.To] {
 			continue
 		}
+
 		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: e.Weight, Directed: e.Directed}
 		out.edges[eid] = ne
 		ensureAdjacency(out, ne.From, ne.To)
 		out.adjacencyList[ne.From][ne.To][eid] = struct{}{}
+
 		if !ne.Directed && ne.From != ne.To {
-			ensureAdjacency(out, ne.To, ne.From)
+			if _, ok = out.adjacencyList[ne.To][ne.From]; !ok {
+				out.adjacencyList[ne.To][ne.From] = make(map[string]struct{})
+			}
 			out.adjacencyList[ne.To][ne.From][eid] = struct{}{}
 		}
 	}
-	g.muEdgeAdj.RUnlock()
 
 	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
 	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)

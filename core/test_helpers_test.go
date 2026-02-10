@@ -230,7 +230,6 @@ func failNil(t *testing.T, op string, reason string, val any) {
 	t.Fatalf("FAILED [%s]: received nil-like value (%s); dynamic_type=%T", op, reason, val)
 }
 
-// MustErrorNil MAIN DESCRIPTION.
 // MustErrorNil fails the test if err != nil.
 //
 // Implementation:

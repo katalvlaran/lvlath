@@ -350,9 +350,11 @@ func (g *Graph) InternalVertices() map[string]*Vertex {
 //   - Undirected self-loop contributes +2 to undirected (classic graph-theory convention).
 //
 // Implementation:
-//   - Stage 1: Obtain incident edges via Neighbors(id) (which enforces vertex validation and determinism).
-//   - Stage 2: Scan edges once and accumulate the three counters.
-//   - Stage 3: Return (in,out,undirected) or an error from Neighbors.
+//   - Stage 1: Validate id and vertex existence under locks.
+//   - Stage 2: Scan ALL graph edges (g.edges) to identify incident connections.
+//     This is necessary because the standard adjacency list is optimized for
+//     outgoing edges and does not efficiently index incoming directed edges.
+//   - Stage 3: Accumulate counters based on connectivity and direction.
 //
 // Inputs:
 //   - id: vertex identifier.
@@ -361,57 +363,81 @@ func (g *Graph) InternalVertices() map[string]*Vertex {
 //   - in: directed in-degree component.
 //   - out: directed out-degree component.
 //   - undirected: undirected degree component.
-//   - err: propagated from Neighbors(id).
+//   - err: vertices working errors (ErrEmptyVertexID or ErrVertexNotFound).
 //
 // Errors:
-//   - Propagates sentinel errors from Neighbors(id) (e.g., ErrEmptyVertexID / ErrVertexNotFound depending on its contract).
+//   - ErrEmptyVertexID: if id is empty.
+//   - ErrVertexNotFound: if the vertex does not exist in the graph.
 //
 // Determinism:
-//   - Deterministic given deterministic Neighbors(id) (contractually sorted by Edge.ID asc).
+//   - Deterministic result (counting is order-independent).
 //
 // Complexity:
-//   - Time O(d), Space O(1), where d is the number of incident edges returned by Neighbors.
+//   - Time O(E), Space O(1), where E is the total number of edges in the graph.
+//     Note: This is an O(E) operation to ensure correct in-degree calculation without
+//     maintaining a separate reverse index.
 //
 // Notes:
-//   - This method does not allocate except what Neighbors(id) may allocate for its returned slice.
+//   - This method acquires global read locks on vertices and edges.
 //
 // AI-Hints:
-//   - Use Degree() when you need loop-aware, policy-defined degree semantics rather than counting adjacency buckets directly.
+//   - Use Degree() when you need loop-aware, policy-defined degree semantics.
+//   - Be aware of O(E) cost on very large graphs.
 func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 	// AI-HINT:
 	//   - Directed self-loop contributes +1 to in and +1 to out.
 	//   - Undirected self-loop contributes +2 to undirected.
-	edges, err := g.Neighbors(id)
-	if err != nil {
-		return 0, 0, 0, err
+
+	if id == "" {
+		return 0, 0, 0, ErrEmptyVertexID
 	}
-	var e *Edge
-	for _, e = range edges {
+
+	// Acquire locks in the same order as other methods (muVert -> muEdgeAdj)
+	// to ensure consistent view and avoid deadlocks.
+	g.muVert.RLock()
+	defer g.muVert.RUnlock()
+
+	g.muEdgeAdj.RLock()
+	defer g.muEdgeAdj.RUnlock()
+
+	// Validate vertex existence strictly
+	if _, ok := g.vertices[id]; !ok {
+		return 0, 0, 0, ErrVertexNotFound
+	}
+
+	// Iterate over ALL edges to correctly capture incoming directed edges (in-degree),
+	// which are not present in the standard Neighbors() (outgoing-only) view.
+	for _, e := range g.edges {
+		// Safety check against nil edges in map (defensive)
+		if e.IsNil() {
+			continue
+		}
+
+		// Check connectivity for directed and undirected edge
+		isFrom := e.From == id
+		isTo := e.To == id
+		if !isFrom && !isTo {
+			continue
+		}
 		if e.Directed {
+			if isFrom {
+				out++
+			}
+			if isTo {
+				in++
+			}
+			// Note: A directed self-loop (id->id) triggers both checks,
+			// correctly incrementing both 'in' and 'out'.
+		} else {
+			// Undirected logic
 			if e.From == id && e.To == id {
-				// Directed self-loop counts as both incoming and outgoing once.
-				in++
-				out++
-				continue
+				// Undirected self-loop increases degree by 2 in classic theory.
+				undirected += 2
+			} else {
+				// Standard incidence
+				undirected++
 			}
-			if e.From == id {
-				out++
-				continue
-			}
-			if e.To == id {
-				in++
-				continue
-			}
-			// Should not happen; neighbors() ensures relevance.
-			continue
 		}
-		// Undirected edges:
-		if e.From == id && e.To == id {
-			// Undirected self-loop increases degree by 2 in classic theory.
-			undirected += 2
-			continue
-		}
-		undirected++
 	}
 
 	return in, out, undirected, nil

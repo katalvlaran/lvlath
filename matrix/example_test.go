@@ -39,8 +39,7 @@ const (
 	outOKCorrelationSymmetric = "okCorrelationSymmetric" // Tag for correlation symmetry check.
 )
 
-// ExampleShowcasePipeline MAIN DESCRIPTION.
-// Demonstrates "matrix as infrastructure" in a safety-critical telemetry pipeline:
+// ExampleShowcasePipeline demonstrates "matrix as infrastructure" in a safety-critical telemetry pipeline:
 // raw ingestion (NaN/Inf possible) → sanitize → statistics → symmetric repair → eigen → ridge inverse → LU/QR checks.
 // Scenario:
 //   - You operate a real-time analytics loop (telemetry → features → risk / control decision).
@@ -270,8 +269,7 @@ func ExampleShowcasePipeline() {
 	// okQR=true
 }
 
-// ExampleMiniFEASpringChain MAIN DESCRIPTION (2+ lines, no marketing).
-// Solves a small 1D spring-chain system to mimic a Mini-FEA workflow:
+// ExampleMiniFEASpringChain solves a small 1D spring-chain system to mimic a Mini-FEA workflow:
 // assembly via View → boundary conditions via Induced → solve via LU/QR → residual verification.
 // Scenario:
 //   - You approximate a mechanical chain (springs) or a 1D structural bar discretization.
@@ -451,8 +449,7 @@ func ExampleMiniFEASpringChain() {
 	// okSolutionsClose=true
 }
 
-// ExampleStressTestFactorModel MAIN DESCRIPTION (2+ lines, no marketing).
-// Demonstrates a credit portfolio stress-test pipeline:
+// ExampleStressTestFactorModel demonstrates a credit portfolio stress-test pipeline:
 // raw ingestion (NaN/Inf possible) → sanitize → factor shock Δ = B*S → PD via logistic → Expected Loss aggregation.
 // Scenario:
 //   - You run a portfolio / risk system where exposures (X), factors (F), and residuals define outcomes.
@@ -602,8 +599,7 @@ func ExampleStressTestFactorModel() {
 
 // ----------- helpers -----------
 
-// addToView MAIN DESCRIPTION (2+ lines, no marketing).
-// Adds `delta` to a view cell (i,j) using a read-modify-write sequence.
+// addToView adds `delta` to a view cell (i,j) using a read-modify-write sequence.
 // This helper keeps assembly deterministic and avoids duplicating bounds/policy rules.
 // Implementation:
 //   - Stage 1: Read the current value via v.At(i,j).
@@ -645,8 +641,7 @@ func addToView(v *matrix.MatrixView, i, j int, delta float64) error {
 	return v.Set(i, j, updated) // Write back through the view (policy-aware).
 }
 
-// maxAbs MAIN DESCRIPTION (2+ lines, no marketing).
-// Computes max(|x[i]|) for a float64 slice to provide a stable infinity-norm proxy.
+// maxAbs computes max(|x[i]|) for a float64 slice to provide a stable infinity-norm proxy.
 // This is used for residual norms and solution-difference diagnostics in examples.
 // Implementation:
 //   - Stage 1: Validate the slice reference (nil is treated as empty).
@@ -689,8 +684,7 @@ func maxAbs(x []float64) float64 {
 	return maxV // Return the computed maximum absolute value.
 }
 
-// solveLowerUnitTriangular MAIN DESCRIPTION (2+ lines, no marketing).
-// Solves L*y = b where L is unit lower-triangular (L[i,i] == 1) using forward substitution.
+// solveLowerUnitTriangular solves L*y = b where L is unit lower-triangular (L[i,i] == 1) using forward substitution.
 // This is used for LU-based solves in the Mini-FEA example.
 // Implementation:
 //   - Stage 1: Validate dimensions and input lengths.
@@ -748,8 +742,7 @@ func solveLowerUnitTriangular(L matrix.Matrix, b []float64) ([]float64, error) {
 	return y, nil // Return the computed solution.
 }
 
-// solveUpperTriangular MAIN DESCRIPTION (2+ lines, no marketing).
-// Solves U*x = y where U is upper-triangular using backward substitution.
+// solveUpperTriangular solves U*x = y where U is upper-triangular using backward substitution.
 // This is used for both LU-based solves and QR-based solves (R is upper-triangular).
 // Implementation:
 //   - Stage 1: Validate dimensions and input lengths.
@@ -814,8 +807,7 @@ func solveUpperTriangular(U matrix.Matrix, y []float64) ([]float64, error) {
 	return x, nil // Return the computed solution.
 }
 
-// solveWithLU MAIN DESCRIPTION (2+ lines, no marketing).
-// Solves A*x = b using deterministic LU factorization (no pivoting) and triangular solves.
+// solveWithLU solves A*x = b using deterministic LU factorization (no pivoting) and triangular solves.
 // This is used to demonstrate an engineering-style "solve + verify residual" pipeline.
 // Implementation:
 //   - Stage 1: Factorize A into (L,U) via LUDecompose.
@@ -862,8 +854,7 @@ func solveWithLU(A matrix.Matrix, b []float64) ([]float64, error) {
 	return x, nil // Return the final solution vector.
 }
 
-// solveWithQR MAIN DESCRIPTION (2+ lines, no marketing).
-// Solves A*x = b using Householder QR where A ≈ Qᵀ * R (per package contract).
+// solveWithQR solves A*x = b using Householder QR where A ≈ Qᵀ * R (per package contract).
 // The solve uses the identity: Qᵀ*R*x = b  =>  R*x = Q*b  (multiply both sides by Q).
 // Implementation:
 //   - Stage 1: Compute (Q,R) via QRDecompose.
@@ -910,8 +901,7 @@ func solveWithQR(A matrix.Matrix, b []float64) ([]float64, error) {
 	return x, nil // Return the final solution vector.
 }
 
-// logisticStable MAIN DESCRIPTION (2+ lines, no marketing).
-// Computes logistic(x) = 1/(1+exp(-x)) using a numerically stable branch strategy.
+// logisticStable computes logistic(x) = 1/(1+exp(-x)) using a numerically stable branch strategy.
 // This is used in the credit stress-test example to map scores into probabilities.
 // Implementation:
 //   - Stage 1: Branch on sign(x) to avoid overflow in exp.

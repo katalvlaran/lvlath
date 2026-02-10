@@ -443,7 +443,6 @@ func (g *Graph) GetNamedEdges() []*Edge {
 	return named
 }
 
-// GetEdge MAIN DESCRIPTION.
 // GetEdge returns the edge with the given edgeID, or ErrEdgeNotFound if absent.
 //
 // Implementation:
@@ -492,7 +491,6 @@ func (g *Graph) GetEdge(edgeID string) (*Edge, error) {
 	return e, nil // happy path: return read-only pointer to the cataloged edge
 }
 
-// Edges MAIN DESCRIPTION.
 // Edges returns all edges sorted by Edge.ID ascending (stable, deterministic order).
 //
 // Implementation:
@@ -542,7 +540,6 @@ func (g *Graph) Edges() []*Edge {
 	return out
 }
 
-// EdgeCount MAIN DESCRIPTION.
 // EdgeCount returns the current number of edges in the graph.
 //
 // Implementation:
@@ -582,7 +579,6 @@ func (g *Graph) EdgeCount() int {
 	return len(g.edges)
 }
 
-// HasDirectedEdges MAIN DESCRIPTION.
 // HasDirectedEdges reports whether at least one edge with Directed == true exists.
 //
 // Implementation:

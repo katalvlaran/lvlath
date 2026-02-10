@@ -45,8 +45,7 @@ const (
 )
 
 // denseErrorf wraps an error with a uniform Dense context and callsite indices.
-// MAIN DESCRIPTION:
-//   - Attach method context and coordinates to a sentinel error for diagnostics.
+// Attach method context and coordinates to a sentinel error for diagnostics.
 //
 // Implementation:
 //   - Stage 1: format "Dense.<method>(row,col): %w".
@@ -120,8 +119,7 @@ func (m *Dense) validateValue(v float64) error {
 	return nil
 }
 
-// IsNil MAIN DESCRIPTION (2+ lines, no marketing).
-// Reports whether the receiver is a typed-nil *Dense and therefore must be
+// IsNil reports whether the receiver is a typed-nil *Dense and therefore must be
 // treated as nil when stored inside the Matrix interface.
 //
 // Implementation:
@@ -193,7 +191,6 @@ var (
 )
 
 // NewDense creates an r×c zero matrix using row-major storage.
-// MAIN DESCRIPTION:
 //   - Public constructor for Dense with non-negative shape validation
 //     and the default numeric policy.
 //   - Zero-sized matrices (0×N, N×0, 0×0) are legal and represented
@@ -386,8 +383,7 @@ func (m *Dense) Cols() int { return m.c }
 func (m *Dense) Shape() (rows, cols int) { return m.r, m.c }
 
 // indexOf computes the row-major offset or returns ErrOutOfRange.
-// MAIN DESCRIPTION:
-//   - Bounds-check (row,col) and compute flat offset for row-major storage.
+// Bounds-check (row,col) and compute flat offset for row-major storage.
 //
 // Implementation:
 //   - Stage 1: validate 0 ≤ row < m.r and 0 ≤ col < m.c.
@@ -428,9 +424,7 @@ func (m *Dense) indexOf(row, col int) (int, error) {
 	return row*m.c + col, nil
 }
 
-// At returns the value at (row, col) or ErrOutOfRange.
-// MAIN DESCRIPTION:
-//   - Safe element read at coordinates.
+// At returns the value at (row, col) or ErrOutOfRange. Safe element read at coordinates.
 //
 // Implementation:
 //   - Stage 1: compute offset via indexOf (bounds check).
@@ -469,8 +463,7 @@ func (m *Dense) At(row, col int) (float64, error) {
 }
 
 // Set stores v at (row, col) or returns an error (bounds or numeric policy).
-// MAIN DESCRIPTION:
-//   - Safe element write with optional finite-only policy.
+// Safe element write with optional finite-only policy.
 //
 // Implementation:
 //   - Stage 1: Validate bounds.
@@ -529,8 +522,7 @@ func (m *Dense) Set(row, col int, v float64) error {
 	return nil
 }
 
-// Fill MAIN DESCRIPTION (2+ lines, no marketing).
-// Overwrites the entire Dense buffer with the provided row-major slice.
+// Fill overwrites the entire Dense buffer with the provided row-major slice.
 // Enforces the receiver numeric policy (same rules as Set) to keep invariants consistent.
 //
 // Implementation:
@@ -621,8 +613,7 @@ func (d *Dense) Fill(data []float64) error {
 }
 
 // Clone returns a deep copy (new buffer, same numeric policy).
-// MAIN DESCRIPTION:
-//   - Produce an independent Dense with identical shape/data/policy.
+// Produce an independent Dense with identical shape/data/policy.
 //
 // Implementation:
 //   - Stage 1: allocate new buffer len==r*c.
@@ -709,8 +700,7 @@ func (m *Dense) String() string {
 }
 
 // Induced materializes a copy submatrix using explicit index sets.
-// MAIN DESCRIPTION:
-//   - Copy rows/cols at the given index lists (duplicates allowed).
+// Copy rows/cols at the given index lists (duplicates allowed).
 //
 // Implementation:
 //   - Stage 1: handle zero-sized result (legal).
@@ -791,8 +781,7 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error) {
 }
 
 // Do visits each element (i,j) in row-major order and calls f(i,j,v).
-// MAIN DESCRIPTION:
-//   - Read-only visitor; stops early when f returns false.
+// Read-only visitor; stops early when f returns false.
 //
 // Implementation:
 //   - Stage 1: validate receiver and callback; bail out on nil.
@@ -844,8 +833,7 @@ func (m *Dense) Do(f func(i, j int, v float64) bool) {
 }
 
 // Apply replaces each element with f(i,j,v) in-place.
-// MAIN DESCRIPTION:
-//   - In-place map with policy enforcement and deterministic order.
+// In-place map with policy enforcement and deterministic order.
 //
 // Implementation:
 //   - Stage 1: nested loops - double for-loop over rows then cols; compute new value via f.
@@ -899,8 +887,7 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 }
 
 // View creates a no-copy window [r0:r0+rows, c0:c0+cols) over the same storage.
-// MAIN DESCRIPTION:
-//   - Lightweight submatrix referencing the base buffer (shared storage).
+// Lightweight submatrix referencing the base buffer (shared storage).
 //
 // Implementation:
 //   - Stage 1: validate window bounds; allow zero-area.
@@ -985,8 +972,7 @@ func (v *MatrixView) Rows() int { return v.r }
 func (v *MatrixView) Cols() int { return v.c }
 
 // At reads element (i,j) in the view or returns ErrOutOfRange.
-// MAIN DESCRIPTION:
-//   - Safe read within the view bounds; translates to base coordinates.
+// Safe read within the view bounds; translates to base coordinates.
 //
 // Implementation:
 //   - Stage 1: check 0≤i<r and 0≤j<c.
@@ -1010,8 +996,7 @@ func (v *MatrixView) At(i, j int) (float64, error) {
 	return v.base.data[(v.r0+i)*v.base.c+(v.c0+j)], nil
 }
 
-// Set MAIN DESCRIPTION (2+ lines, no marketing).
-// Writes (i,j) in the view and forwards numeric-policy enforcement to the base Dense.
+// Set writes (i,j) in the view and forwards numeric-policy enforcement to the base Dense.
 //
 // Implementation:
 //   - Stage 1: Validate receiver/base and bounds in view coordinates.

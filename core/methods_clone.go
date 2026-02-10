@@ -49,12 +49,15 @@ import "sync/atomic"
 // AI-Hints:
 //   - Use CloneEmpty when you need the same vertex universe but want to rebuild topology from scratch.
 func (g *Graph) CloneEmpty() *Graph {
-	// AI-HINT: No edges are copied; vertices + flags copied; nextEdgeID carried.
+	// Acquire locks to ensure consistent vertex snapshot.
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
+	// Lock edges too, to ensure we don't snapshot whilst Clear() or internal reorg is happening,
+	// maintaining strict Lock ordering (Vert -> EdgeAdj).
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
-	// Copy configuration via options
+
+	// 1. Copy configuration
 	opts := []GraphOption{WithDirected(g.directed)}
 	if g.weighted {
 		opts = append(opts, WithWeighted())
@@ -71,9 +74,11 @@ func (g *Graph) CloneEmpty() *Graph {
 
 	clone := NewGraph(opts...)
 
-	// Preserve the textual edge ID sequence to avoid collisions on future AddEdge.
+	// 2. Carry over nextEdgeID
 	atomic.StoreUint64(&clone.nextEdgeID, atomic.LoadUint64(&g.nextEdgeID))
-	// Copy vertices (shallow metadata copy by contract).
+
+	// 3. Copy vertices (Shallow Copy of Metadata)
+	// ALIASING WARNING: Metadata map is shared between source and clone.
 	var id string
 	var v *Vertex
 	for id, v = range g.vertices {
@@ -87,17 +92,16 @@ func (g *Graph) CloneEmpty() *Graph {
 // Clone returns a deep topology copy of the Graph: configuration, vertices, edges, and adjacency.
 //
 // Implementation:
-//   - Stage 1: Build the base clone via CloneEmpty (flags + vertices, no edges).
-//   - Stage 2: Acquire muEdgeAdj read lock to snapshot edge catalog and adjacency safely.
-//   - Stage 3: Copy each Edge struct into the clone's edge catalog.
-//   - Stage 4: Rebuild adjacency buckets in the clone consistently with edge directedness.
-//   - Stage 5: Carry over nextEdgeID to preserve the textual edge ID sequence.
-//   - Stage 6: Return the clone.
+//   - Stage 1: Acquire BOTH muVert and muEdgeAdj Rlocks (atomic snapshot).
+//   - Stage 2: Create new Graph and copy configuration.
+//   - Stage 3: Copy vertices (shallow metadata).
+//   - Stage 4: Copy edges and rebuild adjacency.
+//   - Stage 5: Release locks.
 //
 // Behavior highlights:
+//   - ATOMIC: The clone represents the graph state at a single instant.
 //   - Preserves Edge.ID, endpoints, weights, and directedness.
-//   - Produces an independent graph instance with no shared internal maps.
-//   - Vertex.Metadata is still a shallow copy (shared pointer), consistent with Vertex contract.
+//   - Vertex.Metadata is shallow-copied (shared pointer).
 //
 // Inputs:
 //   - None.
@@ -121,12 +125,39 @@ func (g *Graph) CloneEmpty() *Graph {
 // AI-Hints:
 //   - Use Clone when algorithms need a sandbox graph to mutate without affecting the original.
 func (g *Graph) Clone() *Graph {
-	// AI-HINT: Deep copy of vertices, edges, adjacency; IDs and Directedness preserved; nextEdgeID carried.
-	clone := g.CloneEmpty()
+	// LOCK ORDER: muVert -> muEdgeAdj.
+	// We must hold BOTH locks to ensure the vertex set doesn't change
+	// while we are copying edges that refer to them.
+	g.muVert.RLock()
+	defer g.muVert.RUnlock()
 
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
-	// Copy edges and adjacency
+
+	// 1. Setup new graph with same config
+	opts := []GraphOption{WithDirected(g.directed)}
+	if g.weighted {
+		opts = append(opts, WithWeighted())
+	}
+	if g.allowMulti {
+		opts = append(opts, WithMultiEdges())
+	}
+	if g.allowLoops {
+		opts = append(opts, WithLoops())
+	}
+	if g.allowMixed {
+		opts = append(opts, WithMixedEdges())
+	}
+	clone := NewGraph(opts...)
+
+	// 2. Copy Vertices
+	// ALIASING WARNING: Metadata is shared.
+	for id, v := range g.vertices {
+		clone.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
+		clone.adjacencyList[id] = make(map[string]map[string]struct{})
+	}
+
+	// 3. Copy Edges & Adjacency
 	var (
 		eid   string
 		e, ne *Edge
@@ -136,12 +167,14 @@ func (g *Graph) Clone() *Graph {
 		// Duplicate Edge struct
 		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: e.Weight, Directed: e.Directed}
 		clone.edges[eid] = ne
-		// Append to nested adjacency maps
+
+		// Rebuild Adjacency: Forward
 		if _, ok = clone.adjacencyList[e.From][e.To]; !ok {
 			clone.adjacencyList[e.From][e.To] = make(map[string]struct{})
 		}
 		clone.adjacencyList[e.From][e.To][eid] = struct{}{}
 
+		// Rebuild Adjacency: Backward (if undirected)
 		if !e.Directed && e.From != e.To {
 			if _, ok = clone.adjacencyList[e.To][e.From]; !ok {
 				clone.adjacencyList[e.To][e.From] = make(map[string]struct{})
@@ -150,7 +183,7 @@ func (g *Graph) Clone() *Graph {
 		}
 	}
 
-	// Keep the sequence monotonic on the clone.
+	// 4. Preserve ID Counter
 	atomic.StoreUint64(&clone.nextEdgeID, atomic.LoadUint64(&g.nextEdgeID))
 
 	return clone

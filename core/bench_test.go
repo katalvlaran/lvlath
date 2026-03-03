@@ -8,8 +8,7 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// Benchmark sinks prevent accidental dead-code elimination in microbenchmarks.
-// They must remain package-level to defeat escape analysis assumptions.
+// Benchmark sinks prevent accidental dead-code elimination.
 var (
 	benchSinkString string
 	benchSinkEdges  []*core.Edge
@@ -19,9 +18,9 @@ var (
 // BenchmarkAddEdge_Unweighted measures AddEdge throughput under the default policy (unweighted, undirected),
 // excluding string formatting costs from the timed region.
 //
-// Implementation:
-//   - Stage 1: Precompute destination vertex IDs outside the timer.
-//   - Stage 2: Reset timer and repeatedly call AddEdge("Root", ids[i], 0).
+// Improvements:
+//   - Strings are pre-generated to measure Graph performance, not fmt performance.
+//   - Errors are captured to ensure API correctness without adding branching overhead in the hot loop.
 //
 // Behavior highlights:
 //   - Exercises the unweighted fast-path (weight must be 0).
@@ -31,10 +30,6 @@ var (
 func BenchmarkAddEdge_Unweighted(b *testing.B) {
 	// Create a new default Graph (undirected, unweighted)
 	g := core.NewGraph()
-	// Report memory allocations per operation
-	b.ReportAllocs()
-	// Reset timer to exclude setup cost
-	b.ResetTimer()
 
 	var i int
 	ids := make([]string, b.N)
@@ -42,10 +37,20 @@ func BenchmarkAddEdge_Unweighted(b *testing.B) {
 		ids[i] = fmt.Sprintf("N%d", i)
 	}
 
+	// Report memory allocations per operation
+	b.ReportAllocs()
+	// Reset timer to exclude setup cost
+	b.ResetTimer()
+
+	var err error
 	for i = 0; i < b.N; i++ {
-		// AddEdge uses weight=0 by default to satisfy unweighted constraint
-		id, _ := g.AddEdge("Root", ids[i], 0)
-		benchSinkString = id
+		// Use weight=0 for unweighted graph.
+		_, err = g.AddEdge("Root", ids[i], 0)
+	}
+
+	// Verify correctness outside the hot path.
+	if err != nil {
+		b.Fatal(err)
 	}
 }
 
@@ -57,18 +62,24 @@ func BenchmarkAddEdge_Unweighted(b *testing.B) {
 func BenchmarkAddEdge_Weighted(b *testing.B) {
 	// Create a weighted Graph
 	g := core.NewGraph(core.WithWeighted())
-	b.ReportAllocs()
-	b.ResetTimer()
+
 	var i int
 	ids := make([]string, b.N)
 	for i = 0; i < b.N; i++ {
 		ids[i] = fmt.Sprintf("N%d", i)
 	}
 
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	var err error
 	for i = 0; i < b.N; i++ {
-		// Using i as weight exercises the weighted path
-		id, _ := g.AddEdge("Root", ids[i], float64(i))
-		benchSinkString = id
+		// Use 'i' as weight.
+		_, err = g.AddEdge("Root", ids[i], float64(i))
+	}
+
+	if err != nil {
+		b.Fatal(err)
 	}
 }
 
@@ -80,10 +91,8 @@ func BenchmarkAddEdge_Weighted(b *testing.B) {
 func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 	// Create graph allowing multi-edges and weights
 	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
-	b.ReportAllocs()
-	b.ResetTimer()
 
-	// Keep endpoint cardinality small to create many parallel edges deterministically.
+	// Keep endpoint cardinality small to force parallel edges.
 	const targets = 100
 	var i int
 	ids := make([]string, targets)
@@ -91,10 +100,17 @@ func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 		ids[i] = fmt.Sprintf("N%d", i)
 	}
 
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	var err error
 	for i = 0; i < b.N; i++ {
-		// Cycle through 100 target nodes to stress many parallel edges
-		id, _ := g.AddEdge("Root", ids[i%targets], float64(i))
-		benchSinkString = id
+		// Cycle through targets to create many parallel edges.
+		_, err = g.AddEdge("Root", ids[i%targets], float64(i))
+	}
+
+	if err != nil {
+		b.Fatal(err)
 	}
 }
 
@@ -111,12 +127,19 @@ func BenchmarkNeighbors(b *testing.B) {
 	for i = 0; i < 1000; i++ {
 		_, _ = g.AddEdge("Center", fmt.Sprintf("Node%d", i), 0)
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
+	var edges []*core.Edge
+	var err error
 	for i = 0; i < b.N; i++ {
-		// Neighbors should return 1000 edges in O(d log d)
-		edges, _ := g.Neighbors("Center")
+		edges, err = g.Neighbors("Center")
 		benchSinkEdges = edges
+	}
+
+	if err != nil {
+		b.Fatal(err)
 	}
 }
 
@@ -134,8 +157,10 @@ func BenchmarkClone(b *testing.B) {
 	for i = 0; i < 1000; i++ {
 		_, _ = g.AddEdge("A", fmt.Sprintf("V%d", i), float64(i))
 	}
+
 	b.ReportAllocs()
 	b.ResetTimer()
+
 	for i = 0; i < b.N; i++ {
 		// Clone performs O(V+E) copy
 		benchSinkGraph = g.Clone()

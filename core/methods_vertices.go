@@ -337,33 +337,28 @@ func (g *Graph) InternalVertices() map[string]*Vertex {
 	return g.vertices
 }
 
-// Degree returns the degree components of the given vertex ID:
+// Degree returns the degree components of the given vertex ID.
 //
-//   - in: number of incoming directed edges (e.To == id)
-//   - out: number of outgoing directed edges (e.From == id)
-//   - undirected: contribution from undirected edges
-//
-// Academic policy:
+// Math Policy (Contract Anchor):
 //   - Directed edges contribute to in/out only.
 //   - Undirected edges contribute to undirected only.
-//   - Directed self-loop (id -> id) contributes +1 to both in and out.
-//   - Undirected self-loop contributes +2 to undirected (classic graph-theory convention).
+//   - Directed self-loop (id -> id): Contributes +1 to 'in' AND +1 to 'out'.
+//   - Undirected self-loop (id - id): Contributes +2 to 'undirected' (classic graph theory).
 //
 // Implementation:
 //   - Stage 1: Validate id and vertex existence under locks.
 //   - Stage 2: Scan ALL graph edges (g.edges) to identify incident connections.
-//     This is necessary because the standard adjacency list is optimized for
-//     outgoing edges and does not efficiently index incoming directed edges.
-//   - Stage 3: Accumulate counters based on connectivity and direction.
+//     This is an O(E) operation required to correctly calculate in-degree for
+//     directed edges without maintaining a separate expensive reverse index.
 //
 // Inputs:
 //   - id: vertex identifier.
 //
 // Returns:
-//   - in: directed in-degree component.
-//   - out: directed out-degree component.
-//   - undirected: undirected degree component.
-//   - err: vertices working errors (ErrEmptyVertexID or ErrVertexNotFound).
+//   - in: number of incoming directed edges (e.To == id)
+//   - out: number of outgoing directed edges (e.From == id)
+//   - undirected: contribution from undirected edges
+//   - err: ErrEmptyVertexID or ErrVertexNotFound.
 //
 // Errors:
 //   - ErrEmptyVertexID: if id is empty.
@@ -381,19 +376,16 @@ func (g *Graph) InternalVertices() map[string]*Vertex {
 //   - This method acquires global read locks on vertices and edges.
 //
 // AI-Hints:
+//   - Directed self-loops increase the total degree sum by 2 (1 in + 1 out).
+//   - Undirected self-loops increase the total degree sum by 2 (2 undirected).
 //   - Use Degree() when you need loop-aware, policy-defined degree semantics.
 //   - Be aware of O(E) cost on very large graphs.
 func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
-	// AI-HINT:
-	//   - Directed self-loop contributes +1 to in and +1 to out.
-	//   - Undirected self-loop contributes +2 to undirected.
-
 	if id == "" {
 		return 0, 0, 0, ErrEmptyVertexID
 	}
 
-	// Acquire locks in the same order as other methods (muVert -> muEdgeAdj)
-	// to ensure consistent view and avoid deadlocks.
+	// Acquire locks in the same order as mutators (muVert -> muEdgeAdj)
 	g.muVert.RLock()
 	defer g.muVert.RUnlock()
 
@@ -405,32 +397,36 @@ func (g *Graph) Degree(id string) (in, out, undirected int, err error) {
 		return 0, 0, 0, ErrVertexNotFound
 	}
 
-	// Iterate over ALL edges to correctly capture incoming directed edges (in-degree),
-	// which are not present in the standard Neighbors() (outgoing-only) view.
+	// Iterate over ALL edges to correctly capture incoming directed edges.
 	for _, e := range g.edges {
-		// Safety check against nil edges in map (defensive)
+		// Safety check (defensive)
 		if e.IsNil() {
 			continue
 		}
 
-		// Check connectivity for directed and undirected edge
+		// Calculate incidence once (Register/Stack access is faster than heap dereference)
 		isFrom := e.From == id
 		isTo := e.To == id
+
+		// GUARD CLAUSE:
+		// Most edges in the graph are irrelevant. Filter them out immediately.
 		if !isFrom && !isTo {
 			continue
 		}
+
 		if e.Directed {
+			// Directed logic
 			if isFrom {
 				out++
 			}
 			if isTo {
 				in++
 			}
-			// Note: A directed self-loop (id->id) triggers both checks,
+			// Note: A directed self-loop (isFrom && isTo) triggers both checks,
 			// correctly incrementing both 'in' and 'out'.
 		} else {
 			// Undirected logic
-			if e.From == id && e.To == id {
+			if isFrom && isTo {
 				// Undirected self-loop increases degree by 2 in classic theory.
 				undirected += 2
 			} else {

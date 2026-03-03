@@ -100,26 +100,31 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 // AddEdge creates a new edge (from -> to) with an optional weight and per-edge options.
 // The method enforces graph capabilities (weighted/multi/loops/mixed) and updates adjacency.
 //
+// Transactional Safety:
+//   - This operation is TOPOLOGICALLY ATOMIC.
+//   - It acquires muVert.Lock() AND muEdgeAdj.Lock() (in that order) to ensure that
+//     endpoints cannot be concurrently removed by RemoveVertex() during edge creation.
+//   - If endpoints are missing, they are created atomically as part of this transaction.
+//
 // Implementation:
-//   - Stage 1: Validate inputs against graph capabilities (empty IDs, weight policy, loop policy).
-//   - Stage 2: Ensure endpoints exist (AddVertex).
-//   - Stage 3: Under muEdgeAdj write lock:
-//   - enforce multi-edge policy,
-//   - construct a baseline Edge (defaults + endpoints + weight),
-//   - apply EdgeOptions in call order (first error aborts),
-//   - assign an auto-ID if no explicit ID was provided,
-//   - store in edge catalog and update adjacency (mirror if undirected).
+//   - Stage 1: Validate inputs (stateless checks).
+//   - Stage 2: Acquire muVert.Lock() (Transaction Start).
+//   - Stage 3: Ensure 'from' and 'to' vertices exist in the catalog.
+//   - Stage 4: Acquire muEdgeAdj.Lock().
+//   - Stage 5: Enforce edge policies (multi, loops, mixed).
+//   - Stage 6: Create edge, assign ID, update adjacency buckets.
+//   - Stage 7: Release locks (Transaction End).
 //
 // Behavior highlights:
 //   - Strict sentinel errors only (errors.Is).
 //   - No panics as part of the public contract.
-//   - Deterministic behavior given deterministic inputs.
+//   - No lock gap between vertex creation and edge insertion.
 //
 // Inputs:
 //   - from: source vertex ID (must be non-empty).
 //   - to: destination vertex ID (must be non-empty).
 //   - weight: edge weight; must be 0 unless WithWeighted() was set.
-//   - opts: optional per-edge mutators (WithID, WithEdgeDirected, ...).
+//   - opts: optional per-edge mutators.
 //
 // Returns:
 //   - string: the assigned Edge.ID (auto-generated or explicit).
@@ -138,7 +143,7 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //   - Auto-ID assignment uses a monotonic counter (no randomness, no time).
 //
 // Complexity:
-//   - Time O(1) amortized (hash-map + nested-map updates + O(len(opts)) option calls).
+//   - Time O(1) amortized.
 //   - Space O(1) amortized.
 //
 // Notes:
@@ -148,59 +153,75 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //   - Use WithID for stable cross-run edge references.
 //   - For undirected edges, adjacency is mirrored automatically.
 func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (string, error) {
-	// Input validation
+	// 1. Input validation (stateless)
 	if from == "" || to == "" {
 		return "", ErrEmptyVertexID
 	}
-	if !g.weighted && weight != 0 { // weight constraint
+	if !g.weighted && weight != 0 {
 		return "", ErrBadWeight
 	}
-	if from == to && !g.allowLoops { // loop constraint
+	if from == to && !g.allowLoops {
 		return "", ErrLoopNotAllowed
 	}
 
-	// Ensure vertices exist
-	if err := g.AddVertex(from); err != nil {
-		return "", err
+	// 2. Start Transaction: Lock Vertices (Write Lock)
+	// We must hold this lock to prevent concurrent RemoveVertex from deleting
+	// 'from' or 'to' while we are in the process of linking them.
+	g.muVert.Lock()
+	defer g.muVert.Unlock()
+
+	// 3. Ensure Vertices Exist (Inlined logic to avoid deadlock via g.AddVertex)
+	if _, ok := g.vertices[from]; !ok {
+		g.vertices[from] = &Vertex{ID: from, Metadata: make(map[string]interface{})}
 	}
-	if err := g.AddVertex(to); err != nil {
-		return "", err
+	if _, ok := g.vertices[to]; !ok {
+		g.vertices[to] = &Vertex{ID: to, Metadata: make(map[string]interface{})}
 	}
 
-	// Insert edge under lock
+	// 4. Lock Edges & Adjacency
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
 
-	// Build baseline edge (ID assigned later)
-	e := &Edge{From: from, To: to, Weight: weight, Directed: g.directed}
+	// 5. Ensure Adjacency Invariants
+	// (Vertices exist, so their adjacency buckets must exist).
+	// We rely on ensureAdjacency or direct checks.
+	if g.adjacencyList[from] == nil {
+		g.adjacencyList[from] = make(map[string]map[string]struct{})
+	}
+	if g.adjacencyList[to] == nil {
+		g.adjacencyList[to] = make(map[string]map[string]struct{})
+	}
 
-	if !g.allowMulti { // Multi-edge existence check
+	// 6. Enforce Multi-edge Policy
+	if !g.allowMulti {
 		if inner := g.adjacencyList[from][to]; len(inner) > 0 {
 			return "", ErrMultiEdgeNotAllowed
 		}
 	}
 
-	// Apply EdgeOptions deterministically in call order.
-	//    Any option error aborts the operation without mutating graph catalogs.
+	// 7. Build Baseline Edge
+	e := &Edge{From: from, To: to, Weight: weight, Directed: g.directed}
+
+	// 8. Apply Options
+	// Note: Options are simple mutators; they do not require extra locks.
 	for _, opt := range opts {
 		if err := opt(g, e); err != nil {
 			return "", err
 		}
 	}
 
-	// Re-check loops in case WithEdgeDirected changed nothing here,
-	//    but best to keep the guard in case future options interfere (future options must not bypass loop policy).
+	// Re-check loops guard (options might not respect initial check, though they should)
 	if e.From == e.To && !g.allowLoops {
 		return "", ErrLoopNotAllowed
 	}
 
-	// Assign edge ID:
+	// 9. Assign edge ID:
 	//    - If WithID was used, e.ID is already set and validated for uniqueness.
 	//    - Otherwise, generate a new unique textual edge ID in O(1) without fmt allocations.
 	if e.ID == "" {
 		e.ID = nextEdgeID(g)
 	} else {
-		// Final defensive collision check (covers future options that may set IDs).
+		// Collision check for explicit ID
 		if _, exists := g.edges[e.ID]; exists {
 			return "", ErrEdgeIDConflict
 		}
@@ -209,12 +230,12 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 		}
 	}
 
-	// Store edge and update adjacency.
+	// 10. Store Edge & Update Adjacency
 	g.edges[e.ID] = e
+	// Forward Adjacency
 	ensureAdjacency(g, from, to)
 	g.adjacencyList[from][to][e.ID] = struct{}{}
-
-	// Mirror undirected edges (excluding loops).
+	// Mirror Adjacency (Undirected)
 	if !e.Directed && from != to {
 		ensureAdjacency(g, to, from)
 		g.adjacencyList[to][from][e.ID] = struct{}{}

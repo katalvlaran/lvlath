@@ -114,9 +114,9 @@
 //     Assigns a custom Edge.ID for the new edge.
 //     Contract:
 //
-//   - id must be non-empty, else ErrEmptyEdgeID.
+//   - id must be non-empty, else returns ErrEmptyEdgeID.
 //
-//   - id must be globally unique within the graph, else ErrEdgeIDConflict.
+//   - id must be globally unique within the graph, else returns ErrEdgeIDConflict.
 //     Note:
 //
 //   - If id matches the canonical auto-ID form "eN", the graph advances its
@@ -187,11 +187,13 @@
 // -- COMPLEXITY SUMMARY -------------------------------------------------------
 //
 //	AddVertex / HasVertex / HasEdge              O(1) amortized
-//	AddEdge / RemoveEdge                         O(1) amortized
+//	AddEdge                                      O(1) amortized (topologically atomic)
+//	RemoveEdge                                   O(1) amortized + adjacency cleanup cost
+//	RemoveVertex                                 O(E) (scans edge catalog to remove incidents)
 //	Vertices / Edges                             O(V log V) / O(E log E) for ordering
 //	Neighbors / NeighborIDs                      O(d log d)  (d = degree(id))
 //	AdjacencyList                                O(V+E) assemble + per-vertex sort
-//	Degree                                       O(d)
+//	Degree                                       O(E) (scans edges to ensure correct in-degree)
 //	CloneEmpty / Clone                           O(V) / O(V+E)
 //	Clear                                        O(1) (map reinit + counter reset)
 //	Stats                                        O(V+E)

@@ -1,176 +1,160 @@
-// Package bfs provides tunable options and error definitions
-// for breadth‐first search over a core.Graph.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package bfs
 
 import (
-	"context"
-	"errors"
 	"fmt"
 )
 
-// Sentinel errors for BFS execution.
-var (
-	// ErrStartVertexNotFound is returned when the start ID is absent.
-	ErrStartVertexNotFound = errors.New("bfs: start vertex not found")
-
-	// ErrGraphNil is returned if a nil graph pointer is passed.
-	ErrGraphNil = errors.New("bfs: graph is nil")
-
-	// ErrOptionViolation is returned when an invalid Option is supplied.
-	ErrOptionViolation = errors.New("bfs: invalid option supplied")
-)
-
-// Option configures BFS behavior via functional arguments.
-// If an Option is invalid (e.g. negative depth), it will be recorded
-// internally and surfaced as ErrOptionViolation when BFS is invoked.
-type Option func(*BFSOptions)
-
-// BFSOptions holds parameters and callbacks to customize BFS execution.
-type BFSOptions struct {
-	// Ctx allows cancellation and deadlines.
-	Ctx context.Context
-
-	// OnEnqueue is called when a vertex is enqueued, before visiting.
-	// Receives vertex ID and its depth from the start.
-	OnEnqueue func(id string, depth int)
-
-	// OnDequeue is called immediately before visiting a vertex.
-	OnDequeue func(id string, depth int)
-
-	// OnVisit is called when visiting a vertex. If it returns an error,
-	// BFS aborts and propagates that error.
-	OnVisit func(id string, depth int) error
-
-	// MaxDepth, if > 0, stops exploring beyond this depth.
-	// A value of 0 explicitly disables any depth limit.
-	MaxDepth int
-
-	// FilterNeighbor can skip edges by returning false.
-	// Called for each edge curr→neighbor.
-	FilterNeighbor func(curr, neighbor string) bool
-
-	// internal error recorded during option parsing
-	err error
-}
-
-// DefaultOptions returns a BFSOptions with sane defaults:
-//   - Context.Background()
-//   - no depth limit (MaxDepth == 0)
-//   - no filtering (all neighbors allowed)
-//   - no-op hooks (OnEnqueue, OnDequeue, OnVisit)
-//   - error channel clear.
-func DefaultOptions() BFSOptions {
-	return BFSOptions{
-		Ctx:            context.Background(),
-		OnEnqueue:      func(string, int) {},
-		OnDequeue:      func(string, int) {},
-		OnVisit:        func(string, int) error { return nil },
-		MaxDepth:       0,
-		FilterNeighbor: func(_, _ string) bool { return true },
-		err:            nil,
-	}
-}
-
-// WithContext sets a custom context for cancellation.
-func WithContext(ctx context.Context) Option {
-	return func(o *BFSOptions) {
-		if ctx != nil {
-			o.Ctx = ctx
-		}
-	}
-}
-
-// WithOnEnqueue registers a callback to run on enqueue.
-func WithOnEnqueue(fn func(id string, depth int)) Option {
-	return func(o *BFSOptions) {
-		if fn != nil {
-			o.OnEnqueue = fn
-		}
-	}
-}
-
-// WithOnDequeue registers a callback to run on dequeue.
-func WithOnDequeue(fn func(id string, depth int)) Option {
-	return func(o *BFSOptions) {
-		if fn != nil {
-			o.OnDequeue = fn
-		}
-	}
-}
-
-// WithOnVisit registers a callback to run on visit; returning an error
-// from this callback stops the BFS.
-func WithOnVisit(fn func(id string, depth int) error) Option {
-	return func(o *BFSOptions) {
-		if fn != nil {
-			o.OnVisit = fn
-		}
-	}
-}
-
-// WithMaxDepth stops the search at the given depth (exclusive).
-//
-//	d > 0: limit to depth d
-//	d == 0: explicit no depth limit
-//	d < 0: invalid option → ErrOptionViolation
-func WithMaxDepth(d int) Option {
-	return func(o *BFSOptions) {
-		switch {
-		case d < 0:
-			o.err = fmt.Errorf("%w: MaxDepth cannot be negative (%d)", ErrOptionViolation, d)
-		case d == 0:
-			// explicit "no limit"
-			o.MaxDepth = 0
-		default:
-			o.MaxDepth = d
-		}
-	}
-}
-
-// WithFilterNeighbor skips neighbors when fn returns false.
-func WithFilterNeighbor(fn func(curr, neighbor string) bool) Option {
-	return func(o *BFSOptions) {
-		if fn != nil {
-			o.FilterNeighbor = fn
-		}
-	}
-}
-
-// BFSResult holds the outcome of a BFS traversal:
-//   - Order: vertices visited, in visit sequence.
-//   - Depth: map from vertex ID to its distance (in edges) from the start.
-//   - Parent: map from vertex ID to its predecessor in the BFS tree.
+// BFSResult holds the outcome of a breadth-first traversal.
 type BFSResult struct {
-	Order  []string
-	Depth  map[string]int
+	// StartID is the starting vertex ID for this BFS invocation.
+	//
+	// AI-HINTS:
+	//   - StartID is required to make PathTo unambiguous under FullTraversal.
+	StartID string
+
+	// Order is the deterministic dequeue/visit order.
+	//
+	// AI-HINTS:
+	//   - Order remains meaningful on partial results (it only contains processed vertices).
+	Order []string
+
+	// Depth[v] is the shortest distance in edges.
+	//
+	// Semantics:
+	//   - WithFullTraversal=false: from StartID.
+	//   - WithFullTraversal=true: from the forest root that discovered v (each component has its own root at depth 0).
+	//
+	// AI-HINTS:
+	//   - Depth is edge-count (unweighted). Do not interpret as weighted distance.
+	Depth map[string]int
+
+	// Parent[v] = u forms the BFS tree/forest; roots have no parent entry.
+	//
+	// Semantics:
+	//   - WithFullTraversal=false: a single BFS tree rooted at StartID.
+	//   - WithFullTraversal=true: a BFS forest; each component root has no parent entry.
+	//
+	// AI-HINTS:
+	//   - Parent is sufficient to reconstruct one shortest path (not all).
 	Parent map[string]string
+
+	// Visited marks reached vertices (may include enqueued-but-not-yet-dequeued on early exit).
+	//
+	// AI-HINTS:
+	//   - On partial results, Visited can be a superset of Order.
+	Visited map[string]bool
+
+	// Skipped counts neighbor relations rejected by FilterNeighbor.
+	//
+	// AI-HINTS:
+	//   - Skipped counts relation-level filtering, not edge-level filtering.
+	Skipped int
 }
 
-// PathTo reconstructs the path from the start vertex to dest.
-// Returns an error if dest was not reached.
-func (r *BFSResult) PathTo(dest string) ([]string, error) {
-	if _, ok := r.Depth[dest]; !ok {
-		return nil, fmt.Errorf("bfs: no path to %q", dest)
+// PathTo reconstructs one shortest path from StartID to dst.
+// Returns (nil, ErrNoPath) if dst is unreachable from StartID.
+//
+// Implementation:
+//   - Stage 1: Validate that dst is reachable (via Visited; fallback to Depth for compatibility).
+//   - Stage 2: Follow Parent links backward from dst to a root.
+//   - Stage 3: Reverse the collected chain to produce Start → dst.
+//   - Stage 4: Enforce StartID anchoring when StartID is present.
+//
+// Behavior highlights:
+//   - Protocol: path absence is reported via ErrNoPath (errors.Is-friendly).
+//
+// Inputs:
+//   - dst: destination vertex ID.
+//
+// Returns:
+//   - []string: a vertex ID sequence from StartID to dst (inclusive).
+//
+// Errors:
+//   - ErrNoPath if dst is unreachable or the Parent chain cannot be anchored to StartID.
+//
+// Determinism:
+//   - The returned path is deterministic given deterministic Parent construction.
+//
+// Complexity:
+//   - Time O(L), Space O(L), where L is the number of vertices on the reconstructed path.
+//
+// Notes:
+//   - If StartID is empty, PathTo falls back to the root of the Parent chain for backward compatibility.
+//
+// AI-Hints:
+//   - Under FullTraversal, visited != reachable-from-StartID; StartID anchoring prevents false paths.
+func (r *BFSResult) PathTo(dst string) ([]string, error) {
+	if r == nil {
+		return nil, ErrNoPath
 	}
-	// build reversed path
-	var (
-		path      []string
-		cur, prev string
-		ok        bool
-	)
-	for cur = dest; ; {
+
+	// Stage 1: Reachability check.
+	if r.Visited != nil {
+		if !r.Visited[dst] {
+			return nil, fmt.Errorf("%w: to %q", ErrNoPath, dst)
+		}
+	} else {
+		if r.Depth == nil {
+			return nil, fmt.Errorf("%w: to %q", ErrNoPath, dst)
+		}
+		if _, ok := r.Depth[dst]; !ok {
+			return nil, fmt.Errorf("%w: to %q", ErrNoPath, dst)
+		}
+	}
+
+	// Stage 2: Walk Parent links backward, guarding against malformed cycles.
+	seen := make(map[string]bool, 8)
+
+	// Preallocate path capacity when depth is known.
+	path := make([]string, 0, 8)
+	if r.Depth != nil {
+		if d, ok := r.Depth[dst]; ok && d >= 0 {
+			path = make([]string, 0, d+1)
+		}
+	}
+
+	for cur := dst; ; {
+		if seen[cur] {
+			return nil, fmt.Errorf("%w: cyclic parent chain at %q", ErrNoPath, cur)
+		}
+		seen[cur] = true
+
 		path = append(path, cur)
-		prev, ok = r.Parent[cur]
+
+		prev, ok := r.Parent[cur]
 		if !ok {
 			break
 		}
 		cur = prev
 	}
-	// reverse to get start → dest
-	var i, j int
-	for i, j = 0, len(path)-1; i < j; i, j = i+1, j-1 {
+
+	// Stage 3: Reverse to get root → dst.
+	for i, j := 0, len(path)-1; i < j; i, j = i+1, j-1 {
 		path[i], path[j] = path[j], path[i]
 	}
 
+	// Stage 4: Enforce StartID anchoring when StartID is available.
+	if r.StartID != "" && len(path) > 0 && path[0] != r.StartID {
+		return nil, fmt.Errorf("%w: to %q", ErrNoPath, dst)
+	}
+
 	return path, nil
+}
+
+// ComponentsResult holds weakly-connected components computed over an undirected relation.
+type ComponentsResult struct {
+	// Components is a list of weakly-connected components; each component is lex-sorted.
+	Components [][]string
+
+	// Count is len(Components).
+	Count int
+
+	// UndirectedView reports that components were computed on underlying undirected relation.
+	UndirectedView bool
+
+	// AI-HINTS:
+	//   - Components are deterministic: sort vertices inside components and sort components by a stable key.
 }

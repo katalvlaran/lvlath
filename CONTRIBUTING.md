@@ -74,12 +74,12 @@ Merge into the development branch via pull request; CI must pass.
 
 ## 🔧 Testing & Benchmarks
 
-* All new code **must** include unit tests (use testify/suite).
+* All new code **must** include unit tests (WITHOUT using 'testify').
 * For performance‑critical algorithms, include benchmarks:
 
-  ```go
+```go
   func BenchmarkDinic(b *testing.B) { ... }
-  ```
+```
 * Aim for **>90%** coverage for core and critical algorithms.
 
 ---

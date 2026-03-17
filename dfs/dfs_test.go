@@ -1,128 +1,225 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package dfs_test
 
 import (
 	"context"
 	"errors"
 	"fmt"
-	"strconv"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dfs"
 )
 
-// buildChain creates a directed chain graph of length n: 0→1→2→…→n-1
+// buildChain creates a directed chain graph of length n: N0->N1->...->N(n-1).
 func buildChain(n int) *core.Graph {
 	g := core.NewGraph(core.WithDirected(true))
-	for i := 0; i < n-1; i++ {
-		u := "N" + strconv.Itoa(i)
-		v := "N" + strconv.Itoa(i+1)
-		_ = g.AddVertex(u)
-		_ = g.AddVertex(v)
-		_, _ = g.AddEdge(u, v, 0)
+
+	for index := 0; index < n-1; index++ {
+		fromID := fmt.Sprintf("N%d", index)
+		toID := fmt.Sprintf("N%d", index+1)
+
+		_ = g.AddVertex(fromID)
+		_ = g.AddVertex(toID)
+		_, _ = g.AddEdge(fromID, toID, 0)
 	}
 
 	return g
 }
 
-// buildBinaryTree creates a complete binary tree of depth d (nodes = 2^d-1).
-// IDs: "T-1","T-2",…,"T-N".
+// buildBinaryTree creates a complete directed binary tree of the requested depth.
+// Vertex IDs are T-1, T-2, ..., T-(2^depth-1).
 func buildBinaryTree(depth int) *core.Graph {
 	g := core.NewGraph(core.WithDirected(true))
-	// numbering from 1 to (2^depth -1)
-	maxD := (1 << depth) - 1
-	for i := 1; i <= maxD; i++ {
-		id := fmt.Sprintf("T-%d", i)
-		_ = g.AddVertex(id)
-		parent := fmt.Sprintf("T-%d", i/2)
-		if i > 1 {
-			_, _ = g.AddEdge(parent, id, 0)
+	vertexCount := (1 << depth) - 1
+
+	for index := 1; index <= vertexCount; index++ {
+		vertexID := fmt.Sprintf("T-%d", index)
+		_ = g.AddVertex(vertexID)
+
+		if index == 1 {
+			continue
 		}
+
+		parentID := fmt.Sprintf("T-%d", index/2)
+		_, _ = g.AddEdge(parentID, vertexID, 0)
 	}
 
 	return g
 }
 
 func TestDFS_NilGraph(t *testing.T) {
-	res, err := dfs.DFS(nil, "A")
-	assert.Nil(t, res)
-	assert.ErrorIs(t, err, dfs.ErrGraphNil)
+	result, err := dfs.DFS(nil, "A")
+
+	mustNilState(t, result, true, "DFS(nil) result")
+	mustErrorIs(t, err, dfs.ErrGraphNil)
 }
 
-func TestDFS_StartNotFound(t *testing.T) {
+func TestDFS_StartVertexNotFound(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	res, err := dfs.DFS(g, "X")
-	assert.Nil(t, res)
-	assert.ErrorIs(t, err, dfs.ErrStartVertexNotFound)
+
+	result, err := dfs.DFS(g, "missing")
+
+	mustNilState(t, result, true, "DFS missing-start result")
+	mustErrorIs(t, err, dfs.ErrStartVertexNotFound)
+}
+
+func TestDFS_InvalidOptionNilContext(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+	_ = g.AddVertex("A")
+
+	result, err := dfs.DFS(g, "A", dfs.WithContext(nil))
+
+	mustNilState(t, result, true, "DFS invalid nil-context result")
+	mustErrorIs(t, err, dfs.ErrOptionViolation)
+}
+
+func TestDFS_InvalidOptionNegativeMaxDepth(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+	_ = g.AddVertex("A")
+
+	result, err := dfs.DFS(g, "A", dfs.WithMaxDepth(dfs.NoDepthLimit-1))
+
+	mustNilState(t, result, true, "DFS invalid negative-depth result")
+	mustErrorIs(t, err, dfs.ErrOptionViolation)
 }
 
 func TestDFS_SingleVertex_NoEdges(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	err := g.AddVertex("X")
-	assert.NoError(t, err)
+	mustNoError(t, g.AddVertex("X"))
 
-	res, err := dfs.DFS(g, "X")
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"X"}, res.Order)
-	assert.True(t, res.Visited["X"])
-	assert.Equal(t, 0, res.Depth["X"])
-	_, hasParent := res.Parent["X"]
-	assert.False(t, hasParent, "start vertex should have no parent")
+	result, err := dfs.DFS(g, "X")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS single-vertex result")
+	mustEqualSlice(t, result.Order, []string{"X"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"X": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"X": 0,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{})
+	mustEqualInt(t, result.SkippedNeighbors, 0, "")
 }
 
 func TestDFS_SelfLoop(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true), core.WithLoops())
-	err := g.AddVertex("A")
-	assert.NoError(t, err)
+	mustNoError(t, g.AddVertex("A"))
+
 	edgeID, err := g.AddEdge("A", "A", 0)
-	assert.NoError(t, err)
-	assert.NotEmpty(t, edgeID)
+	mustNoError(t, err)
+	mustEqualBool(t, edgeID != "", true, "expected a non-empty edge ID for the self-loop")
 
-	res, err := dfs.DFS(g, "A")
-	assert.NoError(t, err)
-	// Self-loop should not create additional entries
-	assert.Equal(t, []string{"A"}, res.Order)
-	assert.True(t, res.Visited["A"])
+	result, err := dfs.DFS(g, "A")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS self-loop result")
+	mustEqualSlice(t, result.Order, []string{"A"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{})
 }
 
-func TestDFS_ChainAndDepthParent(t *testing.T) {
+func TestDFS_ChainDepthParentExactOrder(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
-	res, err := dfs.DFS(g, "A")
-	assert.NoError(t, err)
-	// Post-order: C, B, A
-	assert.Equal(t, []string{"C", "B", "A"}, res.Order)
-	assert.Equal(t, "B", res.Parent["C"])
-	assert.Equal(t, 2, res.Depth["C"])
+	result, err := dfs.DFS(g, "A")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS chain result")
+	mustEqualSlice(t, result.Order, []string{"C", "B", "A"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+		"C": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+		"C": 2,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+		"C": "B",
+	})
 }
 
-func TestDFS_Disconnected(t *testing.T) {
+func TestDFS_DisconnectedSingleSource(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
-	err := g.AddVertex("C")
-	assert.NoError(t, err)
+	mustNoError(t, g.AddVertex("C"))
 
-	res, err := dfs.DFS(g, "A")
-	assert.NoError(t, err)
-	// Only reachable vertices
-	assert.Equal(t, []string{"B", "A"}, res.Order)
-	assert.False(t, res.Visited["C"], "disconnected vertex should not be visited")
+	result, err := dfs.DFS(g, "A")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS disconnected single-source result")
+	mustEqualSlice(t, result.Order, []string{"B", "A"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+	})
 }
 
-func TestDFS_MaxDepth(t *testing.T) {
+func TestDFS_FullTraversal_IgnoresMissingStartVertex(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+	_, _ = g.AddEdge("A", "B", 0)
+	mustNoError(t, g.AddVertex("C"))
+
+	result, err := dfs.DFS(g, "missing-start", dfs.WithFullTraversal())
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS full-traversal missing-start result")
+	mustEqualSlice(t, result.Order, []string{"B", "A", "C"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+		"C": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+		"C": 0,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+	})
+	mustHaveNoKey(t, result.Parent, "A")
+	mustHaveNoKey(t, result.Parent, "C")
+}
+
+func TestDFS_MaxDepthZero(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
-	res, err := dfs.DFS(g, "A", dfs.WithMaxDepth(0))
-	assert.NoError(t, err)
-	// Depth limit = 0, only A
-	assert.Equal(t, []string{"A"}, res.Order)
-	assert.False(t, res.Visited["B"])
+	result, err := dfs.DFS(g, "A", dfs.WithMaxDepth(0))
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS max-depth-zero result")
+	mustEqualSlice(t, result.Order, []string{"A"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{})
 }
 
 func TestDFS_FilterNeighbor(t *testing.T) {
@@ -130,143 +227,293 @@ func TestDFS_FilterNeighbor(t *testing.T) {
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("A", "C", 0)
 
-	// Skip C
-	res, err := dfs.DFS(g, "A", dfs.WithFilterNeighbor(func(id string) bool {
-		return id != "C"
+	result, err := dfs.DFS(g, "A", dfs.WithFilterNeighbor(func(vertexID string) bool {
+		return vertexID != "C"
 	}))
-	assert.NoError(t, err)
-	// Only B then A
-	assert.Equal(t, []string{"B", "A"}, res.Order)
-	assert.False(t, res.Visited["C"], "filtered neighbor should not be visited")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS filter-neighbor result")
+	mustEqualSlice(t, result.Order, []string{"B", "A"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+	})
+	mustEqualInt(t, result.SkippedNeighbors, 1, "")
 }
 
-func TestDFS_OnExitError(t *testing.T) {
+func TestDFS_OnExitErrorPreservesCauseAndClearsOrder(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 
-	res, err := dfs.DFS(g, "A", dfs.WithOnExit(func(id string) error {
-		if id == "B" {
-			return errors.New("halt at B on exit")
+	hookErr := errors.New("stop on B exit")
+
+	result, err := dfs.DFS(g, "A", dfs.WithOnExit(func(vertexID string) error {
+		if vertexID == "B" {
+			return hookErr
 		}
 
 		return nil
 	}))
-	assert.NotNil(t, res)
-	assert.Error(t, err)
-	assert.ErrorContains(t, err, "OnExit hook for \"B\"")
-	assert.Empty(t, res.Order, "no post-order on hook error")
+
+	mustNilState(t, result, false, "DFS on-exit-error result")
+	mustErrorIs(t, err, hookErr)
+	mustEqualSlice(t, result.Order, nil)
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+	})
 }
 
-func TestDFS_Cancellation(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
-	// build chain
-	for i := 0; i < 1000; i++ {
-		src := fmt.Sprintf("N%d", i)
-		dst := fmt.Sprintf("N%d", i+1)
-		_ = g.AddVertex(src)
-		_ = g.AddVertex(dst)
-		_, _ = g.AddEdge(src, dst, 0)
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel()
+func TestDFS_OnVisitErrorPreservesCauseAndClearsOrder(t *testing.T) {
+	g := buildBinaryTree(3)
 
-	res, err := dfs.DFS(g, "N0", dfs.WithContext(ctx))
-	assert.NotNil(t, res)
-	assert.ErrorIs(t, err, context.Canceled)
-	assert.Empty(t, res.Order, "no completion when canceled immediately")
-}
+	var preOrder []string
+	var postOrder []string
 
-func TestDFS_LargeChain_PostOrderDepthParent(t *testing.T) {
-	const n = 10
-	g := buildChain(n)
-	res, err := dfs.DFS(g, "N0")
-	assert.NoError(t, err)
+	hookErr := errors.New("stop on T-4 visit")
 
-	// Post order: N9, N8, …, N0
-	expected := make([]string, n)
-	for i := n - 1; i >= 0; i-- {
-		expected[n-1-i] = "N" + strconv.Itoa(i)
-	}
-	assert.Equal(t, expected, res.Order, "Chain post-order reversed")
+	result, err := dfs.DFS(
+		g,
+		"T-1",
+		dfs.WithOnVisit(func(vertexID string) error {
+			preOrder = append(preOrder, vertexID)
 
-	// Checking the depth and parent of the last node
-	assert.Equal(t, n-1, res.Depth["N"+strconv.Itoa(n-1)])
-	assert.Equal(t, "N"+strconv.Itoa(n-2), res.Parent["N"+strconv.Itoa(n-1)])
-}
-
-func TestDFS_BinaryTree_TraversalAndVisited(t *testing.T) {
-	const depth = 4 // 15 nodes
-	g := buildBinaryTree(depth)
-	res, err := dfs.DFS(g, "T-1")
-	assert.NoError(t, err)
-
-	// All edges must be visited
-	assert.Len(t, res.Visited, (1<<depth)-1)
-	for i := 1; i < (1 << depth); i++ {
-		id := fmt.Sprintf("T-%d", i)
-		assert.True(t, res.Visited[id], "vertex %s must be visited", id)
-	}
-
-	// Post order: size 15, root should be last
-	assert.Len(t, res.Order, (1<<depth)-1)
-	assert.Equal(t, "T-1", res.Order[len(res.Order)-1], "root must finish last")
-}
-
-func TestDFS_OnVisitOnExitHooks(t *testing.T) {
-	g := buildBinaryTree(3) // 7 nodes
-	var pre, post []string
-
-	res, err := dfs.DFS(g, "T-1",
-		dfs.WithOnVisit(func(id string) error {
-			pre = append(pre, id)
-			if id == "T-4" {
-				return errors.New("stop at T-4")
+			if vertexID == "T-4" {
+				return hookErr
 			}
 
 			return nil
 		}),
-		dfs.WithOnExit(func(id string) error {
-			post = append(post, id)
-
+		dfs.WithOnExit(func(vertexID string) error {
+			postOrder = append(postOrder, vertexID)
 			return nil
 		}),
 	)
-	assert.NotNil(t, res)
-	assert.ErrorContains(t, err, "OnVisit hook for \"T-4\"")
-	// Make sure pre-order contains root and T-2,T-4
-	assert.Contains(t, pre, "T-1")
-	assert.Contains(t, pre, "T-4")
-	// Since the error occurred in OnVisit, post-order remains empty
-	assert.Empty(t, post)
-	assert.Empty(t, res.Order)
+
+	mustNilState(t, result, false, "DFS on-visit-error result")
+	mustErrorIs(t, err, hookErr)
+
+	mustEqualSlice(t, preOrder, []string{"T-1", "T-2", "T-4"})
+	mustEqualSlice(t, postOrder, nil)
+	mustEqualSlice(t, result.Order, nil)
+
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"T-1": true,
+		"T-2": true,
+		"T-4": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"T-1": 0,
+		"T-2": 1,
+		"T-4": 2,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"T-2": "T-1",
+		"T-4": "T-2",
+	})
+}
+
+func TestDFS_HooksExactPreAndPostOrder(t *testing.T) {
+	g := buildBinaryTree(3)
+
+	var preOrder []string
+	var postOrder []string
+
+	result, err := dfs.DFS(
+		g,
+		"T-1",
+		dfs.WithOnVisit(func(vertexID string) error {
+			preOrder = append(preOrder, vertexID)
+			return nil
+		}),
+		dfs.WithOnExit(func(vertexID string) error {
+			postOrder = append(postOrder, vertexID)
+			return nil
+		}),
+	)
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS hook-success result")
+	mustEqualSlice(t, preOrder, []string{
+		"T-1",
+		"T-2",
+		"T-4",
+		"T-5",
+		"T-3",
+		"T-6",
+		"T-7",
+	})
+	mustEqualSlice(t, postOrder, []string{
+		"T-4",
+		"T-5",
+		"T-2",
+		"T-6",
+		"T-7",
+		"T-3",
+		"T-1",
+	})
+	mustEqualSlice(t, result.Order, postOrder)
 }
 
 func TestDFS_CancellationImmediate(t *testing.T) {
 	g := buildChain(100)
-	ctx, cancel := context.WithCancel(context.Background())
-	cancel() // immediate
 
-	res, err := dfs.DFS(g, "N0", dfs.WithContext(ctx))
-	assert.NotNil(t, res)
-	assert.ErrorIs(t, err, context.Canceled)
-	assert.Empty(t, res.Order, "no nodes should finish when canceled immediately")
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	result, err := dfs.DFS(g, "N0", dfs.WithContext(ctx))
+
+	mustNilState(t, result, false, "DFS cancellation result")
+	mustErrorIs(t, err, context.Canceled)
+	mustEqualSlice(t, result.Order, nil)
+	mustEqualBoolMap(t, result.Visited, map[string]bool{})
+	mustEqualIntMap(t, result.Depth, map[string]int{})
+	mustEqualStringMap(t, result.Parent, map[string]string{})
+	mustEqualInt(t, result.SkippedNeighbors, 0, "")
 }
 
-func TestDFS_DisconnectedComponent(t *testing.T) {
-	// Create two separate sub graphs with 5 nodes each
-	g := buildChain(5)
-	for i := 5; i < 10; i++ {
-		id := "M" + strconv.Itoa(i)
-		_ = g.AddVertex(id)
+func TestDFS_FullTraversalForestSemantics(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("C", "D", 0)
+	mustNoError(t, g.AddVertex("E"))
+
+	result, err := dfs.DFS(g, "", dfs.WithFullTraversal())
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS forest result")
+	mustEqualSlice(t, result.Order, []string{"B", "A", "D", "C", "E"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+		"C": true,
+		"D": true,
+		"E": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"A": 0,
+		"B": 1,
+		"C": 0,
+		"D": 1,
+		"E": 0,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "A",
+		"D": "C",
+	})
+	mustHaveNoKey(t, result.Parent, "A")
+	mustHaveNoKey(t, result.Parent, "C")
+	mustHaveNoKey(t, result.Parent, "E")
+}
+
+func TestDFS_UndirectedRegression_StartFromToEndpointVisitsOppositeEndpoint(t *testing.T) {
+	g := core.NewGraph()
+	_, _ = g.AddEdge("A", "B", 0)
+
+	result, err := dfs.DFS(g, "B")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS undirected regression result")
+	mustEqualSlice(t, result.Order, []string{"A", "B"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"B": 0,
+		"A": 1,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"A": "B",
+	})
+}
+
+func TestDFS_MixedGraph_PerEdgeDirectionIsRespected(t *testing.T) {
+	g := core.NewMixedGraph(core.WithDirected(true))
+
+	// Directed edge B->A.
+	_, _ = g.AddEdge("B", "A", 0, core.WithEdgeDirected(true))
+
+	// Undirected edge B--C.
+	_, _ = g.AddEdge("B", "C", 0, core.WithEdgeDirected(false))
+
+	result, err := dfs.DFS(g, "C")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS mixed-edge result")
+	mustEqualSlice(t, result.Order, []string{"A", "B", "C"})
+	mustEqualBoolMap(t, result.Visited, map[string]bool{
+		"A": true,
+		"B": true,
+		"C": true,
+	})
+	mustEqualIntMap(t, result.Depth, map[string]int{
+		"C": 0,
+		"B": 1,
+		"A": 2,
+	})
+	mustEqualStringMap(t, result.Parent, map[string]string{
+		"B": "C",
+		"A": "B",
+	})
+}
+
+func TestDFS_LargeChain_PostOrderDepthParent(t *testing.T) {
+	const vertexCount = 10
+
+	g := buildChain(vertexCount)
+	result, err := dfs.DFS(g, "N0")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS large-chain result")
+
+	expectedOrder := make([]string, vertexCount)
+	for index := vertexCount - 1; index >= 0; index-- {
+		expectedOrder[vertexCount-1-index] = fmt.Sprintf("N%d", index)
 	}
-	res, err := dfs.DFS(g, "N0")
-	assert.NoError(t, err)
-	// Must be only N0..N4
-	assert.ElementsMatch(t,
-		[]string{"N4", "N3", "N2", "N1", "N0"},
-		res.Order,
-	)
-	for i := 5; i < 10; i++ {
-		assert.False(t, res.Visited["M"+strconv.Itoa(i)], "disconnected M%d should not be visited", i)
+
+	mustEqualSlice(t, result.Order, expectedOrder)
+	mustEqualInt(t, result.Depth[mustFmt(t, "N%d", vertexCount-1)], vertexCount-1, "")
+	mustEqualString(t, result.Parent[mustFmt(t, "N%d", vertexCount-1)], mustFmt(t, "N%d", vertexCount-2), "")
+}
+
+func TestDFS_BinaryTree_VisitsAllVerticesAndFinishesRootLast(t *testing.T) {
+	const depth = 5
+
+	g := buildBinaryTree(depth)
+	result, err := dfs.DFS(g, "T-1")
+	mustNoError(t, err)
+
+	mustNilState(t, result, false, "DFS binary-tree result")
+
+	wantVertexCount := (1 << depth) - 1
+
+	mustEqualInt(t, len(result.Visited), wantVertexCount, "")
+	mustEqualInt(t, len(result.Order), wantVertexCount, "")
+	mustEqualString(t, result.Order[len(result.Order)-1], "T-1", "")
+
+	for index := 1; index <= wantVertexCount; index++ {
+		vertexID := mustFmt(t, "T-%d", index)
+
+		if !result.Visited[vertexID] {
+			t.Fatalf("expected vertex %q to be visited, got visited=%v", vertexID, result.Visited)
+		}
 	}
+
+	mustEqualInt(t, result.Depth["T-16"], 4, "")
+	mustEqualString(t, result.Parent["T-16"], "T-8", "")
 }

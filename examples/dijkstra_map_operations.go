@@ -66,7 +66,7 @@ func main1() {
 	fmt.Printf("\nShortest distances from %s:\n", CAPITAL)
 	for _, city := range hubs {
 		d := dist[city]
-		if d == math.MaxInt64 {
+		if d == math.MaxInt64 { // !! math.Inf(1)
 			fmt.Printf("  %-12s unreachable\n", city)
 		} else {
 			fmt.Printf("  %-12s %6.1f km\n", city, d)

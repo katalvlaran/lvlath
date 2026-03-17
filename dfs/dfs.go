@@ -1,33 +1,7 @@
-// Package dfs implements depth‑first search (single‑source and forest) on core.Graph.
-// It supports directed, undirected, and per‑edge mixed‑direction edges, cancellation,
-// pre‑ and post‑order hooks, depth and neighbor limits, full‑graph traversal, and diagnostics.
-//
-// Key features:
-//   - DFS(g, startID, opts...): traverse from a root or full forest via WithFullTraversal
-//   - Mixed‑edge: honors Edge.Directed when core.WithMixedEdges is enabled
-//   - Hooks: OnVisit (pre‑order) & OnExit (post‑order) with error aborts
-//   - Limits: MaxDepth, FilterNeighbor, SkippedNeighbors diagnostic count
-//   - Cancellation via context.Context
-//
-// Complexity:
-//
-//   - Time:   O(V + E) for traversal (where V = vertices, E = edges), plus overhead of hooks and filters.
-//   - Memory: O(V) for recursion stack and metadata maps.
-//
-// Options:
-//
-//   - WithContext(ctx)          allows cancellation via context.Context.
-//   - WithOnVisit(fn)           pre-order hook on vertex discovery; error aborts traversal.
-//   - WithOnExit(fn)            post-order hook after exploring descendants, before recording.
-//   - WithMaxDepth(limit)       stops recursion beyond given depth (>=0).
-//   - WithFilterNeighbor(fn)    filters neighbor IDs; return false to skip.
-//
-// Errors:
-//
-//   - ErrGraphNil               if g is nil.
-//   - ErrStartVertexNotFound    if startID is missing.
-//   - context.Canceled          if ctx is done.
-//   - any error returned by OnVisit or OnExit.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// DFS traversal implementation and runtime state for core.Graph.
 package dfs
 
 import (
@@ -36,145 +10,286 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// dfsWalker encapsulates state during DFS.
+// dfsWalker owns runtime-only DFS state during a single traversal execution.
+//
+// Implementation:
+//   - Stage 1: Hold immutable graph and traversal policy references.
+//   - Stage 2: Accumulate runtime traversal state and diagnostics.
+//   - Stage 3: Write observable results into DFSResult as vertices are entered and finished.
+//
+// Behavior highlights:
+//   - The struct is internal and per-execution.
+//   - Runtime counters do not leak back into DFSOptions.
+//
+// Inputs:
+//   - N/A.
+//
+// Returns:
+//   - N/A.
+//
+// Errors:
+//   - N/A.
+//
+// Determinism:
+//   - Deterministic under deterministic graph order, neighbor order, and callbacks.
+//
+// Complexity:
+//   - Space O(V) through the owned DFSResult maps and slices.
+//
+// Notes:
+//   - The struct is intentionally not reused across DFS calls.
+//
+// AI-Hints:
+//   - Keep runtime state here, not inside DFSOptions.
+//   - Diagnostics such as skipped-neighbor counts belong to execution state, not configuration.
 type dfsWalker struct {
-	graph *core.Graph // underlying graph
-	opts  DFSOptions  // traversal options
-	res   *DFSResult  // result collector
+	// graph is the traversed graph.
+	graph *core.Graph
+
+	// opts is the finalized traversal policy for this execution.
+	opts DFSOptions
+
+	// res accumulates the observable traversal result.
+	res *DFSResult
+
+	// skippedNeighbors counts neighbors rejected by FilterNeighbor during this execution.
+	skippedNeighbors int
 }
 
-// DFS performs depth‑first search on graph g. If opts include WithFullTraversal,
-// it covers all disconnected components; otherwise, it starts only from startID.
-// Returns DFSResult or error if aborted by context or hook.
-func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
-	// 1. Validate input graph
+// runDFS performs depth-first traversal over g using the provided traversal policy.
+//
+// Implementation:
+//   - Stage 1: Validate the input graph.
+//   - Stage 2: Assemble and validate DFS options.
+//   - Stage 3: Validate the starting-root policy.
+//   - Stage 4: Allocate deterministic traversal result storage.
+//   - Stage 5: Execute either single-tree traversal or DFS-forest traversal.
+//   - Stage 6: Expose runtime diagnostics in the returned DFSResult.
+//
+// Behavior highlights:
+//   - Order is DFS finish order (post-order).
+//   - FullTraversal produces a DFS forest rather than a single global DFS tree.
+//   - Depth records DFS-tree depth, not shortest-path distance.
+//   - Traversal direction for mixed graphs is interpreted per edge.
+//
+// Inputs:
+//   - g: graph to traverse.
+//   - startID: starting vertex ID for single-source traversal.
+//   - opts: ordered DFS option builders.
+//
+// Returns:
+//   - *DFSResult: traversal result, including visited flags, tree parents, depths, and finish order.
+//   - error: nil on success, or a traversal/configuration failure.
+//
+// Errors:
+//   - ErrGraphNil: if g is nil.
+//   - ErrStartVertexNotFound: if startID does not exist in single-source mode.
+//   - ErrOptionViolation: if option assembly rejects explicit input.
+//   - ErrNeighborFetch: if graph neighbor enumeration fails.
+//   - context.Canceled / context.DeadlineExceeded: if traversal context is canceled.
+//   - Any user callback error returned by OnVisit or OnExit.
+//
+// Determinism:
+//   - Deterministic under deterministic graph root order, neighbor order, and deterministic callbacks.
+//
+// Complexity:
+//   - Time O(V + E) for traversal itself, plus callback and filter costs.
+//   - Space O(V) for result maps, recursion stack, and post-order output.
+//
+// Notes:
+//   - On error, Visited, Depth, and Parent may contain partial traversal state.
+//   - Order is cleared when traversal aborts because partial finish order is not exposed as authoritative output.
+//
+// AI-Hints:
+//   - Order is post-order finish order, not discovery order.
+//   - FullTraversal resets tree depth at each new DFS-tree root.
+//   - Mixed-edge traversal must interpret direction per edge, not via edge.To.
+//   - Invalid option input is a configuration failure, not a runtime traversal event.
+func runDFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
+	// Reject a nil graph immediately because traversal semantics require a concrete graph instance.
 	if g == nil {
 		return nil, ErrGraphNil
 	}
 
-	// 2. Apply options
-	dopts := DefaultOptions()
-	var fn Option
-	for _, fn = range opts {
-		fn(&dopts)
+	// Assemble the canonical DFS configuration before any traversal state is allocated.
+	dopts, err := buildDFSOptions(opts...)
+	if err != nil {
+		return nil, err
 	}
 
-	// 3. Single‑source mode: verify startID
+	// In single-source mode, the requested start vertex must exist explicitly.
 	if !dopts.FullTraversal && !g.HasVertex(startID) {
 		return nil, ErrStartVertexNotFound
 	}
 
-	// 4. Initialize result with capacity hint
-	vertices := g.Vertices()
+	// Use the graph's reliable vertex count for preallocation.
+	vertexCount := g.VertexCount()
+
+	// Preallocate result storage from the stable vertex-count hint.
 	res := &DFSResult{
-		Order:   make([]string, 0, len(vertices)),
-		Depth:   make(map[string]int, len(vertices)),
-		Parent:  make(map[string]string, len(vertices)),
-		Visited: make(map[string]bool, len(vertices)),
+		Order:   make([]string, 0, vertexCount),
+		Depth:   make(map[string]int, vertexCount),
+		Parent:  make(map[string]string, vertexCount),
+		Visited: make(map[string]bool, vertexCount),
 	}
 
-	walker := &dfsWalker{graph: g, opts: dopts, res: res}
+	// Build the per-execution traversal runtime.
+	walker := &dfsWalker{
+		graph: g,
+		opts:  dopts,
+		res:   res,
+	}
 
-	// 5. Traverse: forest or single tree
+	// Full traversal visits every unvisited root in graph vertex order, forming a DFS forest.
 	if dopts.FullTraversal {
-		for _, v := range vertices {
-			if !res.Visited[v] {
-				if err := walker.traverse(v, 0); err != nil {
-					return res, err
-				}
+		for _, vertexID := range g.Vertices() {
+			if walker.res.Visited[vertexID] {
+				continue
+			}
+
+			if err = walker.traverse(vertexID, 0, ""); err != nil {
+				walker.res.SkippedNeighbors = walker.skippedNeighbors
+				return walker.res, err
 			}
 		}
 	} else {
-		if err := walker.traverse(startID, 0); err != nil {
-			return res, err
+		// Single-source traversal starts only from the validated start vertex.
+		if err = walker.traverse(startID, 0, ""); err != nil {
+			walker.res.SkippedNeighbors = walker.skippedNeighbors
+			return walker.res, err
 		}
 	}
 
-	// 6. Expose diagnostics
-	res.SkippedNeighbors = walker.opts.SkippedNeighbors
+	// Expose runtime diagnostics in the caller-owned result.
+	walker.res.SkippedNeighbors = walker.skippedNeighbors
 
-	return res, nil
+	return walker.res, nil
 }
 
-// traverse visits vertex id at given depth, recursing to neighbors.
-// It honors context cancellation, depth limit, hooks, filtering, and mixed‑edge rules.
-func (w *dfsWalker) traverse(id string, depth int) error {
-	// 1. Cancellation check
+// traverse visits vertexID at the given DFS-tree depth.
+//
+// Implementation:
+//   - Stage 1: Observe context cancellation.
+//   - Stage 2: Enforce depth policy before vertex entry.
+//   - Stage 3: Record parent only when the vertex is actually entered.
+//   - Stage 4: Mark the vertex as entered and record DFS-tree depth.
+//   - Stage 5: Execute the pre-order hook.
+//   - Stage 6: Enumerate graph neighbors exactly once.
+//   - Stage 7: Resolve per-edge traversal semantics and recurse on eligible neighbors.
+//   - Stage 8: Execute the post-order hook.
+//   - Stage 9: Append the vertex to DFS finish order.
+//
+// Behavior highlights:
+//   - Parent is assigned only when vertexID actually passes entry guards.
+//   - FilterNeighbor applies after edge-to-neighbor semantics are resolved.
+//   - Self-loop policy remains separate from neighbor resolution policy.
+//
+// Inputs:
+//   - vertexID: current vertex being traversed.
+//   - depth: DFS-tree depth of vertexID.
+//   - parentID: DFS-tree parent candidate for vertexID.
+//
+// Returns:
+//   - error: nil on success, or a traversal failure.
+//
+// Errors:
+//   - ErrNeighborFetch: if neighbor enumeration fails.
+//   - context.Canceled / context.DeadlineExceeded: if the traversal context is canceled.
+//   - Any user callback error returned by OnVisit or OnExit.
+//
+// Determinism:
+//   - Deterministic under deterministic neighbor order and deterministic callbacks.
+//
+// Complexity:
+//   - Local overhead is O(out-degree(vertexID)) plus callback and filter cost.
+//   - Overall DFS complexity remains O(V + E) across the full traversal, excluding callback and filter cost.
+//
+// Notes:
+//   - On failure, Order is cleared because partial finish order is not exposed as authoritative output.
+//
+// AI-Hints:
+//   - Never assign Parent before the child actually enters traversal.
+//   - Never infer undirected neighbors via edge.To.
+//   - Apply filtering only after neighbor semantics are resolved.
+func (w *dfsWalker) traverse(vertexID string, depth int, parentID string) error {
+	// Respect traversal cancellation before performing any new vertex work.
 	select {
 	case <-w.opts.Ctx.Done():
+		w.res.Order = nil
 		return w.opts.Ctx.Err()
 	default:
 	}
 
-	// 2. Depth limit: stop if exceeded
-	if w.opts.MaxDepth >= 0 && depth > w.opts.MaxDepth {
+	// Reject traversal entry beyond the configured depth limit.
+	if w.opts.MaxDepth != NoDepthLimit && depth > w.opts.MaxDepth {
 		return nil
 	}
 
-	// 3. Mark visited and record depth
-	w.res.Visited[id] = true
-	w.res.Depth[id] = depth
+	// Record the DFS-tree parent only after the vertex has passed all pre-entry guards.
+	if depth > 0 {
+		w.res.Parent[vertexID] = parentID
+	}
 
-	// 4. Pre‑order hook
+	// Mark the vertex as entered and record its DFS-tree depth.
+	w.res.Visited[vertexID] = true
+	w.res.Depth[vertexID] = depth
+
+	// Run the pre-order callback immediately after entry if one is configured.
 	if w.opts.OnVisit != nil {
-		if err := w.opts.OnVisit(id); err != nil {
-			// abort and clear post‑order
+		if err := w.opts.OnVisit(vertexID); err != nil {
 			w.res.Order = nil
-
-			return fmt.Errorf("dfs: OnVisit hook for %q: %w", id, err)
+			return fmt.Errorf("dfs: OnVisit(%q): %w", vertexID, err)
 		}
 	}
 
-	// 5. Fetch neighbors once
-	nbs, err := w.graph.Neighbors(id)
+	// Read neighbor edges exactly once so traversal logic works from a stable local slice.
+	neighbors, err := w.graph.Neighbors(vertexID)
 	if err != nil {
 		w.res.Order = nil
-
-		return fmt.Errorf("dfs: Neighbors(%q): %w", id, err)
+		return fmt.Errorf("%w: neighbors(%q): %w", ErrNeighborFetch, vertexID, err)
 	}
 
-	// 6. Explore each neighbor
-	var e *core.Edge
-	var nid string
-	for _, e = range nbs {
-		nid = e.To
-
-		// Skip reverse edges in mixed/undirected
-		if !e.Directed && !w.graph.Directed() && nid == id {
+	// Process neighbors in graph-provided order so traversal determinism follows graph determinism.
+	for _, edge := range neighbors {
+		// Resolve the actual traversal neighbor under per-edge directed or undirected semantics.
+		neighborID, ok := neighborFromEdge(edge, vertexID)
+		if !ok {
 			continue
 		}
 
-		// Skip self‑loops if disallowed
-		if nid == id && !w.graph.Looped() {
+		// Enforce self-loop policy independently from neighbor resolution semantics.
+		if neighborID == vertexID && !w.graph.Looped() {
 			continue
 		}
 
-		// Neighbor filtering
-		if w.opts.FilterNeighbor != nil && !w.opts.FilterNeighbor(nid) {
-			w.opts.SkippedNeighbors++
+		// Apply caller-provided neighbor filtering only after a valid candidate neighbor exists.
+		if w.opts.FilterNeighbor != nil && !w.opts.FilterNeighbor(neighborID) {
+			w.skippedNeighbors++
 			continue
 		}
 
-		// Recurse on unvisited
-		if !w.res.Visited[nid] {
-			w.res.Parent[nid] = id
-			if err = w.traverse(nid, depth+1); err != nil {
-				return err
-			}
+		// Skip already-entered vertices because DFS-tree parent assignment is defined only on first entry.
+		if w.res.Visited[neighborID] {
+			continue
 		}
-	}
 
-	// 7. Post‑order hook
-	if w.opts.OnExit != nil {
-		if err = w.opts.OnExit(id); err != nil {
+		// Recurse to the child at the next DFS-tree depth level.
+		if err = w.traverse(neighborID, depth+1, vertexID); err != nil {
 			w.res.Order = nil
-
-			return fmt.Errorf("dfs: OnExit hook for %q: %w", id, err)
+			return err
 		}
 	}
 
-	// 8. Record finish order
-	w.res.Order = append(w.res.Order, id)
+	// Run the post-order callback after all reachable descendants have been processed.
+	if w.opts.OnExit != nil {
+		if err = w.opts.OnExit(vertexID); err != nil {
+			w.res.Order = nil
+			return fmt.Errorf("dfs: OnExit(%q): %w", vertexID, err)
+		}
+	}
+
+	// Record DFS finish order only after the full post-order stage is complete.
+	w.res.Order = append(w.res.Order, vertexID)
 
 	return nil
 }

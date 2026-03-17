@@ -2,14 +2,14 @@
 
 ---
 
-```
+~~~
 ┌─────────────────────────────────┐
 │  o       o            o    o    │
 │  ║ o   o ║   o───╖  o─╫─o  ║    │
 │  ║  \ /  ║   o───╢    ║    ╟──╖ │
 │  ╙o  o   ╙o  ╙───o    ╙o   o  o │
 └─────────────────────────────────┘
-```
+~~~
 
 [![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-reference-blue?logo=go)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
 [![Go Report Card](https://goreportcard.com/badge/github.com/katalvlaran/lvlath)](https://goreportcard.com/report/github.com/katalvlaran/lvlath)
@@ -52,9 +52,9 @@
 
 ## Installation
 
-```bash
+~~~bash
 go get github.com/katalvlaran/lvlath@latest
-```
+~~~
 
 *Requires Go ≥ 1.23. Pure Go. No external dependencies.*
 
@@ -62,7 +62,7 @@ go get github.com/katalvlaran/lvlath@latest
 
 ## Package map & roles
 
-```
+~~~
 core ─┬─ bfs, dfs ──► utilities (reachability, ordering)
       ├─ dijkstra ──► weighted shortest paths (non‑negative)
       ├─ prim_kruskal ──► MST (dense via matrix / sparse via edge list)
@@ -71,7 +71,7 @@ core ─┬─ bfs, dfs ──► utilities (reachability, ordering)
       ├─ matrix ─────────► dense views used by Prim/TSP
       ├─ gridgraph ──────► 2D lattices for BFS/Dijkstra teaching & demos
       └─ builder ────────► deterministic fixtures for examples & tests
-```
+~~~
 
 * Use packages independently or compose them.
 * Prefer `matrix` + Prim on dense graphs; use `core` + Kruskal on sparse ones.
@@ -87,7 +87,7 @@ core ─┬─ bfs, dfs ──► utilities (reachability, ordering)
 
 We create six disconnected letter‑shapes `l v l a t h` using the naming scheme you described. We’ll compute connected components, cyclomatic number, and patch three letters into a single `M`.
 
-```go
+~~~go
 package main
 
 import (
@@ -204,7 +204,7 @@ func main() {
     deg := matrix.DegreeVector(am)
     fmt.Println("a-degree-vector:", deg)
 }
-```
+~~~
 
 **What this proves**
 
@@ -221,7 +221,7 @@ func main() {
 
 ASCII sketch:
 
-```
+~~~
                                [A]
                               / | \
                   (C─H:9)   3/  |  \4   (D─F:7)
@@ -239,10 +239,10 @@ ASCII sketch:
                   (J─H:7)   2\  |  /3   (K─F:8)
                               \ | /
                                [M]
-```
+~~~
 We’ll build the weighted, undirected “Hexagram” graph and run BFS layers (on an unweighted view), Dijkstra, MST, and set up a symmetric TSP distance matrix.
 
-```go
+~~~go
 package main
 
 import (
@@ -325,7 +325,7 @@ func main() {
     if err != nil { panic(err) }
     fmt.Println("TSP tour length:", ts.Cost, " nodes:", len(ts.Tour))
 }
-```
+~~~
 
 **Why this matters**
 
@@ -398,6 +398,10 @@ API reference: **[pkg.go.dev › lvlath](https://pkg.go.dev/github.com/katalvlar
 
 ---
 
-*© 2025 katalvlaran — MIT License*
+
+## Licensing
+This project is licensed under the GNU Affero General Public License v3 (AGPLv3).
+Important for Enterprise: AGPLv3 requires that if you run this software on a server and let users interact with it over a network, you must make the source code available.
+If you wish to use lvlath in a proprietary environment or do not want to disclose your source code, you must obtain a Commercial License. Contact me at katalvlaran@gmail.com for licensing terms and professional advisory.
 
 *Happy graphing!*

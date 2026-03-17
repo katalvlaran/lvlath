@@ -1,200 +1,235 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package dfs_test
 
 import (
-	"strings"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dfs"
 )
 
-// TestDirectedNilGraph verifies DetectCycles handles nil input without error.
-func TestDetectCycles_DirectedNilGraph(t *testing.T) {
-	// Since our DetectCycles now returns (bool, [][]string, error),
-	// we capture the error and assert it's nil.
-	has, cycles, err := dfs.DetectCycles(nil)
-	assert.NoError(t, err) // no error when graph is nil
-	assert.False(t, has)   // should indicate no cycle
-	assert.Nil(t, cycles)  // cycles slice should be nil
+func TestDetectCycles_NilGraph(t *testing.T) {
+	result, err := dfs.DetectCycles(nil)
+
+	mustNilState(t, result, true, "DetectCycles(nil) result")
+	mustErrorIs(t, err, dfs.ErrGraphNil)
 }
 
-// TestDetectCycles_DirectedNoCycle ensures no cycles in a simple directed chain.
 func TestDetectCycles_DirectedNoCycle(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// Build a simple directed acyclic structure:
-	// A -> B -> C -> G
-	//     |
-	//     D -> E -> F
+
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("B", "D", 0)
 	_, _ = g.AddEdge("C", "G", 0)
 	_, _ = g.AddEdge("D", "E", 0)
 	_, _ = g.AddEdge("E", "F", 0)
+	_, _ = g.AddEdge("F", "H", 0)
+	_, _ = g.AddEdge("H", "I", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)  // neighbor lookups should not fail
-	assert.False(t, has)    // no cycle expected
-	assert.Empty(t, cycles) // cycles slice should be empty
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, false, nil)
 }
 
-// TestDetectCycles_SimpleTwoNodeCycle covers two-node cycle normalization.
+func TestDetectCycles_SelfLoopAllowed(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true), core.WithLoops())
+	mustNoError(t, g.AddVertex("A"))
+	_, err := g.AddEdge("A", "A", 0)
+	mustNoError(t, err)
+
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "A"},
+	})
+}
+
 func TestDetectCycles_SimpleTwoNodeCycle(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// A -> B -> A forms a simple directed 2-node cycle
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "A", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has) // cycle should be detected
-	// Expect exactly one cycle, normalized to ["A","B","A"]
-	assert.Equal(t,
-		[][]string{{"A", "B", "A"}},
-		cycles,
-	)
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "A"},
+	})
 }
 
-// TestDetectCycles_ThreeNodeCycle covers a 3-node cycle.
 func TestDetectCycles_ThreeNodeCycle(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// A -> B -> C -> A forms a 3-node cycle
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has)
-	assert.Equal(t,
-		[][]string{{"A", "B", "C", "A"}},
-		cycles,
-	)
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "C", "A"},
+	})
 }
 
-// TestDetectCycles_FourNodeCycle covers a 4-node cycle.
 func TestDetectCycles_FourNodeCycle(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// V -> W -> X -> Y -> Z -> W forms a 4-node cycle
 	_, _ = g.AddEdge("V", "W", 0)
 	_, _ = g.AddEdge("W", "X", 0)
 	_, _ = g.AddEdge("X", "Y", 0)
 	_, _ = g.AddEdge("Y", "Z", 0)
 	_, _ = g.AddEdge("Z", "W", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has)
-	// The canonical cycle should start at W
-	assert.Equal(t,
-		[][]string{{"W", "X", "Y", "Z", "W"}},
-		cycles,
-	)
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"W", "X", "Y", "Z", "W"},
+	})
 }
 
-// TestDetectCycles_Undirected_MultipleDisjointCycles covers two distinct cycles in the same undirected graph.
-func TestDetectCycles_Undirected_MultipleDisjointCycles(t *testing.T) {
-	g := core.NewGraph() // undirected by default
-	// three-node cycle A--B--C--A
+func TestDetectCycles_UndirectedTriangle_NoFalseTwoCycle(t *testing.T) {
+	g := core.NewGraph()
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
 
-	// four-node cycle W--X--Y--Z--W
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "C", "A"},
+	})
+}
+
+func TestDetectCycles_UndirectedMultipleDisjointCycles(t *testing.T) {
+	g := core.NewGraph()
+
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("B", "C", 0)
+	_, _ = g.AddEdge("C", "A", 0)
+
 	_, _ = g.AddEdge("W", "X", 0)
 	_, _ = g.AddEdge("X", "Y", 0)
 	_, _ = g.AddEdge("Y", "Z", 0)
 	_, _ = g.AddEdge("Z", "W", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has)
-	// We expect two cycles: ["A","B","C","A"] and ["W","X","Y","Z","W"], in any order
-	assert.ElementsMatch(t,
-		[][]string{{"A", "B", "C", "A"}, {"W", "X", "Y", "Z", "W"}},
-		cycles,
-	)
-	assert.Len(t, cycles, 2)
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "C", "A"},
+		{"W", "X", "Y", "Z", "W"},
+	})
 }
 
-// TestDetectCycles_DirectedMultipleLarge verifies detection of multiple disjoint cycles in a directed graph.
-func TestDetectCycles_DirectedMultipleLarge(t *testing.T) {
+func TestDetectCycles_DirectedMultipleDisjointCycles(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// Cycle1: A->B->C->D->E->A
-	cycle1 := []string{"A", "B", "C", "D", "E", "A"}
-	for i := 0; i < len(cycle1)-1; i++ {
-		_, _ = g.AddEdge(cycle1[i], cycle1[i+1], 0)
+
+	cycleOne := []string{"A", "B", "C", "D", "E", "A"}
+	for index := 0; index < len(cycleOne)-1; index++ {
+		_, _ = g.AddEdge(cycleOne[index], cycleOne[index+1], 0)
 	}
-	// Cycle2: F->G->H->F
-	cycle2 := []string{"F", "G", "H", "F"}
-	for i := 0; i < len(cycle2)-1; i++ {
-		_, _ = g.AddEdge(cycle2[i], cycle2[i+1], 0)
+
+	cycleTwo := []string{"F", "G", "H", "I", "F"}
+	for index := 0; index < len(cycleTwo)-1; index++ {
+		_, _ = g.AddEdge(cycleTwo[index], cycleTwo[index+1], 0)
 	}
-	// Connect cycles E -> F and add extra vertices I, J with no new edges
+
 	_, _ = g.AddEdge("E", "F", 0)
-	_ = g.AddVertex("I")
 	_ = g.AddVertex("J")
+	_ = g.AddVertex("K")
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has, "expected at least one cycle in directed graph")
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
 
-	// Convert found cycles to comma-joined signatures for robust comparison
-	sigs := make([]string, len(cycles))
-	for i, c := range cycles {
-		sigs[i] = strings.Join(c, ",")
-	}
-	// Expected signatures (canonical rotations)
-	exp := []string{strings.Join(cycle1, ","), strings.Join(cycle2, ",")}
-	assert.ElementsMatch(t, exp, sigs)
-	assert.Len(t, cycles, 2)
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "C", "D", "E", "A"},
+		{"F", "G", "H", "I", "F"},
+	})
 }
 
-// TestDetectCycles_UndirectedThreeNode verifies a 3-node undirected cycle is found.
-func TestDetectCycles_UndirectedThreeNode(t *testing.T) {
-	g := core.NewGraph() // undirected
-	// Triangle A--B--C--A
+func TestDetectCycles_OverlappingDirectedCycles_WitnessContract(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+
+	// The graph contains:
+	//   - A->B->C->A
+	//   - A->C->A
+	//
+	// The contract is witness-set based, not exhaustive simple-cycle enumeration.
+	// The deterministic DFS-based algorithm is expected to report a stable witness,
+	// not every mathematically possible simple-cycle representation.
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
+	_, _ = g.AddEdge("A", "C", 0)
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has)
-	assert.Len(t, cycles, 1)
-	// Only one cycle expected: ["A","B","C","A"]
-	assert.Equal(t, []string{"A", "B", "C", "A"}, cycles[0])
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "B", "C", "A"},
+	})
 }
 
-// TestDetectCycles_UndirectedMultipleLarge verifies detection of multiple cycles in an undirected graph.
-func TestDetectCycles_UndirectedMultipleLarge(t *testing.T) {
-	g := core.NewGraph()
-	// Cycle X: 4-node W--X--Y--Z--W
-	cyc4 := []string{"W", "X", "Y", "Z", "W"}
-	for i := 0; i < len(cyc4)-1; i++ {
-		_, _ = g.AddEdge(cyc4[i], cyc4[i+1], 0)
+func TestDetectCycles_DirectedCanonicalizationPreservesOrientation(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+
+	// The directed cycle is A->C->B->A.
+	// Its reversed lexical form A->B->C->A is smaller, but must not win canonicalization
+	// because direction is part of the identity of a directed cycle.
+	_, _ = g.AddEdge("A", "C", 0)
+	_, _ = g.AddEdge("C", "B", 0)
+	_, _ = g.AddEdge("B", "A", 0)
+
+	result, err := dfs.DetectCycles(g)
+	mustNoError(t, err)
+
+	mustCycleResult(t, result, true, [][]string{
+		{"A", "C", "B", "A"},
+	})
+}
+
+func TestMinimalRotation_DoesNotMutateInputBackingArray(t *testing.T) {
+	input := make([]string, 3, 6)
+	copy(input, []string{"B", "C", "A"})
+
+	original := append([]string(nil), input...)
+
+	rotation := dfs.TestOnlyMinimalRotation(input)
+
+	if len(input) != len(original) {
+		t.Fatalf("input length changed: got=%d want=%d", len(input), len(original))
 	}
-	// Cycle Y: 5-node P--Q--R--S--T--P
-	cyc5 := []string{"P", "Q", "R", "S", "T", "P"}
-	for i := 0; i < len(cyc5)-1; i++ {
-		_, _ = g.AddEdge(cyc5[i], cyc5[i+1], 0)
+
+	for index := range original {
+		if input[index] != original[index] {
+			t.Fatalf(
+				"input mutated at index %d: got=%q want=%q input=%v original=%v",
+				index, input[index], original[index], input, original,
+			)
+		}
 	}
 
-	has, cycles, err := dfs.DetectCycles(g)
-	assert.NoError(t, err)
-	assert.True(t, has)
+	wantRotation := []string{"A", "B", "C"}
+	if len(rotation) != len(wantRotation) {
+		t.Fatalf("rotation length mismatch: got=%d want=%d rotation=%v", len(rotation), len(wantRotation), rotation)
+	}
+	for index := range wantRotation {
+		if rotation[index] != wantRotation[index] {
+			t.Fatalf(
+				"rotation mismatch at index %d: got=%q want=%q rotation=%v want=%v",
+				index, rotation[index], wantRotation[index], rotation, wantRotation,
+			)
+		}
+	}
 
-	// Build a set of expected comma-joined cycle signatures
-	exp := map[string]struct{}{}
-	exp[strings.Join(cyc4, ",")] = struct{}{}
-	exp[strings.Join(cyc5, ",")] = struct{}{}
-
-	// Ensure exactly two cycles were found, each matching one expected signature
-	assert.Len(t, cycles, 2)
-	for _, c := range cycles {
-		sig := strings.Join(c, ",")
-		assert.Contains(t, exp, sig)
+	rotation[0] = "X"
+	if input[0] != original[0] {
+		t.Fatalf("rotation shares mutation-sensitive state with input: input=%v original=%v", input, original)
 	}
 }

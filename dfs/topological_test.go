@@ -1,231 +1,226 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package dfs_test
 
 import (
+	"context"
 	"testing"
-
-	"github.com/stretchr/testify/assert"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dfs"
 )
 
-// position returns index of v in slice or -1 if not found
-func position(order []string, v string) int {
-	for i, x := range order {
-		if x == v {
-			return i
-		}
-	}
-
-	return -1
-}
-
-// TestTopo_NilGraph verifies that passing a nil graph returns ErrGraphNil.
-func TestTopo_NilGraph(t *testing.T) {
+func TestTopologicalSort_NilGraph(t *testing.T) {
 	order, err := dfs.TopologicalSort(nil)
-	assert.Nil(t, order)
-	assert.ErrorIs(t, err, dfs.ErrGraphNil)
+
+	mustNilState(t, order, true, "TopologicalSort(nil) order")
+	mustErrorIs(t, err, dfs.ErrGraphNil)
 }
 
-// TestTopo_UndirectedGraph ensures TopologicalSort rejects undirected graphs.
-func TestTopo_UndirectedGraph(t *testing.T) {
-	g := core.NewGraph() // undirected by default
-	_, err := dfs.TopologicalSort(g)
-	assert.Error(t, err)
-	assert.Contains(t, err.Error(), "requires directed graph")
-}
-
-// TestTopo_EmptyGraph covers a directed graph with no vertices.
-func TestTopo_EmptyGraph(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
-	// no vertices added
-	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	assert.Empty(t, order)
-}
-
-// TestTopo_NoEdges checks that a directed graph with vertices but no edges
-// can be sorted in any order.
-func TestTopo_NoEdges(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
-	_ = g.AddVertex("A")
-	_ = g.AddVertex("B")
-	_ = g.AddVertex("C")
+func TestTopologicalSort_UndirectedGraphUsesSentinel(t *testing.T) {
+	g := core.NewGraph()
 
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	// any permutation of A,B,C is valid
-	assert.ElementsMatch(t, []string{"A", "B", "C"}, order)
+
+	mustNilState(t, order, true, "TopologicalSort undirected order")
+	mustErrorIs(t, err, dfs.ErrGraphNotDirected)
 }
 
-// TestTopo_SimpleChain verifies linear chain A→B→C yields [A,B,C].
-func TestTopo_SimpleChain(t *testing.T) {
+func TestTopologicalSortContext_NilContext(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+
+	order, err := dfs.TopologicalSortContext(nil, g)
+
+	mustNilState(t, order, true, "TopologicalSortContext nil-context order")
+	mustErrorIs(t, err, dfs.ErrOptionViolation)
+}
+
+func TestTopologicalSort_EmptyGraph(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+
+	order, err := dfs.TopologicalSort(g)
+	mustNoError(t, err)
+
+	mustEqualInt(t, len(order), 0, "")
+}
+
+func TestTopologicalSort_NoEdgesDeterministicOrder(t *testing.T) {
+	g := core.NewGraph(core.WithDirected(true))
+	mustNoError(t, g.AddVertex("A"))
+	mustNoError(t, g.AddVertex("B"))
+	mustNoError(t, g.AddVertex("C"))
+
+	order, err := dfs.TopologicalSort(g)
+	mustNoError(t, err)
+
+	// Independent roots are visited in graph vertex order and then reversed from post-order.
+	mustEqualSlice(t, order, []string{"C", "B", "A"})
+}
+
+func TestTopologicalSort_SimpleChain(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	assert.Equal(t, []string{"A", "B", "C"}, order)
+	mustNoError(t, err)
+
+	mustEqualSlice(t, order, []string{"A", "B", "C"})
 }
 
-// TestTopo_BranchingDAG checks a DAG with A→B and A→C: A must come first,
-// B and C in any order afterward.
-func TestTopo_BranchingDAG(t *testing.T) {
+func TestTopologicalSort_BranchingDAGDeterministicOrder(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("A", "C", 0)
 
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	assert.Equal(t, "A", order[0])
-	assert.ElementsMatch(t, []string{"B", "C"}, order[1:])
+	mustNoError(t, err)
+
+	// DFS visits B before C, so post-order is [B,C,A] and the final topological order is [A,C,B].
+	mustEqualSlice(t, order, []string{"A", "C", "B"})
 }
 
-// TestTopo_Disconnected verifies that disconnected components are included:
-// each component appears in a valid topological segment.
-func TestTopo_Disconnected(t *testing.T) {
+func TestTopologicalSort_DisconnectedGraphRespectsDependencies(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// component 1: X→Y
 	_, _ = g.AddEdge("X", "Y", 0)
-	// component 2: A→B
 	_, _ = g.AddEdge("A", "B", 0)
 
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	// X must precede Y, A must precede B; the two pairs can interleave
-	pos := func(v string) int {
-		for i, id := range order {
-			if id == v {
-				return i
-			}
-		}
+	mustNoError(t, err)
 
-		return -1
-	}
-	assert.Less(t, pos("X"), pos("Y"))
-	assert.Less(t, pos("A"), pos("B"))
-	assert.Len(t, order, 4)
-	assert.ElementsMatch(t, []string{"X", "Y", "A", "B"}, order)
+	mustEqualStringSet(t, order, []string{"X", "Y", "A", "B"})
+	mustTopoOrderRespectsEdges(t, order, [][2]string{
+		{"X", "Y"},
+		{"A", "B"},
+	})
 }
 
-// TestTopo_Cycle ensures that a cycle detection returns ErrCycleDetected.
-func TestTopo_Cycle(t *testing.T) {
+func TestTopologicalSort_Cycle(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
 
 	order, err := dfs.TopologicalSort(g)
-	assert.Nil(t, order)
-	assert.ErrorIs(t, err, dfs.ErrCycleDetected)
+
+	mustNilState(t, order, true, "TopologicalSort cycle order")
+	mustErrorIs(t, err, dfs.ErrCycleDetected)
 }
 
-// TestTopo_LargeLinearChain verifies a linear chain of 10 vertices A→B→C→...→J.
-func TestTopo_LargeLinearChain(t *testing.T) {
+func TestTopologicalSort_LargeLinearChain(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// Build chain A→B→C→...→J
-	vertices := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"}
-	for i := 0; i < len(vertices)-1; i++ {
-		from, to := vertices[i], vertices[i+1]
-		_, err := g.AddEdge(from, to, 0)
-		assert.NoError(t, err, "AddEdge(%s→%s)", from, to)
+	vertices := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"}
+
+	for index := 0; index < len(vertices)-1; index++ {
+		_, err := g.AddEdge(vertices[index], vertices[index+1], 0)
+		mustNoError(t, err)
 	}
-	// Sort
+
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	// Verify all 10 present
-	assert.Len(t, order, 10)
-	// Each predecessor appears before successor
-	for i := 0; i < len(vertices)-1; i++ {
-		u, v := vertices[i], vertices[i+1]
-		assert.Lessf(t,
-			position(order, u), position(order, v),
-			"node %s should come before %s", u, v,
-		)
-	}
+	mustNoError(t, err)
+
+	mustEqualSlice(t, order, vertices)
 }
 
-// TestTopo_DisconnectedLarge ensures two disjoint chains are interleaved correctly.
-func TestTopo_DisconnectedLarge(t *testing.T) {
+func TestTopologicalSort_DisconnectedLargeRespectsDependencies(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// Chain1: 1→2→3→4
-	chain1 := []string{"1", "2", "3", "4"}
-	for i := 0; i < len(chain1)-1; i++ {
-		_, err := g.AddEdge(chain1[i], chain1[i+1], 0)
-		assert.NoError(t, err)
+
+	chainOne := []string{"1", "2", "3", "4", "5"}
+	for index := 0; index < len(chainOne)-1; index++ {
+		_, err := g.AddEdge(chainOne[index], chainOne[index+1], 0)
+		mustNoError(t, err)
 	}
-	// Chain2: A→B→C→D→E
-	chain2 := []string{"A", "B", "C", "D", "E"}
-	for i := 0; i < len(chain2)-1; i++ {
-		_, err := g.AddEdge(chain2[i], chain2[i+1], 0)
-		assert.NoError(t, err)
+
+	chainTwo := []string{"A", "B", "C", "D", "E", "F"}
+	for index := 0; index < len(chainTwo)-1; index++ {
+		_, err := g.AddEdge(chainTwo[index], chainTwo[index+1], 0)
+		mustNoError(t, err)
 	}
+
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	assert.Len(t, order, len(chain1)+len(chain2))
-	// Verify ordering constraints in each chain
-	for i := 0; i < len(chain1)-1; i++ {
-		u, v := chain1[i], chain1[i+1]
-		assert.Less(t,
-			position(order, u), position(order, v),
-			"%s should precede %s", u, v,
-		)
-	}
-	for i := 0; i < len(chain2)-1; i++ {
-		u, v := chain2[i], chain2[i+1]
-		assert.Less(t,
-			position(order, u), position(order, v),
-			"%s should precede %s", u, v,
-		)
-	}
+	mustNoError(t, err)
+
+	mustEqualStringSet(t, order, []string{"1", "2", "3", "4", "5", "A", "B", "C", "D", "E", "F"})
+	mustTopoOrderRespectsEdges(t, order, [][2]string{
+		{"1", "2"},
+		{"2", "3"},
+		{"3", "4"},
+		{"4", "5"},
+		{"A", "B"},
+		{"B", "C"},
+		{"C", "D"},
+		{"D", "E"},
+		{"E", "F"},
+	})
 }
 
-// TestTopo_ComplexDAG builds a DAG of 10 vertices with cross-links and ensures validity.
-func TestTopo_ComplexDAG(t *testing.T) {
+func TestTopologicalSort_ComplexDAGRespectsDependencies(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// vertices V1...V10
-	vs := []string{"V1", "V2", "V3", "V4", "V5", "V6", "V7", "V8", "V9", "V10"}
-	// add vertices explicitly
-	for _, v := range vs {
-		_ = g.AddVertex(v)
+
+	vertices := []string{
+		"V1", "V2", "V3", "V4", "V5", "V6",
+		"V7", "V8", "V9", "V10", "V11", "V12",
 	}
-	// add edges: V1→V3, V1→V2, V2→V5, V3→V5, V2→V4, V4→V6,
-	// V5→V7, V6→V8, V7→V9, V8→V10
+	for _, vertexID := range vertices {
+		mustNoError(t, g.AddVertex(vertexID))
+	}
+
 	edges := [][2]string{
-		{"V1", "V3"}, {"V1", "V2"}, {"V2", "V5"}, {"V3", "V5"},
-		{"V2", "V4"}, {"V4", "V6"}, {"V5", "V7"}, {"V6", "V8"},
-		{"V7", "V9"}, {"V8", "V10"},
+		{"V1", "V3"},
+		{"V1", "V2"},
+		{"V2", "V5"},
+		{"V3", "V5"},
+		{"V2", "V4"},
+		{"V4", "V6"},
+		{"V5", "V7"},
+		{"V6", "V8"},
+		{"V7", "V9"},
+		{"V8", "V10"},
+		{"V3", "V11"},
+		{"V11", "V12"},
 	}
-	for _, e := range edges {
-		_, err := g.AddEdge(e[0], e[1], 0)
-		assert.NoError(t, err)
+	for _, edge := range edges {
+		_, err := g.AddEdge(edge[0], edge[1], 0)
+		mustNoError(t, err)
 	}
+
 	order, err := dfs.TopologicalSort(g)
-	assert.NoError(t, err)
-	assert.Len(t, order, 10)
-	// all dependencies must hold
-	for _, e := range edges {
-		u, v := e[0], e[1]
-		assert.Less(t,
-			position(order, u), position(order, v),
-			"edge %s→%s should be respected", u, v,
-		)
-	}
+	mustNoError(t, err)
+
+	mustEqualStringSet(t, order, vertices)
+	mustTopoOrderRespectsEdges(t, order, edges)
 }
 
-// TestTopo_CycleDetection uses a 6-node cycle to verify ErrCycleDetected.
-func TestTopo_CycleDetection(t *testing.T) {
+func TestTopologicalSort_ContextCanceled(t *testing.T) {
 	g := core.NewGraph(core.WithDirected(true))
-	// cycle on 6 nodes: a→b→c→d→e→f→a
-	cycle := []string{"a", "b", "c", "d", "e", "f"}
-	for i := 0; i < len(cycle); i++ {
-		from := cycle[i]
-		to := cycle[(i+1)%len(cycle)]
-		_, err := g.AddEdge(from, to, 0)
-		assert.NoError(t, err)
-	}
+	_, _ = g.AddEdge("A", "B", 0)
+	_, _ = g.AddEdge("B", "C", 0)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	order, err := dfs.TopologicalSortContext(ctx, g)
+
+	mustNilState(t, order, true, "TopologicalSortContext canceled order")
+	mustErrorIs(t, err, context.Canceled)
+}
+
+func TestTopologicalSort_MixedGraphIgnoresUndirectedEdges(t *testing.T) {
+	g := core.NewMixedGraph(core.WithDirected(true))
+
+	_, _ = g.AddEdge("A", "B", 0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("B", "D", 0, core.WithEdgeDirected(true))
+
+	// This edge is intentionally undirected and must be ignored by topological traversal logic.
+	_, _ = g.AddEdge("A", "C", 0, core.WithEdgeDirected(false))
+
 	order, err := dfs.TopologicalSort(g)
-	assert.Nil(t, order)
-	assert.ErrorIs(t, err, dfs.ErrCycleDetected)
+	mustNoError(t, err)
+
+	mustEqualStringSet(t, order, []string{"A", "B", "C", "D"})
+	mustTopoOrderRespectsEdges(t, order, [][2]string{
+		{"A", "B"},
+		{"B", "D"},
+	})
 }

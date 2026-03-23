@@ -1,183 +1,344 @@
-// Package dijkstra defines core types and configuration options
-// for Dijkstra's shortest-path algorithm on weighted graphs.
-//
-// Dijkstra computes the minimum-cost path from a single source vertex to all
-// other reachable vertices in a graph with non-negative edge weights.
-// The algorithm maintains a priority queue of vertices to explore and
-// relaxes edges in increasing order of distance from the source vertex.
-//
-// Complexity:
-//
-//   - Time:  O((V + E) log V)   where V = |vertices|, E = |edges|
-//   - Each vertex is extracted from the priority queue at most once (V extracts).
-//   - Each edge relaxation may push into the priority queue (up to E pushes).
-//   - Each heap operation (push/pop) costs O(log V) or O(log (V+E)), simplified to O(log V).
-//   - Space: O(V + E)
-//   - O(V) to store distance and predecessor maps.
-//   - O(E) in the priority queue in the worst case (lazy decrease-key).
-//
-// Options:
-//
-//   - Source:           ID of the starting vertex (must be non-empty and present in the graph).
-//   - ReturnPath:       if true, return the predecessor map for path reconstruction.
-//   - MaxDistance:      optional cap on distances to explore; vertices beyond this are skipped.
-//   - InfEdgeThreshold: edges with weight >= this threshold are treated as impassable.
-//
-// Errors (sentinel):
-//
-//   - ErrEmptySource     if the provided source ID is empty.
-//   - ErrNilGraph        if the provided graph pointer is nil.
-//   - ErrUnweightedGraph if the graph is not configured to support weights.
-//   - ErrVertexNotFound  if the source vertex does not exist in the graph.
-//   - ErrNegativeWeight  if a negative edge weight is detected in the graph.
-//   - ErrBadMaxDistance  if MaxDistance < 0.
-//   - ErrBadInfThreshold if InfEdgeThreshold <= 0.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package dijkstra
 
 import (
-	"errors"
 	"math"
+
+	"github.com/katalvlaran/lvlath/core"
 )
 
-// Sentinel errors returned by the Dijkstra implementation.
-var (
-	// ErrEmptySource indicates that the provided source vertex ID is empty.
-	ErrEmptySource = errors.New("dijkstra: source vertex ID is empty")
-
-	// ErrNilGraph indicates that a nil *core.Graph was passed to Dijkstra.
-	ErrNilGraph = errors.New("dijkstra: graph is nil")
-
-	// ErrUnweightedGraph indicates that the graph was not marked as weighted
-	// but Dijkstra requires non-negative weights to compute shortest paths.
-	ErrUnweightedGraph = errors.New("dijkstra: graph must be weighted")
-
-	// ErrVertexNotFound indicates that the specified source vertex does not exist
-	// in the provided graph.
-	ErrVertexNotFound = errors.New("dijkstra: source vertex not found in graph")
-
-	// ErrNegativeWeight indicates that a negative edge weight was detected in the graph.
-	ErrNegativeWeight = errors.New("dijkstra: negative edge weight encountered")
-
-	// ErrBadMaxDistance indicates that MaxDistance was set to a negative value,
-	// which is not meaningful for a distance threshold.
-	ErrBadMaxDistance = errors.New("dijkstra: MaxDistance must be non-negative")
-
-	// ErrBadInfThreshold indicates that InfEdgeThreshold was set to zero or negative,
-	// which would treat all edges (including zero-weight edges) as impassable.
-	ErrBadInfThreshold = errors.New("dijkstra: InfEdgeThreshold must be positive")
-)
-
-// MemoryMode controls how predecessor information is stored during Dijkstra's execution.
+// DijkstraResult stores the detached, queryable outcome of a single-source
+// shortest-path run over a weighted graph.
+// The result keeps the source identifier, the finalized distance map, and
+// the optional predecessor map used for path reconstruction.
 //
-// Note: Currently only MemoryModeFull is fully supported; MemoryModeCompact is reserved
-// for future implementations where predecessor storage is minimized and paths are
-// reconstructed via repeated partial computation.
+// Implementation:
+//   - Stage 1: Store the finalized source identifier and distance domain.
+//   - Stage 2: Optionally store predecessor information when path tracking is enabled.
+//   - Stage 3: Expose safe result-surface helpers for distance and path queries.
 //
-// MemoryModeFull    - store complete predecessor map for immediate path reconstruction.
-// MemoryModeCompact - minimize memory; omit or compress predecessor data (not yet implemented).
-type MemoryMode int
-
-const (
-	// MemoryModeFull stores all predecessors to allow direct path recovery.
-	MemoryModeFull MemoryMode = iota
-
-	// MemoryModeCompact reduces memory footprint; requires external path derivation.
-	// At present, MemoryModeCompact does not alter behavior (equivalent to Full).
-	MemoryModeCompact
-)
-
-// Options configures the behavior of the Dijkstra algorithm.
+// Behavior highlights:
+//   - Distances uses +Inf to represent known but unreachable vertices.
+//   - Prev == nil means path tracking was disabled for the producing run.
+//   - The result is detached from the graph and remains stable after return.
 //
-// Source           - starting vertex ID (must be non-empty and present in the graph).
-// ReturnPath       - if true, return the predecessor map; otherwise prev map is nil.
-// MaxDistance      - optional cap on distances to explore (vertices beyond are skipped).
+// Inputs:
+//   - SourceID: the source vertex identifier used for the originating run.
+//   - Distances: the finalized shortest-path distance map.
+//   - Prev: the optional predecessor map for path reconstruction.
 //
-//	Must be ≥ 0. Default is math.MaxInt64 (no cap).
+// Returns:
+//   - DijkstraResult: a detached contract type for post-run queries.
 //
-// InfEdgeThreshold - treat edges with weight ≥ this threshold as impassable obstacles.
+// Errors:
+//   - Result helper methods may return ErrNilResult, ErrEmptyTargetID,
+//     ErrTargetNotFound, ErrPathTrackingDisabled, or ErrNoPath.
 //
-//	Must be > 0. Default is math.MaxInt64 (no obstacles).
-type Options struct {
-	Source           string     // The ID of the source vertex
-	MemoryMode       MemoryMode // Controls how predecessors are stored (Full or Compact)
-	ReturnPath       bool       // Whether to return the predecessor map
-	MaxDistance      float64    // Maximum distance to explore
-	InfEdgeThreshold float64    // Weight threshold above which edges are non-traversable
+// Determinism:
+//   - Query methods are deterministic for the same stored SourceID, Distances, and Prev.
+//
+// Complexity:
+//   - Querying a single distance is O(1).
+//   - Path reconstruction is O(k), where k is the number of vertices on the returned path.
+//
+// Notes:
+//   - The result does not retain a live link to the source graph.
+//   - A present vertex with distance +Inf is distinct from an unknown target vertex.
+//
+// AI-Hints:
+//   - Do not treat Prev == nil as "there is no path"; it means path tracking was disabled.
+//   - Do not collapse unknown-target and unreachable-target semantics into one branch.
+type DijkstraResult struct {
+	SourceID  string
+	Distances map[string]float64
+	Prev      map[string]string
 }
 
-// Option represents a functional option for configuring Dijkstra.
-type Option func(*Options)
+// Ensure that DijkstraResult satisfies core.Nilable without requiring callers
+// to know the concrete result implementation type.
+var _ core.Nilable = (*DijkstraResult)(nil)
 
-// WithMemoryMode sets the memory mode for storing predecessor information.
-// MemoryModeFull: store full predecessor map.
-// MemoryModeCompact: minimize memory (behavior currently same as Full).
-func WithMemoryMode(mode MemoryMode) Option {
-	return func(o *Options) {
-		o.MemoryMode = mode
+// IsNil reports whether the result receiver itself is nil.
+// This method exists to satisfy core.Nilable and to let callers perform safe
+// nil checks without triggering a nil-pointer dereference.
+//
+// Implementation:
+//   - Stage 1: Compare the receiver pointer against nil.
+//
+// Behavior highlights:
+//   - The method is safe on a nil receiver.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - bool: true when the receiver is nil; otherwise false.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Always returns the same value for the same receiver state.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - A non-nil result may still contain nil maps if that is part of the contract.
+//
+// AI-Hints:
+//   - Prefer IsNil over ad-hoc interface assertions when working with core.Nilable.
+//   - Nil receiver safety here does not remove the need for safe checks in other methods.
+func (r *DijkstraResult) IsNil() bool {
+	return r == nil
+}
+
+// DistanceTo returns the stored shortest-path distance to the requested target vertex.
+// A returned distance of +Inf is a valid canonical outcome and means that the target
+// is known to the result domain but unreachable from the source.
+//
+// Implementation:
+//   - Stage 1: Validate the receiver and target identifier.
+//   - Stage 2: Look up the target in the stored distance map.
+//   - Stage 3: Return the stored value without reinterpretation.
+//
+// Behavior highlights:
+//   - Missing targets are rejected explicitly.
+//   - +Inf is returned as data, not as an error.
+//
+// Inputs:
+//   - vertexID: the target vertex identifier to query.
+//
+// Returns:
+//   - float64: the stored shortest-path distance for the target vertex.
+//
+// Errors:
+//   - ErrNilResult if the receiver is nil.
+//   - ErrEmptyTargetID if vertexID is empty.
+//   - ErrTargetNotFound if the target does not exist in the result domain.
+//
+// Determinism:
+//   - Map lookup is deterministic for the same stored result state.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Unknown target and unreachable target are intentionally different states.
+//
+// AI-Hints:
+//   - Do not replace +Inf with zero or another synthetic sentinel value.
+//   - Do not treat a missing key as equivalent to an unreachable known vertex.
+func (r *DijkstraResult) DistanceTo(vertexID string) (float64, error) {
+	if r == nil {
+		return 0, ErrNilResult
 	}
-}
-
-// Source sets the Source field of Options to the given string.
-// Must be called to specify the starting vertex ID.
-func Source(str string) Option {
-	return func(o *Options) {
-		o.Source = str
+	if vertexID == "" {
+		return 0, ErrEmptyTargetID
 	}
-}
 
-// WithReturnPath enables generation of the predecessor map in the result.
-// If false (default), the predecessor map is not returned (prev == nil).
-func WithReturnPath() Option {
-	return func(o *Options) {
-		o.ReturnPath = true
+	distance, ok := r.Distances[vertexID]
+	if !ok {
+		return 0, ErrTargetNotFound
 	}
+
+	return distance, nil
 }
 
-// WithMaxDistance sets a maximum distance threshold.
-// Vertices whose shortest distance would exceed this value are not explored.
-// Must pass a non-negative value; negative values cause ErrBadMaxDistance.
-// Default (if not set) is math.MaxInt64 (no cap).
-func WithMaxDistance(max float64) Option {
-	return func(o *Options) {
-		if max < 0 {
-			// Panic to signal invalid configuration early.
-			// In Go, panic in Option constructors is acceptable for invalid arguments.
-			panic(ErrBadMaxDistance.Error())
+// HasPathTo reports whether the target vertex is reachable from the source
+// under the stored shortest-path result.
+// The method distinguishes unknown targets from known-but-unreachable targets.
+//
+// Implementation:
+//   - Stage 1: Resolve the target distance through DistanceTo.
+//   - Stage 2: Interpret +Inf as unreachable.
+//   - Stage 3: Report reachability for finite distances.
+//
+// Behavior highlights:
+//   - Missing targets remain errors.
+//   - Unreachable known targets return false with no error.
+//
+// Inputs:
+//   - vertexID: the target vertex identifier to query.
+//
+// Returns:
+//   - bool: true when the target is reachable; otherwise false.
+//
+// Errors:
+//   - ErrNilResult if the receiver is nil.
+//   - ErrEmptyTargetID if vertexID is empty.
+//   - ErrTargetNotFound if the target does not exist in the result domain.
+//
+// Determinism:
+//   - Always derives its answer from the stored distance map in a stable way.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This method does not require path tracking.
+//
+// AI-Hints:
+//   - Reachability is derived from the distance contract, not from the presence of Prev.
+//   - Do not treat missing-target errors as a simple false result.
+func (r *DijkstraResult) HasPathTo(vertexID string) (bool, error) {
+	distance, err := r.DistanceTo(vertexID)
+	if err != nil {
+		return false, err
+	}
+
+	return !math.IsInf(distance, 1), nil
+}
+
+// PathTo reconstructs one deterministic shortest-path witness from the source
+// to the requested target using the stored predecessor map.
+// The method requires path tracking to have been enabled when the result was produced.
+//
+// Implementation:
+//   - Stage 1: Validate the receiver, target identifier, and target presence.
+//   - Stage 2: Reject disabled path tracking and unreachable known targets.
+//   - Stage 3: Follow Prev backward from the target to the source.
+//   - Stage 4: Reverse the collected sequence in place and return it.
+//
+// Behavior highlights:
+//   - Path tracking is explicit and never inferred.
+//   - Unknown targets, unreachable targets, and disabled tracking remain distinct cases.
+//   - The source queried against itself returns a single-vertex path.
+//
+// Inputs:
+//   - vertexID: the target vertex identifier to reconstruct.
+//
+// Returns:
+//   - []string: the reconstructed shortest-path witness from source to target.
+//
+// Errors:
+//   - ErrNilResult if the receiver is nil.
+//   - ErrEmptyTargetID if vertexID is empty.
+//   - ErrTargetNotFound if the target does not exist in the result domain.
+//   - ErrPathTrackingDisabled if the result was produced without predecessor tracking.
+//   - ErrNoPath if the target is known but unreachable or if the predecessor chain cannot reach the source.
+//
+// Determinism:
+//   - Reconstruction is deterministic for the same stored predecessor map.
+//
+// Complexity:
+//   - Time O(k), Space O(k), where k is the number of vertices on the returned path.
+//
+// Notes:
+//   - This method returns one shortest-path witness, not an exhaustive set of shortest paths.
+//
+// AI-Hints:
+//   - Do not silently return an empty slice when Prev is nil; that hides a contract violation.
+//   - Do not fabricate a path when the predecessor chain is broken or unreachable.
+func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
+	if r == nil {
+		return nil, ErrNilResult
+	}
+	if vertexID == "" {
+		return nil, ErrEmptyTargetID
+	}
+
+	if _, ok := r.Distances[vertexID]; !ok {
+		return nil, ErrTargetNotFound
+	}
+	if r.Prev == nil {
+		return nil, ErrPathTrackingDisabled
+	}
+
+	distance, err := r.DistanceTo(vertexID)
+	if err != nil {
+		return nil, err
+	}
+	if math.IsInf(distance, 1) {
+		return nil, ErrNoPath
+	}
+	if vertexID == r.SourceID {
+		return []string{r.SourceID}, nil
+	}
+
+	path := make([]string, 0, 4)
+	currentID := vertexID
+
+	for {
+		path = append(path, currentID)
+
+		if currentID == r.SourceID {
+			break
 		}
-		o.MaxDistance = max
-	}
-}
 
-// WithInfEdgeThreshold defines a weight threshold above which edges are
-// considered non-traversable (treated as infinite weight).
-// Edges with weight ≥ threshold are skipped entirely.
-// Must pass a positive value; zero or negative cause ErrBadInfThreshold.
-// Default (if not set) is math.MaxInt64 (no edges treated as impassable).
-func WithInfEdgeThreshold(threshold float64) Option {
-	return func(o *Options) {
-		if threshold <= 0 {
-			panic(ErrBadInfThreshold.Error())
+		parentID, ok := r.Prev[currentID]
+		if !ok || parentID == "" {
+			return nil, ErrNoPath
 		}
-		o.InfEdgeThreshold = threshold
+
+		currentID = parentID
 	}
+
+	for leftIndex, rightIndex := 0, len(path)-1; leftIndex < rightIndex; leftIndex, rightIndex = leftIndex+1, rightIndex-1 {
+		path[leftIndex], path[rightIndex] = path[rightIndex], path[leftIndex]
+	}
+
+	return path, nil
 }
 
-// DefaultOptions returns an Options struct initialized with sensible defaults
-// for the given source vertex ID. Use this as a starting point for further
-// functional-options overrides.
+// Clone returns a detached deep copy of the result.
+// Maps are copied deeply so that the returned value can be mutated by the caller
+// without affecting the original result.
 //
-// Defaults:
-//   - Source:           <as passed> (no validation here; validated in Dijkstra).
-//   - MemoryMode:       MemoryModeFull (predecessor map fully stored).
-//   - ReturnPath:       false (predecessor map not returned).
-//   - MaxDistance:      math.Inf(1) (no distance limit; explore all reachable).
-//   - InfEdgeThreshold: math.Inf(1) (no edges treated as impassable).
-func DefaultOptions(source string) Options {
-	return Options{
-		Source:           source,
-		MemoryMode:       MemoryModeFull,
-		ReturnPath:       false,
-		MaxDistance:      math.Inf(1),
-		InfEdgeThreshold: math.Inf(1),
+// Implementation:
+//   - Stage 1: Handle the nil receiver safely.
+//   - Stage 2: Copy scalar fields.
+//   - Stage 3: Deep-copy Distances.
+//   - Stage 4: Deep-copy Prev only when tracking data exists.
+//
+// Behavior highlights:
+//   - Nil receivers produce nil clones.
+//   - Prev remains nil when the original result had path tracking disabled.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - *DijkstraResult: a deep copy of the receiver, or nil when the receiver is nil.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Produces structurally equivalent copies for the same receiver state.
+//
+// Complexity:
+//   - Time O(V), Space O(V), where V is the total number of entries copied across the stored maps.
+//
+// Notes:
+//   - This method preserves the ownership law of the result surface.
+//
+// AI-Hints:
+//   - Preserve Prev == nil exactly; do not rewrite it into an empty map.
+//   - Do not shallow-copy maps here; callers must receive isolated ownership.
+func (r *DijkstraResult) Clone() *DijkstraResult {
+	if r == nil {
+		return nil
 	}
+
+	clonedResult := &DijkstraResult{
+		SourceID:  r.SourceID,
+		Distances: make(map[string]float64, len(r.Distances)),
+		Prev:      nil,
+	}
+
+	for vertexID, distance := range r.Distances {
+		clonedResult.Distances[vertexID] = distance
+	}
+
+	if r.Prev != nil {
+		clonedResult.Prev = make(map[string]string, len(r.Prev))
+		for vertexID, parentID := range r.Prev {
+			clonedResult.Prev[vertexID] = parentID
+		}
+	}
+
+	return clonedResult
 }

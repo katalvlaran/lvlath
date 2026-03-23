@@ -1,325 +1,676 @@
+<!--
+  lvlath - Repository Documentation
+
+  Purpose:
+    This document is the repository-level specification, tutorial, and contract map
+    for lvlath/dijkstra. It explains the weighted shortest-path kernel, numeric
+    policy, determinism laws, traversal-policy gates, result-surface semantics,
+    and safe production usage.
+
+  Contract status:
+    - Determinism rules (graph-surface order, heap tie-break, strict improvement)
+      are part of the public contract.
+    - Numeric policy (float64, +Inf unreachable publication, NaN/-Inf rejection,
+      +Inf wall semantics) is part of the public contract.
+    - Sentinel-error governance and errors.Is-first matching are part of the
+      public contract.
+    - Result-surface semantics (detached ownership, tracking-enabled path witness,
+      partial-result suppression) are part of the public contract.
+    - Any incompatible change must be explicit, documented, and versioned.
+
+  Scope:
+    - Deterministic single-source shortest paths over weighted core.Graph.
+    - Runtime traversal policy through MaxDistance and InfEdgeThreshold.
+    - Deterministic reconstruction of one shortest-path witness.
+    - Directed, undirected, and mixed-edge endpoint resolution laws.
+
+  License:
+    The lvlath repository is licensed under AGPL-3.0-only. See LICENSE.
+-->
+
 # 5. Shortest Paths: Dijkstra
 
----
+> **Package:** `lvlath/dijkstra` | **Focus:** Determinism, Numeric Discipline, Result Contracts, Traversal Policy, Stable Witnesses
 
-## 5.1. What, Why, When (and where)
+The `lvlath/dijkstra` package provides a deterministic, contract-driven implementation of single-source shortest paths over `core.Graph`. It is designed not as a throwaway priority-queue snippet, but as a reusable weighted shortest-path kernel for downstream packages and applications that require reproducible costs, stable witnesses, explicit unreachable semantics, strict numeric governance, and detached caller-owned result artifacts.
 
-**What?**  
-Dijkstra’s algorithm computes the minimum-cost paths from a single source vertex to all other vertices in a weighted graph with non-negative edge weights. It forms the backbone of routing, navigation, and resource-allocation systems.
-
-**Why?**
-- **Correctness:** Guarantees optimal paths when all weights ≥ 0.
-- **Performance:** Achieves O((V + E) log V) time using a binary heap.
-- **Completeness:** Produces a full distance map and optional predecessor map for path reconstruction.
-
-**When?**
-- All edge weights in your graph are non-negative.
-- You need distances to _every_ reachable node (not just a single destination).
-- You may combine with `lvlath/matrix` for matrix-based workflows.
-
-**Where?**
-- **Implementation:** `github.com/katalvlaran/lvlath/dijkstra.Dijkstra`
-- **Graph integration:** Works seamlessly with `lvlath/core.Graph` and its `WithWeighted()`, `WithMixedEdges()` settings.
-
-> **Goal:** Compute the minimum‐cost path from a single source to every other vertex in a weighted graph with non‑negative edge weights.
----
-
-## 5.2. Mathematical Formulation
-Dijkstra maintains a set of **visited** nodes whose shortest distance from the source is finalized, and a **min‑heap** (priority queue) of frontier nodes keyed by their tentative distance.
-
-Let `G = (V, E)` be a graph with weight function $$w: E \to \mathbb{R}_{\ge0}$$
-
-* A **distance** map
-  $$d: V \to [0,\infty]$$
-
-
-* A **predecessor** map
-  $$\pi: V \to V \cup \{\mathrm{nil}\}$$
-
-
-1. **Initialization**: 
-   
-   $$d[s] = 0, \quad d[v] = +\infty \quad \forall v \neq s, \quad \pi[v] = \mathrm{nil}$$
-
-2. **Relaxation**: For each edge $$(u, v) \in E$$ , update:
-
-   $$\text{if } d[u] + w(u,v) < d[v] \text{ then } d[v] := d[u] + w(u,v),\; \pi[v] := u$$
-
-3. **Main Loop** (using a min‑priority queue):
-
-    * Extract the unsettled vertex `u` with minimal `d[u]`.
-    * For each outgoing edge `(u,v)`: perform **Relaxation**.
-    * Repeat until the queue is empty.
-
-**Time Complexity:** `O((V + E) \log V)` with a binary heap.
-**Space Complexity:** `O(V + E)`.
+Unlike naive implementations that silently drift under unstable ordering, blur unknown-vs-unreachable states, or become semantically unsafe under concurrent graph mutation, `lvlath/dijkstra` treats traversal as a strict mathematical protocol.
 
 ---
 
-## 5.3. Step-by-Step Pseudocode
+## 5.1. What & Why
 
-```plaintext
-function Dijkstra(Graph G, source s):
-    // 1) Initialize distance and predecessor
-    for each vertex v in G.Vertices():
-        d[v] ← +∞              // unknown distance
-        π[v] ← nil             // no predecessor
-    d[s] ← 0                  // distance to source is zero
+Why use `lvlath/dijkstra` instead of a custom heap loop?
 
-    // 2) Build priority queue Q of all vertices keyed by d[v]
-    Q ← MinHeap()
-    Q.Insert(s, 0)
+### The Five Laws of Dijkstra
 
-    // 3) Main loop: extract-min and relax
-    while Q is not empty:
-        (u, distU) ← Q.ExtractMin()    // vertex with smallest tentative distance
-        if distU > MaxDistance:
-            break                      // distances beyond threshold are ignored
+1. **Deterministic Weighted Routing**
+    *   *Others:* Return one of several equal-cost paths depending on incidental adjacency map order or unstable heap behavior.
+    *   *Lvlath:* Preserves the deterministic graph-surface order from `core`, adds an explicit heap tie-break on vertex ID, and applies strict-improvement-only predecessor updates. The chosen witness is binary-stable for the same graph state and runtime policy.
+2. **Explicit Numeric Discipline**
+    *   *Others:* Hide unreachable state behind integer sentinels (`MaxInt64`), conflate invalid numeric input with large values, or silently accept negative costs.
+    *   *Lvlath:* Uses `float64` strictly. `NaN` and `-Inf` are invalid. Finite negative weights are rejected. `+Inf` is dual-purpose: it is valid input data for wall semantics, and it is the canonical published distance for known-but-unreachable vertices.
+3. **Traversal Policy Without Topology Mutation**
+    *   *Others:* Force callers to physically delete edges or clone the graph to model "blocked" roads or "out-of-radius" conditions.
+    *   *Lvlath:* Applies `WithInfEdgeThreshold` and `WithMaxDistance` as runtime policy gates. The topology remains unchanged by the call.
+4. **Detached Result Surface**
+    *   *Others:* Return ad-hoc internal maps or couple result semantics to implementation detail.
+    *   *Lvlath:* Publishes a detached `*DijkstraResult` that exposes explicit distance, reachability, and path-witness queries.
+5. **Graph-Semantics Fidelity**
+    *   *Others:* Assume the traversable destination is always `edge.To`, which silently breaks on undirected or mixed-edge relations.
+    *   *Lvlath:* Resolves the effective opposite endpoint relative to the current vertex. Mixed and undirected traversal therefore remains mathematically correct even when internal edge storage orientation differs from the traversal direction.
 
-        for each edge e in G.Neighbors(u):
-            let v = e.To
-            let w = e.Weight
-            // 3a) Mixed-edge and direction filter
-            if e.Directed and e.From != u:
-                continue               // skip reverse of directed edge
+---
 
-            // 3b) Precondition checks
-            if w < 0:
-                error "negative weight"
-            if w ≥ InfEdgeThreshold:
-                continue               // treat heavy edge as impassable
+## 5.2. Domain Scope & Non-Goals
 
-            // 3c) Relaxation step
-            alt ← distU + w
-            if alt < d[v]:
-                d[v] ← alt
-                π[v] ← u
-                // 3d) Update priority queue (lazy decrease-key)
-                Q.Insert(v, alt)
+### 5.2.1. Domain Scope
+The package answers weighted shortest-path questions such as:
+*   "What is the minimum total cost from this source to every known vertex?"
+*   "What is the minimum cost to this one target?"
+*   "Is this known target reachable under the active traversal policy?"
+*   "What is one deterministic shortest-path witness to this target?"
 
-    return d, π
-```
+### 5.2.2. Explicit Non-Goals
+`lvlath/dijkstra` is intentionally **not**:
+*   **A negative-weight solver:** If any traversed edge can have a negative finite weight, Dijkstra is mathematically the wrong tool. The package actively rejects this input.
+*   **An all-pairs solver:** It does not provide Floyd-Warshall or Johnson-style orchestration.
+*   **An exhaustive enumerator:** It returns exactly *one* deterministic witness, not a catalog of all possible shortest paths.
+*   **A snapshot-isolated engine:** It does not materialize an isolated graph image before traversal.
 
-*Complexity:* O((V + E) log V) time, O(V + E) space.
-## 5.4. Examples
-### 5.4.1 Medium Example: 4‑Node Graph Walkthrough
+---
 
-This example demonstrates Dijkstra’s algorithm on a small undirected graph of four vertices. We trace each step, show the evolving priority queue, and reconstruct the shortest path.
+## 5.3. Mathematical Formulation
 
-#### Graph Structure
+The package differentiates between classic theoretical definitions and our strict runtime application. Let $G = (V, E)$ be a graph with weight function $w: E \to [0, +\infty]$.
 
-```
-      [A]──2──[B]
-     /         |
-   5/          |1
-   /           |
-  [C]────3────[D]
-```
+### 5.3.1. Classical Shortest-Path Objective
+For a source $s$ and target $v$, the weighted shortest-path objective is the infimum of the sum of edge weights over all possible paths $\mathcal{P}(s,v)$:
+$$ dist(s,v) = \inf_{P \in \mathcal{P}(s,v)} \sum_{e \in P} w(e) $$
+If no admissible path exists, $dist(s,v) = +\infty$.
 
-- **Vertices**: A, B, C, D
-- **Edges & Weights**:
-    - A–B (weight 2)
-    - A–C (weight 5)
-    - B–D (weight 1)
-    - C–D (weight 3)
+### 5.3.2. Lvlath Implementation (Strict-Improvement)
+For the known result domain, initialization dictates $dist(s,s) = 0$ and $dist(s,v) = +\infty$ for all $v \neq s$.
+During relaxation of a relation from $u$ to $v$ via edge $e$:
+$$ candidate = dist(s,u) + w(e) $$
+The package updates state **only** on strict improvement:
+$$ \text{If } candidate < dist(s,v) \implies dist(s,v) \leftarrow candidate, \quad \pi(v) \leftarrow u $$
+If $candidate == dist(s,v)$, predecessor state is intentionally **not** overwritten.
 
-We start from source **A** (distance 0) and compute distances to all vertices.
+### 5.3.3. Traversal-Policy Impact (Cutoff Publication Law)
+Options geometrically restrict the admissible graph and the publication domain at runtime.
 
-| Step | PQ Contents               | Action                                | Resulting Distances         |
-|:----:|:--------------------------|:--------------------------------------|:----------------------------|
-|  0   | [(A,0)]                   | Initialize: d[A]=0, others=∞         | A=0, B=∞, C=∞, D=∞          |
-|  1   | [(B,2),(C,5)]             | Relax A’s neighbors: B←2, C←5         | B=2, C=5, D=∞              |
-|  2   | [(C,5),(D,3)]             | Pop B(2), relax B→D(3), B→C(2+3=5)    | D=3 (better), C stays 5    |
-|  3   | [(D,3),(C,5)]             | Pop D(3), relax D→C(3+3=6 no change)  | distances unchanged        |
-|  4   | [(C,5)]                   | Pop C(5) - all neighbors processed    | final: A=0, B=2, D=3, C=5   |
+*   **Wall-Threshold Admissibility (`WithInfEdgeThreshold` $\tau$):**
+    $$ E_{\text{admissible}} = \{ e \in E \mid w(e) < \tau \} $$
+    Edges where $w(e) \ge \tau$ are skipped.
+*   **Cutoff Publication Law (`WithMaxDistance` $M$):**
+    Candidate paths $> M$ are not explored. The publication domain enforces:
+    $$ dist_{\text{pub}}(s,v) = \begin{cases} dist(s,v), & \text{if } v \text{ is finalized under effective policy within } M \\ +\infty, & \text{otherwise} \end{cases} $$
 
-#### Go Code Example
+### 5.3.4. Deterministic Tie-Break Law
+Frontier priority is resolved using a secondary lexicographical key:
+$$ Priority(v) = \langle candidateDistance(v), \text{VertexID}(v) \rangle $$
 
-Below is a fully commented Go program using `lvlath/core` and `lvlath/dijkstra`. It builds the graph, runs Dijkstra, prints distances, and reconstructs the shortest path from A to D.
+### 5.3.5. Effective Complexity
+*   **Validation Phase:** Depends on option validation and $O(E \log E)$ graph-surface numeric pre-scans.
+*   **Kernel Phase:** Effective time $\mathcal{O}(V \log V + E \log V + E_{\text{surface}})$. Space $\mathcal{O}(V + E_{\text{heap}})$.
+*   **Result Surface:** `DistanceTo` is $\mathcal{O}(1)$. `PathTo` is $\mathcal{O}(k)$ where $k$ is path length.
 
-```go
-package main
+---
 
-import (
-  "fmt"
+## 5.4. Public API & Result Contract
 
-  "github.com/katalvlaran/lvlath/core"
-  "github.com/katalvlaran/lvlath/dijkstra"
-)
+### 5.4.1. Public Entry Points & Wrapper Semantics
+~~~go
+// 1. Canonical Execution
+func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, error)
 
-func main() {
-  // 1) Create an undirected, weighted graph.
-  g := core.NewGraph(core.WithWeighted()) // core.WithWeighted() enables non-negative edge weights.
+// 2. Convenience Wrappers (Facades over the canonical result model)
+func Distances(g *core.Graph, sourceID string, opts ...Option) (map[string]float64, error)
+func DistanceTo(g *core.Graph, sourceID, targetID string, opts ...Option) (float64, error)
+func ShortestPathTo(g *core.Graph, sourceID, targetID string, opts ...Option) ([]string, float64, error)
+~~~
+*   `Distances(...)` publishes a detached distance map only.
+*   `DistanceTo(...)` is a point-query wrapper for isolated distance checks.
+*   `ShortestPathTo(...)` forces `WithPathTracking` internally and returns one witness.
 
-  // 2) Define the edges of the 4-node graph.
-  //    AddEdge(u, v, w) creates both u→v and v→u in an undirected graph.
-  g.AddEdge("A", "B", 2)
-  g.AddEdge("A", "C", 5)
-  g.AddEdge("B", "D", 1)
-  g.AddEdge("C", "D", 3)
-
-  // 3) Run Dijkstra from source "A", requesting predecessor map.
-  //    WithReturnPath() returns a map of each node's predecessor on the shortest path.
-  dist, prev, _ := dijkstra.Dijkstra(g, dijkstra.Source("A"), dijkstra.WithReturnPath())
-
-  // 4) Print the computed distances from A to each vertex.
-  fmt.Println("Distances from A:")
-  for _, v := range []string{"A", "B", "C", "D"} {
-    fmt.Printf("  %s: %d\n", v, dist[v])
-  }
-
-  // 5) Reconstruct and print the shortest path from A to D.
-  path := []string{"D"} // Start at target D and walk backwards via prev[] until A.
-  for u := prev["D"]; u != ""; u = prev[u] {
-    path = append([]string{u}, path...)
-  }
-  fmt.Println("Path A→D:", path)
+### 5.4.2. Canonical Result Artifact
+~~~go
+type DijkstraResult struct {
+	SourceID  string
+	Distances map[string]float64
+	Prev      map[string]string
 }
-```
-*Complexity:* Time O((V+E) log V), Space O(V+E). This code showcases clear separation of graph construction, algorithm execution, and result interpretation.
+~~~
 
-**Expected Output:**
-```
-Distances from A:
-  A: 0
-  B: 2
-  C: 5
-  D: 3
-Path A→D: [A B D]
-```
-[![Go Playground](https://img.shields.io/badge/Go_Playground-Dijkstra_1-blue?logo=go)](https://go.dev/play/p/81N4Vr_gEXt)
+Field semantics:
+
+* `SourceID` is the explicit source vertex identifier used for the run.
+* `Distances` stores finalized shortest-path costs for the known result domain.
+* `Prev` stores predecessor links only when path tracking is enabled.
+* `Prev == nil` means path tracking was disabled, not that the graph has no reachable paths.
+
+
+### 5.4.3. Target-Domain States
+For a queried vertex, domain membership determines the primary outcome:
+
+| Target State          | Meaning                                        | Result Action                         |
+|:----------------------|:-----------------------------------------------|:--------------------------------------|
+| **Unknown Target**    | Vertex is absent from the result domain.       | Returns `ErrTargetNotFound`           |
+| **Known Reachable**   | Exists in domain, reachable under policy.      | Returns finite `float64`, `nil` error |
+| **Known Unreachable** | Exists in domain, walled off or out-of-bounds. | Returns `+Inf`, `nil` error           |
+
+### 5.4.4. Path-Tracking States
+Path reconstruction depends on a separate, independent axis:
+
+| Tracking State               | Meaning                                 | `PathTo` Action                            |
+|:-----------------------------|:----------------------------------------|:-------------------------------------------|
+| **Enabled (`Prev != nil`)**  | Tracked during kernel run.              | Yields path (if reachable), or `ErrNoPath` |
+| **Disabled (`Prev == nil`)** | Explicitly disabled to save allocation. | Returns `ErrPathTrackingDisabled`          |
 
 ---
 
-### 5.4.2. Example #2: Advanced 10-Node Graph Demonstration
+## 5.5. Options, Numeric & Error Policies
 
-#### ASCII Illustration of the Graph
-```
-      (A)                     (J)
-      / \                     / \
-    5/   \2                 5/   \2
-   (B)─1─(C)               (I)─1─(H)
-    |   / |                 |   / |
-   2|  3  |4               2|  3  |4
-    |/    |                 |/    |
-   (D)─1─(E)───────17──────(F)─1─(G)
-    └──────────19───────────┘       
-```
-- **Vertices:** A, B, C, D, E, F, G, H, I, J (10 total)
-- **Edges (undirected)** with weights: AB=5, AC=2, BC=1, BD=2, CD=3, CE=4, DE=1, DF=19, EF=17, FG=1, FH=3, FI=2, HI=1, HJ=2, IJ=5
-- **Purpose:** Illustrate algorithm traversing two clusters (A–E and F–J) connected by high-weight edges, ensuring Dijkstra picks low-cost paths first and correctly handles "long bridge" edges.
+### 5.5.1. Numeric Policy
+Numeric semantics are part of the public package contract.
 
-#### Step-by-Step Execution Overview
+- All distances and weights are `float64`.
+- The canonical unreachable value is `math.Inf(1)`.
+- `NaN` is forbidden.
+- `-Inf` is forbidden.
+- `+Inf` is valid input data and participates in wall semantics.
 
-| Step | Frontier (min-heap)                | Extracted | Updated Distances                                                               |
-|------|------------------------------------|-----------|---------------------------------------------------------------------------------|
-| 0    | {A:0}                              | -         | d[A]=0                                                                          |
-| 1    | {B:5, C:2}                         | C (2)     | d[C]=2; relax C→B (2+1=3) ⇒ d[B]=3; C→E (2+4=6) ⇒ d[E]=6; C→D (2+3=5) ⇒ d[D]=5  |
-| 2    | {B:3, D:5, E:6}                    | B (3)     | d[B]=3; relax B→D (3+2=5) ties d[D]=5; B→A, B→C already settled                 |
-| 3    | {D:5, E:6, A:∞?*, ...}             | D (5)     | relax D→E (5+1=6) tie d[E]=6; D→F (5+19=24) ⇒ d[F]=24                           |
-| 4    | {E:6, F:24, ...}                   | E (6)     | relax E→F (6+17=23) ⇒ d[F]=23                                                   |
-| 5    | {F:23, ...}                        | F (23)    | relax F→G (23+1=24) ⇒ d[G]=24; F→H (23+3=26) ⇒ d[H]=26; F→I (23+2=25) ⇒ d[I]=25 |
-| 6    | {G:24, H:26, I:25, J:∞?*, ...}     | G (24)    | G has no new relaxations                                                        |
-| 7    | {I:25, H:26, J:∞?*, ...}           | I (25)    | relax I→J (25+5=30) ⇒ d[J]=30; I→H (25+1=26) tie; I→F skip                      |
-| 8    | {H:26, J:30}                       | H (26)    | H→J (26+2=28) improves d[J]=28; H→F skip                                        |
-| 9    | {J:28}                             | J (28)    | no further relaxations                                                          |
+Weight classification law:
+- `math.IsNaN(w)` -> `ErrInvalidWeight`
+- `math.IsInf(w, -1)` -> `ErrInvalidWeight`
+- `w < 0` -> `ErrNegativeWeight`
+- `math.IsInf(w, +1)` -> valid input, handled by traversal policy
 
-> *Vertices with no direct path from the source until necessary remain ∞ (omitted for clarity).
+### 5.5.2. Option Governance
+Options are explicit runtime policy inputs, not hidden mutable state.
 
-**Final distances** from **A**:
-```
-A:0, B:3, C:2, D:5, E:6, F:23, G:24, H:26, I:25, J:28
-```
+- options are applied sequentially,
+- last-writer-wins per field,
+- nil options are invalid,
+- invalid explicit option input fails before traversal begins.
 
-**Complexity for this run:**
-- V=10, E=16 ⇒ heap ops ∼ O((V+E) log V) ≃ O(26·log10).
+Public policy surface:
+~~~go
+WithPathTracking()
+WithMaxDistance(max)
+WithInfEdgeThreshold(threshold)
+~~~
+
+Default runtime policy:
+
+* `TrackPaths       = false`
+* `MaxDistance      = +Inf`
+* `InfEdgeThreshold = +Inf`
+
+Important separation:
+
+* `sourceID` is **not** an option,
+* `sourceID` is an explicit required public API argument.
+
+### 5.5.3. Error Law
+
+Exported sentinels are the single source of truth for protocol matching.
+
+Callers must use:
+
+~~~
+errors.Is(err, ...)
+~~~
+
+and must not parse error strings.
+
+Primary sentinels include:
+
+* `ErrNilGraph`
+* `ErrEmptySourceID`
+* `ErrSourceNotFound`
+* `ErrTargetNotFound`
+* `ErrUnweightedGraph`
+* `ErrNilOption`
+* `ErrBadMaxDistance`
+* `ErrBadInfEdgeThreshold`
+* `ErrNegativeWeight`
+* `ErrInvalidWeight`
+* `ErrPathTrackingDisabled`
+* `ErrNoPath`
+* `ErrEmptyTargetID`
+* `ErrNilResult`
+
+Error-class separation is intentional:
+
+* missing source != missing target,
+* invalid numeric input != negative finite weight,
+* tracking disabled != no path,
+* unknown target != known unreachable target.
+
+When additional context is attached, the sentinel must be preserved with `%w`.
+
+Panic-based option validation is forbidden.
+
+---
 
 
-#### Go Playground Example (Annotated)
-```go
+## 5.6. Determinism Law
+
+Determinism is a package-level contract.
+
+### 5.6.1. Vertex-Domain Initialization
+The known result domain is initialized by iterating:
+~~~go
+g.Vertices()
+~~~
+
+as surfaced by `core.Graph`.
+
+### 5.6.2. Relation Enumeration
+
+Relaxation processes candidate relations in the exact order returned by:
+
+~~~go
+g.Neighbors(u)
+~~~
+
+The package does not inject a second hidden neighbor-sorting layer.
+
+### 5.6.3. Heap Ordering
+
+Equal-distance frontier items are ordered by:
+$$
+(candidateDistance,\ vertexID)
+$$
+
+That means:
+
+* smaller candidate distance wins,
+* equal candidate distance is broken by lexicographically smaller vertex IDs.
+
+### 5.6.4. Strict-Improvement Predecessor Law
+
+Relaxation updates predecessor state only when:
+$$
+candidate < currentDistance
+$$
+
+Equal-cost candidates do **not** overwrite predecessor state.
+
+### 5.6.5. Consequence
+
+For the same:
+
+* graph state,
+* `sourceID`,
+* and runtime policy,
+
+the package publishes stable:
+
+* finalized distances,
+* predecessor selection,
+* and reconstructed path witnesses.
+
+---
+
+
+## 5.7. Algorithmic Architecture & Pseudocode
+
+The implementation utilizes a **Lazy Decrease-Key Min-Heap** bounded by a strict **Visited-Finalization** loop. Duplicates are allowed in the heap; non-authoritative frontier entries are discarded cleanly by the visited-finalization model.
+
+~~~text
+FUNCTION Dijkstra(g, sourceID, opts...):
+
+  Stage 1: Validate Admission
+    - Ensure g != nil, sourceID != "", options are valid.
+    - Pre-scan edge weights: mathematically reject NaN, -Inf, and w < 0.
+    - Fail immediately and publish NOTHING on validation error.
+
+  Stage 2: Initialize Working State
+    - For v in g.Vertices(): distances[v] = +Inf, visited[v] = false
+    - distances[sourceID] = 0
+
+  Stage 3: Seed Frontier
+    - Push (sourceID, distance: 0) into min-heap.
+    - Heap is ordered by (candidateDistance, vertexID).
+
+  Stage 4: Main Visited-Finalization Loop
+    while frontier is not empty:
+      item = frontier.PopMin()
+
+      if visited[item.id]:
+        continue // Discard stale/duplicate entry
+
+      if item.dist > MaxDistance:
+        break // Cutoff applied to the popped minimum terminates exploration!
+
+      visited[item.id] = true
+
+      for each edge in g.Neighbors(item.id):
+        // Endpoint Law: Resolve relative to current vertex
+        nbrID, ok = otherEndpoint(edge, item.id)
+        if not ok or visited[nbrID]:
+          continue
+
+        if edge.Weight >= InfEdgeThreshold:
+          continue // Wall threshold check
+
+        candidate = distances[item.id] + edge.Weight
+
+        if candidate > MaxDistance:
+          continue // Edge cutoff
+
+        // Strict-Improvement Law
+        if candidate < distances[nbrID]:
+          distances[nbrID] = candidate
+          if opts.TrackPaths:
+            Prev[nbrID] = item.id
+          frontier.Push(nbrID, candidate)
+
+  Stage 5: Publish Result
+    - Return detached DijkstraResult ONLY after successful completion.
+~~~
+
+---
+
+## 5.8. ASCII Diagrams: Routing Mechanics
+
+### 5.8.1. Complex 11-Vertex Logistics & Policy Network
+This diagram demonstrates how thresholds, cutoffs, and +Inf semantics interact with a complex topology.
+
+~~~text
+         [Gateway](1) ──2──▶[Hub:N](2) ──3──▶ [Sort:River](4) ──2──▶[City:Aurora](8)
+              │                   │                   │
+              4                   5                   2
+              │                   ▼                   ▼
+              └────────────▶ [Hub:S](3) ──2──▶ [Sort:Valley](5) ──3─▶ [City:Delta](9)
+                                  │                   │
+                     (Wall >= 8) 10                   3
+                                  ▼                   ▼
+                            [Backup:1](6) ──2─▶[City:Ember](10)
+                                  │
+                                  1
+                                  ▼
+                            [Backup:2](7) ──2─▶ [City:Isolated](11)
+~~~
+
+*   **Scenario A (Unlimited):** All vertices reached. `City:Ember` is reached via `Sort:Valley` (Cost: $4+2+3 = 9$).
+*   **Scenario B (`WithInfEdgeThreshold(8.0)`):** `Hub:S -> Backup:1` is a wall. `Backup:1`, `Backup:2`, and `City:Isolated` are now Known but Unreachable (`+Inf`).
+*   **Scenario C (`WithMaxDistance(7.0)`):** `Gateway -> Hub:N -> Sort:River -> City:Aurora` finishes at cost $7.0$. `City:Delta` requires cost $9.0$, which exceeds $7.0$, so it remains `+Inf` (Policy Cutoff).
+
+### 5.8.2. Equal-Cost Determinism
+~~~text
+                [relay:alpha]
+               /             \
+(c=2)         / (c=2)        (c=2)
+             /                  \
+          [start]           [target]
+             \                  /
+(c=2)         \ (c=2)        (c=2)
+               \             /
+                 [relay:beta]
+~~~
+Equal candidate distance to `target` (cost $4$) occurs through both `relay:alpha` and `relay:beta`. The heap tie-break on `VertexID` processes `alpha` first. When `beta` is processed, $4 \not< 4$ (Strict Improvement Law). `Prev` is **not** overwritten. The witness `[start -> relay:alpha -> target]` is universally stable.
+
+### 5.8.3. Endpoint Law on Undirected Storage
+~~~text
+Stored edge record in core.Graph:
+  From: "B", To: "A", Directed: false
+
+Current finalized vertex context in Dijkstra:
+  u = "A"
+
+Wrong interpretation (Silent failure):
+  v = edge.To = "A"   // Incorrectly points back to self
+
+Correct interpretation (lvlath endpoint law):
+  v = otherEndpoint(edge, "A") = "B"
+~~~
+
+### 5.8.4. Result-State Distinctions
+~~~text
+Target query state machine:
+
+  [targetID is empty]
+        -> ErrEmptyTargetID
+
+  [result is nil]
+        -> ErrNilResult
+
+  [target absent from result domain]
+        -> ErrTargetNotFound
+
+  [target known in result domain]
+        |
+        +-- distance is finite
+        |      -> DistanceTo = finite value
+        |      -> HasPathTo  = true
+        |      -> PathTo     = path OR ErrPathTrackingDisabled
+        |
+        +-- distance is +Inf
+               -> DistanceTo = +Inf
+               -> HasPathTo  = false
+               -> PathTo     = ErrNoPath OR ErrPathTrackingDisabled
+
+~~~
+
+---
+
+## 5.9. Go Example Scenarios
+
+The package examples are intentionally scenario-driven, modeling real pipelines: `build -> dijkstra -> consume`.
+
+### 5.9.1. The Unified Master Pipeline (Expanded)
+Demonstrates graph construction, dynamic wall thresholds, rigorous error handling, and stable witness extraction.
+
+~~~go
 package main
 
 import (
 	"fmt"
-	"log"
+	"math"
+	"strings"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dijkstra"
 )
 
 func main() {
-	// 1) Construct an undirected, weighted graph.
-	g := core.NewGraph(core.WithWeighted())
-	// 1.1) Add edges in the first cluster A–E.
-	g.AddEdge("A", "B", 5)
-	g.AddEdge("A", "C", 2)
-	g.AddEdge("B", "C", 1)
-	g.AddEdge("B", "D", 2)
-	g.AddEdge("C", "D", 3)
-	g.AddEdge("C", "E", 4)
-	g.AddEdge("D", "E", 1)
-	// 1.2) Connect clusters via high-weight edges D–F and E–F.
-	g.AddEdge("D", "F", 19)
-	g.AddEdge("E", "F", 17)
-	// 1.3) Build second cluster F–J.
-	g.AddEdge("F", "G", 1)
-	g.AddEdge("F", "H", 3)
-	g.AddEdge("F", "I", 2)
-	g.AddEdge("G", "H", 4)
-	g.AddEdge("H", "I", 1)
-	g.AddEdge("H", "J", 2)
-	g.AddEdge("I", "J", 5)
+	// 1. Build a mixed-edge distribution network.
+	g := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 
-	// 2) Execute Dijkstra from source "A", requesting predecessors.
-	dist, prev, err := dijkstra.Dijkstra(
-		g,
-		dijkstra.Source("A"),
-		dijkstra.WithReturnPath(),
-	)
+	// Explicitly check AddEdge errors in production
+	if _, err := g.AddEdge("gateway", "hub:north", 2.0, core.WithEdgeDirected(true)); err != nil {
+		fmt.Println("Build error:", err)
+		return
+	}
+	g.AddEdge("gateway", "hub:south", 4.0, core.WithEdgeDirected(true))
+	g.AddEdge("hub:north", "sort:river", 3.0, core.WithEdgeDirected(true))
+
+	// Degraded Highway (Cost: 10.0)
+	g.AddEdge("hub:south", "backup:node", 10.0, core.WithEdgeDirected(true))
+	g.AddEdge("backup:node", "city:isolated", 1.0, core.WithEdgeDirected(true))
+
+	// Local Streets (Undirected)
+	g.AddEdge("sort:river", "city:aurora", 2.0, core.WithEdgeDirected(false))
+	g.AddEdge("hub:south", "city:aurora", 4.0, core.WithEdgeDirected(false))
+
+	// 2. Runtime Policy Assembly
+	opts :=[]dijkstra.Option{
+		dijkstra.WithPathTracking(),        // Required for PathTo()
+		dijkstra.WithInfEdgeThreshold(8.0), // The "Wall"
+	}
+
+	// 3. Kernel Execution
+	result, err := dijkstra.Dijkstra(g, "gateway", opts...)
 	if err != nil {
-		log.Fatalf("Dijkstra failed: %v", err)
+		fmt.Println("Traversal failed:", err)
+		return
 	}
 
-	// 3) Print final distances and a sample shortest path to J.
-	fmt.Println("Final distances from A:")
-	for _, v := range []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J"} {
-		fmt.Printf("  %s → %d\n", v, dist[v])
-	}
+	// 4. Result Consumption: Reachable target
+	target := "city:aurora"
+	cost, _ := result.DistanceTo(target)
+	path, _ := result.PathTo(target)
+	fmt.Printf("Route to %s: %s (Cost: %.0f)\n", target, strings.Join(path, " -> "), cost)
 
-	// 4) Reconstruct and print the path from A to J using the predecessor map.
-	path := []string{"J"}
-	for u := prev["J"]; u != ""; u = prev[u] {
-		path = append([]string{u}, path...)
+	// 5. Result Consumption: Unreachable target (+Inf semantics)
+	isolatedTarget := "city:isolated"
+	isolatedCost, _ := result.DistanceTo(isolatedTarget)
+	if math.IsInf(isolatedCost, 1) {
+		fmt.Printf("Target %q is known but walled off by policy (+Inf).\n", isolatedTarget)
 	}
-	fmt.Printf("Shortest path A→J: %v\n", path)
 }
-```
+~~~
 
-**Explanation of key steps:**
-1. **Graph construction** uses `core.NewGraph(core.WithWeighted())` to enable weighted edges.
-2. **Edge additions** are grouped by cluster, highlighting the low-weight core and high-weight "bridge" design.
-3. **Dijkstra invocation**: we pass `dijkstra.Source("A")` to set the source and `WithReturnPath()` to capture the predecessor chain.
-4. **Distance printing** in sorted order shows the algorithm's prioritization of cheap routes before exploring costly bridges.
-5. **Path reconstruction** iterates `prev[v]` until the empty string, yielding the route.
+### 5.9.2. Scenario Capsules
 
-This advanced example showcases how Dijkstra seamlessly handles tightly connected subgraphs and defer exploration of high-cost edges until necessary.
+The package examples are intentionally scenario-driven and follow the same practical pipeline:
 
-[![Playground - Dijkstra](https://img.shields.io/badge/Go_Playground-Dijkstra_2-blue?logo=go)](https://go.dev/play/p/qCvQDTO9Mgm)
+~~~text
+build -> dijkstra -> consume
+~~~
+
+### 1) Logistics Routing
+
+**Story:** central warehouse, hubs, sort centers, and destination cities.
+
+**Demonstrates:**
+
+* `Dijkstra(...)`
+* `WithPathTracking()`
+* `DistanceTo(...)`
+* `PathTo(...)`
+
+**Why it matters:**
+This is the canonical “cost + one deterministic route” workflow.
+
+### 2) Failover Network
+
+**Story:** weighted network routing with degraded links treated as walls.
+
+**Demonstrates:**
+
+* `WithInfEdgeThreshold(...)`
+* known-but-unreachable target state
+* explicit `+Inf` publication
+* `HasPathTo(...)`
+
+### 3) Service Radius Cutoff
+
+**Story:** bounded delivery or field-service radius.
+
+**Demonstrates:**
+
+* `WithMaxDistance(...)`
+* graph path exists, but traversal policy forbids reaching it
+* `+Inf` as a cutoff-induced outcome
+
+### 4) Mixed Transit Graph
+
+**Story:** one-way avenues plus two-way streets in one city graph.
+
+**Demonstrates:**
+
+* `core.WithMixedEdges()`
+* practical mixed-edge routing
+* endpoint-law correctness through a real route
+
+### 5) Equal-Cost Determinism
+
+**Story:** two equal-cost corridors to the same destination.
+
+**Demonstrates:**
+
+* `WithPathTracking()`
+* deterministic witness selection
+* strict-improvement stability under equal-cost competition
+
+
+> The full runnable scenario set lives in `dijkstra/examples_test.go`.
 
 ---
 
-## 5.5. Best Practices & Pitfalls
+## 5.10. Ownership, Concurrency & Partial-Result Laws
 
-* **Validate Input Early:** Ensure your graph is non-nil, weighted, and source vertex exists before running Dijkstra to avoid wasted work and panics.
-* **Enforce Non-Negative Weights:** Dijkstra assumes $$\(w(u,v) \ge 0\)$$ . For graphs with negative edges use Bellman-Ford or Johnson's algorithm.
-* **Skip Stale Queue Entries:** When popping from the min-heap, always compare the extracted distance with the current `dist[u]` and skip if they differ - this implements the lazy decrease-key safely.
-* **Check for Overflow:** For graphs with very large weights, verify that `dist[u] + w` does not overflow the integer type before assignment, or use a saturated arithmetic strategy.
-* **Tune Priority Queue Strategy:** Go’s `container/heap` is an implicit binary heap `(O(log n)` per op). For heavy workloads consider Fibonacci or pairing heaps for amortized `O(1)` decrease-key, or radix heaps for integer weights.
-* **Limit Search Space:** Use `WithMaxDistance()` to bound exploration when you only need distances up to a threshold, reducing work on large graphs.
-* **Leverage Mixed-Edge Support:** With `WithMixedEdges()`, Dijkstra can handle directed and undirected edges in the same graph - ensure you use the direction filter in relaxation to avoid reverse traversal.
-* **Profile Real Data:** Benchmark on realistic graph models (e.g., road networks, social graphs) rather than grids to capture actual performance characteristics and hotspot edges.
-> * Secret Tip - Early Exit for Single-Target: If you only need the shortest path to one destination, break the loop when that vertex is finalized, saving the cost of processing the rest of the graph.
+### 5.10.1. Detached Ownership Law
+Published results are detached and caller-owned.
 
+This means:
+- the package does not retain a live mutable link from `DijkstraResult` back to the graph,
+- the package does not mutate published result maps after return,
+- callers may read, clone, cache, or transform the result after return.
+
+The graph itself remains externally owned by the caller.
+
+### 5.10.2. Concurrency Law
+- concurrent reads through the `core` contract are expected usage,
+- concurrent topology mutation during execution is unsupported,
+- the package does not materialize a snapshot-isolated graph image before traversal.
+
+If correctness and reproducibility matter, graph topology must remain stable for the duration of the call.
+
+### 5.10.3. Partial-Result Suppression Law
+On failure, the package does **not** publish a partial `DijkstraResult`.
+
+Publication rule:
+- validation failure $\implies$ `nil` result + error
+- runtime kernel failure $\implies$ `nil` result + error
+- successful completion $\implies$ detached finalized result publication
+
+A non-nil published `DijkstraResult` therefore means the run completed successfully.
 
 ---
-> Next: [6. Minimum Spanning Trees: Prim & Kruskal →](PRIM_%26_KRUSKAL.md)
+
+## 5.11. Pitfalls & Best Practices (Architectural Mastery)
+
+### 1. Do not parse error strings
+Use `errors.Is` with exported sentinels only.
+String matching is not part of the contract.
+
+### 2. Do not run Dijkstra on negative-weight graphs
+Finite negative weights are mathematically invalid for Dijkstra and are rejected by the package.
+If the domain allows negative weights, switch algorithms rather than forcing this package to answer the wrong question.
+
+### 3. Do not treat `Prev == nil` as “no path exists”
+`Prev == nil` means path tracking was disabled.
+Reachability must be queried independently through the result surface.
+
+### 4. Do not collapse unknown targets and unreachable targets
+These are different operational states:
+- missing target -> `ErrTargetNotFound`
+- known unreachable target -> `+Inf` with `nil` error
+
+### 5. Do not simplify mixed or undirected traversal to `edge.To`
+The effective traversable endpoint must be resolved relative to the current vertex.
+Reducing traversal to `edge.To` breaks endpoint correctness on undirected and mixed-edge graphs.
+
+### 6. Use policy gates instead of topology mutation when the problem is operational
+Use:
+- `WithInfEdgeThreshold(...)` for degraded or impassable links,
+- `WithMaxDistance(...)` for bounded traversal radius or bounded weighted reachability.
+
+Do not mutate graph topology merely to simulate runtime routing policy.
+
+### 7. Keep `+Inf` as semantic data
+Do not rewrite it into synthetic finite sentinels such as `-1` or arbitrary “large” numbers.
+`+Inf` is part of the numeric contract.
+
+### 8. Use convenience wrappers when the consumer only needs a point query
+Use:
+- `DistanceTo(...)` for one-target distance lookup,
+- `ShortestPathTo(...)` when the caller needs one witness and its distance,
+- `Distances(...)` when only the detached distance map is required.
+
+### 9. Keep examples and documentation contract-faithful
+Examples should:
+- use only current public API,
+- keep graph-construction errors explicit,
+- print deterministic ordered output,
+- and avoid implying stronger guarantees than the package actually provides.
+
+---
+
+> Next:[6. Minimum Spanning Trees: Prim & Kruskal ->](PRIM_%26_KRUSKAL.md)

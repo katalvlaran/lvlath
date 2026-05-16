@@ -1,22 +1,17 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix: functional configuration for graph→matrix adapters and
 // numeric policy. This file defines:
 //   - Option / Options (functional options with internal state),
 //   - documented defaults (constants),
-//   - WithX constructors with strong validation (panic on nonsensical values),
+//   - WithX constructors with strong error-first validation,
 //   - gatherOptions helper (internal) that enforces invariants.
 //
 // Design goals:
 //   - Deterministic behavior: no global state, no implicit randomness.
 //   - No dead switches: each flag impacts behavior and is covered by tests.
-//   - Safe by construction: panic only on invalid parameters (programmer error).
-//   - Reusability: ; public APIs consume ...Option.
-//
-// Design goals:
-//   - Deterministic behavior: no global state, no implicit randomness.
-//   - No dead switches: each flag impacts behavior and is covered by tests.
-//   - Safe by construction: panic only on invalid parameters (programmer error).
+//   - Safe by construction: ordinary invalid public input returns errors, not panics.
 //   - Reusability: Options fields are unexported (is internal); public APIs consume ...Option.
 //
 // Notes:
@@ -46,6 +41,8 @@
 //   - distance-policy builders require +Inf off-diagonal for “no path”.
 //   - those builders must allocate Dense with allowInfDistances=true to make Set(+Inf) legal.
 package matrix
+
+import "fmt"
 
 // ---------- Defaults (single source of truth) ----------
 
@@ -91,6 +88,25 @@ const (
 	// (Floyd–Warshall) when true: diag=0, off-diag=+Inf if no path.
 	// IMPORTANT: ToGraph is unsupported under MetricClosure (ErrMatrixNotImplemented).
 	DefaultMetricClosure = false
+
+	// DefaultAllowZeroShape documents the package-wide zero-shape law.
+	//
+	// Contract:
+	//   - 0×0, 0×N, and N×0 matrices are valid structural matrices.
+	//   - Operations that have no elements to scan should return deterministic no-op
+	//     results where mathematically meaningful.
+	//   - Operations requiring sample degrees of freedom may still reject degenerate
+	//     observation counts explicitly.
+	//
+	// Why constant instead of option:
+	//   - Zero-shape validity is a package invariant, not a user preference.
+	//   - Making it configurable would reintroduce split behavior across builders,
+	//     element-wise kernels, and statistics.
+	//
+	// AI-Hints:
+	//   - Do not add WithAllowZeroShape/WithDisallowZeroShape.
+	//   - Use validators to express stronger preconditions locally.
+	DefaultAllowZeroShape = true
 )
 
 // Export policy (AdjacencyMatrix.ToGraph).
@@ -103,24 +119,89 @@ const (
 
 	// DefaultBinaryWeights if true, exported edges get weight=1 (ignores a[i,j]).
 	DefaultBinaryWeights = false
-)
 
-// ---------- Internal panic messages (no magic strings) ----------
-
-const (
-	panicEpsilonInvalid       = "matrix: WithEpsilon: eps must be finite, non-negative"
-	panicEdgeThresholdInvalid = "matrix: WithEdgeThreshold: threshold must be finite"
+	// DefaultPreserveZeroWeights controls whether all-zero weighted input is preserved
+	// as real zero-weight edges instead of being auto-degraded to binary adjacency.
+	//
+	// false preserves the historical adapter behavior:
+	// weighted-looking input with only zero weights is treated as effectively unweighted.
+	// true forces +Inf-as-no-edge encoding so finite 0 remains a real edge weight.
+	DefaultPreserveZeroWeights = false
 )
 
 // ---------- Public option type (functional) ----------
 
-// Option mutates internal options. Safe to apply repeatedly (idempotent).
-// Constructors MUST panic only on nonsensical values (programmer error).
-type Option func(*Options)
+// Option mutates matrix Options during deterministic option assembly.
+//
+// What:
+// - Option is the public configuration setter type for matrix facades.
+//
+// Why:
+// - It makes contract-changing behavior explicit and testable.
+//
+// Implementation:
+// - gatherOptions applies options left-to-right.
+// - Each Option validates its own public input and returns a sentinel-preserving error.
+// - Ordinary invalid public inputs must return errors, not panic.
+//
+// Inputs:
+// - *Options: non-nil policy object owned by gatherOptions.
+//
+// Returns:
+// - nil on success.
+// - Sentinel-preserving error on invalid option input.
+//
+// Errors:
+// - ErrNaNInf: NaN or forbidden infinity in numeric option arguments.
+// - ErrOutOfRange: negative epsilon/threshold or other invalid numeric range.
+// - ErrNilOption: returned by gatherOptions when an option slot is nil.
+//
+// Determinism:
+// - Option application order is stable and equals call order.
+//
+// Complexity:
+// - O(1) per option.
+//
+// AI-Hints:
+// - Never reintroduce panic-based option validation.
+// - Keep options local: mutate only the provided *Options.
+type Option func(*Options) error
 
-// Options stores the effective configuration after applying Option setters.
-// It is intentionally unexported to prevent external mutation; public entry
-// points accept `...Option` and internally resolve them via gatherOptions.
+// Options stores matrix construction, graph-adapter, numeric, and export policy.
+//
+// What:
+//   - Options is the frozen policy object produced by gatherOptions/NewMatrixOptions.
+//   - It controls numeric validation, graph directionality, edge handling,
+//     weight encoding, metric-closure behavior, and threshold-based graph export.
+//
+// Why:
+// - Matrix builders and adapters need one deterministic source of policy.
+// - Public facades must not reinvent option semantics locally.
+//
+// Implementation:
+// - Options values are assembled by applying Option values left-to-right.
+// - finalizeOptions resolves derived invariants once after all user options apply.
+//
+// Behavior highlights:
+// - Zero value is not the public default contract; use gatherOptions/NewMatrixOptions.
+// - Fields are intentionally unexported to prevent partial, unfinalized policies.
+// - metricClose forces allowInfDistances because +Inf is required for "no path".
+// - binaryWeights and keepWeights are mutually exclusive after finalization.
+//
+// Numeric policy:
+//   - validateNaNInf controls ordinary Dense value validation.
+//   - allowInfDistances allows +Inf only in distance/metric-closure contexts;
+//     it does not authorize NaN or -Inf as valid numeric payloads.
+//
+// Weight policy:
+// - keepWeights=true means graph weights are preserved where the builder contract allows it.
+// - binaryWeights=true means topology is encoded as binary presence.
+// - finalizeOptions preserves last-writer-wins between WithKeepWeights and WithBinaryWeights.
+//
+// AI-Hints:
+// - Do not construct Options manually in production code.
+// - Do not bypass finalizeOptions in tests; use gatherOptions or NewMatrixOptions.
+// - Do not use panic for option validation.
 type Options struct {
 	// numeric policy
 	eps               float64 // >= 0; DefaultEpsilon
@@ -134,10 +215,16 @@ type Options struct {
 	weighted    bool // DefaultWeighted
 	metricClose bool // DefaultMetricClosure
 
+	// preserveZeroWeights forces weighted adjacency to preserve finite zero weights.
+	// When true, builders use +Inf as the no-edge sentinel whenever zero weights
+	// would otherwise be ambiguous.
+	preserveZeroWeights bool
+
 	// export policy (ToGraph)
-	edgeThreshold float64 // DefaultEdgeThreshold
-	keepWeights   bool    // DefaultKeepWeights
-	binaryWeights bool    // DefaultBinaryWeights
+	edgeThreshold    float64 // DefaultEdgeThreshold
+	edgeThresholdSet bool    // true when WithEdgeThreshold was explicitly provided
+	keepWeights      bool    // DefaultKeepWeights
+	binaryWeights    bool    // DefaultBinaryWeights
 }
 
 // ---------- Constructors (WithX) ----------
@@ -148,7 +235,7 @@ type Options struct {
 //   - Stage 2: return a setter that writes eps into Options.
 //
 // Behavior highlights:
-//   - Strict validation in constructor; panics on nonsensical values.
+//   - Error-first validation; nonsensical values are rejected by the returned Option.
 //
 // Inputs:
 //   - eps: non-negative finite tolerance.
@@ -157,7 +244,8 @@ type Options struct {
 //   - Option: functional setter.
 //
 // Errors:
-//   - Panics with a stable message when eps is invalid.
+//   - ErrNaNInf: eps is NaN or ±Inf.
+//   - ErrOutOfRange: eps < 0.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
@@ -168,13 +256,22 @@ type Options struct {
 //
 // AI-Hints:
 //   - Prefer small positive eps (e.g., 1e-9) for double-precision data or unless dealing with noisy data.
+//   - Zero epsilon is allowed and means exact comparison where the consuming
+//     operation supports tolerance.
 func WithEpsilon(eps float64) Option {
-	if isNonFinite(eps) || eps < 0 {
-		panic(panicEpsilonInvalid)
-	}
+	return func(o *Options) error {
+		if isNonFinite(eps) {
+			return fmt.Errorf("matrix: WithEpsilon(%v): %w", eps, ErrNaNInf)
+		}
+		if eps < 0 {
+			return fmt.Errorf("matrix: WithEpsilon(%v): %w", eps, ErrOutOfRange)
+		}
 
-	// Assign validated epsilon
-	return func(o *Options) { o.eps = eps }
+		// Assign validated epsilon
+		o.eps = eps
+
+		return nil
+	}
 }
 
 // WithValidateNaNInf enables strict finite-value validation.
@@ -199,8 +296,13 @@ func WithEpsilon(eps float64) Option {
 //   - Keep this enabled in data-clean pipelines; disable only when ingesting
 //     external data with known ±Inf placeholders and sanitizing later or in controlled experiments.
 //   - Combine with WithAllowInfDistances for APSP.
+//   - Do not use this option to validate distance matrices alone; distance
+//     semantics also require shape/diagonal checks.
 func WithValidateNaNInf() Option {
-	return func(o *Options) { o.validateNaNInf = true }
+	return func(o *Options) error {
+		o.validateNaNInf = true
+		return nil
+	}
 }
 
 // WithNoValidateNaNInf disables NaN/Inf validation (use with care).
@@ -209,6 +311,8 @@ func WithValidateNaNInf() Option {
 //
 // Behavior highlights:
 //   - Allows ±Inf/NaN to pass through on newly created matrices.
+//   - This is an explicit expert mode.
+//   - It should be reserved for trusted numeric pipelines or external validation.
 //
 // Returns:
 //   - Option: functional setter.
@@ -221,8 +325,13 @@ func WithValidateNaNInf() Option {
 //
 // AI-Hints:
 //   - Combine with data sanitization ops (ReplaceInfNaN, Clip) if you disable checks.
+//   - Do not use this as a shortcut for distance matrices; prefer
+//     WithAllowInfDistances/WithMetricClosure when +Inf is semantically required.
 func WithNoValidateNaNInf() Option {
-	return func(o *Options) { o.validateNaNInf = false }
+	return func(o *Options) error {
+		o.validateNaNInf = false
+		return nil
+	}
 }
 
 // WithAllowInfDistances permits +Inf entries to represent “no path” in distance-policy matrices.
@@ -230,7 +339,9 @@ func WithNoValidateNaNInf() Option {
 //   - Stage 1: set allowInfDistances=true.
 //
 // Behavior highlights:
-//   - Does NOT imply “allow NaN”: if ValidateNaNInf is enabled, NaN and -Inf are still rejected.
+//   - Allows +Inf where the Dense value policy supports distance matrices.
+//   - Does not make NaN valid.
+//   - Does not make -Inf valid.
 //
 // Returns:
 //   - Option: functional setter.
@@ -249,8 +360,12 @@ func WithNoValidateNaNInf() Option {
 //
 // AI-Hints:
 //   - Use together with WithMetricClosure or APSP builders.
+//   - Use for shortest-path/distance matrices, not for arbitrary Dense payloads.
 func WithAllowInfDistances() Option {
-	return func(o *Options) { o.allowInfDistances = true }
+	return func(o *Options) error {
+		o.allowInfDistances = true
+		return nil
+	}
 }
 
 // WithDisallowInfDistances disables +Inf-permission mode (default).
@@ -258,15 +373,24 @@ func WithAllowInfDistances() Option {
 //   - Stage 1: set allowInfDistances=false.
 //
 // Behavior highlights:
-//   - If ValidateNaNInf is enabled, all infinities are rejected.
+//   - This is the default.
+//   - If WithMetricClosure is also present, finalizeOptions re-enables +Inf
+//     because metric closure needs +Inf for missing paths.
 //
 // Returns:
 //   - Option: functional setter.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not expect this option to override WithMetricClosure; metric closure has
+//     a stronger derived invariant.
 func WithDisallowInfDistances() Option {
-	return func(o *Options) { o.allowInfDistances = false }
+	return func(o *Options) error {
+		o.allowInfDistances = false
+		return nil
+	}
 }
 
 // WithDirected builds directed adjacency/incidence (no mirroring).
@@ -287,10 +411,14 @@ func WithDisallowInfDistances() Option {
 //   - For export, undirected is inferred; no separate public toggle required.
 //
 // AI-Hints:
+//   - This controls adapter interpretation, not Dense storage layout.
 //   - Use WithUndirected for mirrored graphs without asymmetric weights.
 //   - Combine with AllowMulti/AllowLoops explicitly for reproducibility.
 func WithDirected() Option {
-	return func(o *Options) { o.directed = true }
+	return func(o *Options) error {
+		o.directed = true
+		return nil
+	}
 }
 
 // WithUndirected builds undirected adjacency/incidence (mirror [u,v]→[v,u], except loops).
@@ -312,8 +440,13 @@ func WithDirected() Option {
 // AI-Hints:
 //   - Prefer undirected for symmetric datasets; pair with Weighted as needed.
 //   - In undirected mode, multi-edge deduplication normalizes pair keys.
+//   - Undirected builders may mirror adjacency entries where the source edge
+//     policy permits it.
 func WithUndirected() Option {
-	return func(o *Options) { o.directed = false }
+	return func(o *Options) error {
+		o.directed = false
+		return nil
+	}
 }
 
 // WithAllowMulti includes parallel edges in the ingestion phase.
@@ -338,8 +471,13 @@ func WithUndirected() Option {
 // AI-Hints:
 //   - Prefer disallowing multi unless your pipeline requires parallel edges.
 //   - If you need strict first-edge semantics, use WithDisallowMulti.
+//   - The exact merge/overwrite semantics belong to the consuming builder/exporter;
+//     this option only enables the domain policy.
 func WithAllowMulti() Option {
-	return func(o *Options) { o.allowMulti = true }
+	return func(o *Options) error {
+		o.allowMulti = true
+		return nil
+	}
 }
 
 // WithDisallowMulti enforces "first-edge-wins" de-duplication.
@@ -363,8 +501,12 @@ func WithAllowMulti() Option {
 //
 // AI-Hints:
 //   - Prefer this when ingest order is meaningful (ETL pipelines).
+//   - Keep this default for deterministic simple-graph exports.
 func WithDisallowMulti() Option {
-	return func(o *Options) { o.allowMulti = false }
+	return func(o *Options) error {
+		o.allowMulti = false
+		return nil
+	}
 }
 
 // WithAllowLoops includes self-loops (u==v) during ingestion.
@@ -386,7 +528,10 @@ func WithDisallowMulti() Option {
 // AI-Hints:
 //   - Enable when loops carry semantic meaning (e.g., self-transitions).
 func WithAllowLoops() Option {
-	return func(o *Options) { o.allowLoops = true }
+	return func(o *Options) error {
+		o.allowLoops = true
+		return nil
+	}
 }
 
 // WithDisallowLoops ignores self-loops during ingestion.
@@ -408,7 +553,10 @@ func WithAllowLoops() Option {
 // AI-Hints:
 //   - Pairs well with binary adjacency for structural analyses.
 func WithDisallowLoops() Option {
-	return func(o *Options) { o.allowLoops = false }
+	return func(o *Options) error {
+		o.allowLoops = false
+		return nil
+	}
 }
 
 // WithWeighted preserves actual edge weights if the input graph is weighted.
@@ -426,14 +574,24 @@ func WithDisallowLoops() Option {
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - If the source graph has only zeros, builders may promote to binary 1s
-//     to avoid an all-zero adjacency.
+//   - In auto mode, all-zero weighted-looking input may degrade to binary adjacency
+//     to preserve historical unweighted core-graph adapter behavior.
+//   - Use WithPreserveZeroWeights when zero is a meaningful edge weight and must
+//     survive adjacency construction/export.
 //   - Incidence ignoring weights is intentional and documented; see file header.
 //
 // AI-Hints:
+//   - Mixed zero/non-zero weighted input is preserved automatically by +Inf no-edge encoding.
+//   - All-zero weighted graphs require WithPreserveZeroWeights to avoid auto-degrade.
 //   - Combine with MetricClosure to obtain distance matrices (APSP) from weights.
+//   - Prefer WithKeepWeights in code that talks specifically about adjacency
+//     encoding; prefer WithWeighted in graph-domain examples.
 func WithWeighted() Option {
-	return func(o *Options) { o.weighted = true }
+	return func(o *Options) error {
+		o.weighted = true
+
+		return nil
+	}
 }
 
 // WithUnweighted forces binary adjacency/incidence (unit weights).
@@ -455,8 +613,73 @@ func WithWeighted() Option {
 //
 // AI-Hints:
 //   - Pair with DisallowMulti for clean simple graphs.
+//   - This is a policy choice, not a fallback from invalid weights.
 func WithUnweighted() Option {
-	return func(o *Options) { o.weighted = false }
+	return func(o *Options) error {
+		o.weighted = false
+		o.preserveZeroWeights = false
+
+		return nil
+	}
+}
+
+// WithPreserveZeroWeights forces weighted adjacency builders to preserve zero-weight edges.
+//
+// Implementation:
+//   - Stage 1: set weighted=true because zero-weight preservation is meaningful
+//     only in weighted adjacency.
+//   - Stage 2: set preserveZeroWeights=true.
+//
+// Behavior highlights:
+//   - Mixed zero/non-zero weighted input is already preserved automatically.
+//   - This option is primarily needed for all-zero weighted graphs, where auto mode
+//     would otherwise degrade to binary adjacency.
+//   - Builders use +Inf as the no-edge sentinel so finite 0 remains an edge weight.
+//
+// Returns:
+//   - Option: functional setter.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Incidence matrices ignore weights by design; this option affects adjacency builders.
+//
+// AI-Hints:
+//   - Use this when 0 is a real domain weight, not an absent edge.
+//   - Do not use NaN/-Inf sentinels to preserve zero weights.
+func WithPreserveZeroWeights() Option {
+	return func(o *Options) error {
+		o.weighted = true
+		o.preserveZeroWeights = true
+		return nil
+	}
+}
+
+// WithAutoZeroWeights restores the default all-zero auto-degrade behavior.
+//
+// Implementation:
+//   - Stage 1: set preserveZeroWeights=false.
+//   - Stage 2: leave weighted unchanged; callers may still choose weighted/unweighted separately.
+//
+// Behavior highlights:
+//   - In weighted adjacency, all-zero edge lists may be treated as effectively unweighted.
+//   - Mixed zero/non-zero input remains preserved automatically.
+//
+// Returns:
+//   - Option: functional setter.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - This is the compatibility mode. Use WithPreserveZeroWeights for exact
+//     all-zero weighted graphs.
+func WithAutoZeroWeights() Option {
+	return func(o *Options) error {
+		o.preserveZeroWeights = false
+		return nil
+	}
 }
 
 // WithMetricClosure converts adjacency into all-pairs shortest-path distances via Floyd–Warshall (APSP).
@@ -486,7 +709,10 @@ func WithUnweighted() Option {
 // AI-Hints:
 //   - Prefer APSPFromAdjacency for convenience if available at API level.
 func WithMetricClosure() Option {
-	return func(o *Options) { o.metricClose = true }
+	return func(o *Options) error {
+		o.metricClose = true
+		return nil
+	}
 }
 
 // WithEdgeThreshold sets threshold for ToGraph export (a[i,j] > t ⇒ edge).
@@ -503,22 +729,34 @@ func WithMetricClosure() Option {
 //   - Option: functional setter.
 //
 // Errors:
-//   - Panics with a stable message when t is invalid.
+//   - ErrNaNInf: t is NaN or ±Inf.
+//   - ErrOutOfRange: t < 0.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - Choose t around half the unit if using binary adjacency (e.g., 0.5).
+//   - In classic 0-as-no-edge adjacency, threshold is always applied.
+//   - In +Inf-as-no-edge weighted adjacency, the default threshold is not used
+//     to erase finite zero-weight edges. Threshold filtering is applied only
+//     when the caller explicitly provides WithEdgeThreshold.
 //
 // AI-Hints:
 //   - For weighted graphs, pick a domain-relevant cutoff.
+//   - Threshold controls export/presence decisions; it is not a numeric sanitizer.
 func WithEdgeThreshold(t float64) Option {
-	if isNonFinite(t) {
-		panic(panicEdgeThresholdInvalid)
-	}
+	return func(o *Options) error {
+		if isNonFinite(t) {
+			return fmt.Errorf("matrix: WithEdgeThreshold(%v): %w", t, ErrNaNInf)
+		}
+		if t < 0 {
+			return fmt.Errorf("matrix: WithEdgeThreshold(%v): %w", t, ErrOutOfRange)
+		}
+		o.edgeThreshold = t
+		o.edgeThresholdSet = true
 
-	return func(o *Options) { o.edgeThreshold = t }
+		return nil
+	}
 }
 
 // WithKeepWeights keeps numeric weights on ToGraph export (weight=a[i,j]).
@@ -526,7 +764,8 @@ func WithEdgeThreshold(t float64) Option {
 //   - Stage 1: set keepWeights=true and binaryWeights=flase.
 //
 // Behavior highlights:
-//   - Edge weights reflect matrix entries.
+//   - Explicitly disables binary weight encoding.
+//   - Last-writer-wins against WithBinaryWeights.
 //
 // Returns:
 //   - Option: functional setter.
@@ -539,10 +778,14 @@ func WithEdgeThreshold(t float64) Option {
 //
 // AI-Hints:
 //   - Set an appropriate EdgeThreshold to filter weak links.
+//   - Do not remove the explicit binaryWeights=false assignment; it is what makes
+//     last-writer-wins deterministic before finalizeOptions.
 func WithKeepWeights() Option {
-	return func(o *Options) {
+	return func(o *Options) error {
 		o.keepWeights = true
 		o.binaryWeights = false
+
+		return nil
 	}
 }
 
@@ -553,6 +796,8 @@ func WithKeepWeights() Option {
 //
 // Behavior highlights:
 //   - Edges become unweighted on export, irrespective of matrix entries.
+//   - Explicitly disables weight preservation.
+//   - Last-writer-wins against WithKeepWeights.
 //
 // Returns:
 //   - Option: functional setter.
@@ -565,10 +810,14 @@ func WithKeepWeights() Option {
 //
 // AI-Hints:
 //   - Pair with a threshold to sparsify exports.
+//   - This is not a fallback for invalid weighted data; it is an explicit topology
+//     encoding mode.
 func WithBinaryWeights() Option {
-	return func(o *Options) {
+	return func(o *Options) error {
 		o.binaryWeights = true
 		o.keepWeights = false
+
+		return nil
 	}
 }
 
@@ -592,33 +841,36 @@ func WithBinary() Option { return WithBinaryWeights() }
 
 // NewMatrixOptions resolves option setters against documented defaults.
 // Implementation:
-//   - Stage 1: start from defaultOptions() (single source of truth).
-//   - Stage 2: apply opt in order; last-writer-wins semantics.
-//   - Stage 3: return the internal Options value.
-//
-// Behavior highlights:
-//   - Pure function; no side effects beyond producing a value.
+// - Delegates to gatherOptions.
+// - Does not add alternative defaults or conflict rules.
 //
 // Inputs:
-//   - opts: zero or more functional setters.
+// - opts: zero or more Option values.
 //
 // Returns:
-//   - Options: internal struct with effective configuration.
+// - Options: finalized policy on success.
+// - error: nil on success, otherwise sentinel-preserving failure.
+//
+// Errors:
+// - ErrNilOption: nil option slot.
+// - ErrNaNInf / ErrOutOfRange: invalid numeric option arguments.
 //
 // Determinism:
-//   - Stable for a given sequence of opts.
+// - Same as gatherOptions.
 //
 // Complexity:
-//   - Time O(k), Space O(1) for k=len(opts).
+// - Time O(len(opts)), Space O(1).
 //
 // Notes:
 //   - Most public entry points accept ...Option and call gatherOptions.
 //   - The resulting Options is intended for internal consumption by builders.
 //
 // AI-Hints:
+//   - Callers must check the returned error; no panic/recover workflow is part
+//     of the public contract.
 //   - Compose options close to the adapter call-site for clarity.
 //   - Group related flags together (e.g., Directed + DisallowMulti).
-func NewMatrixOptions(opts ...Option) Options {
+func NewMatrixOptions(opts ...Option) (Options, error) {
 	return gatherOptions(opts...)
 }
 
@@ -655,6 +907,8 @@ func defaultOptions() Options {
 		weighted:    DefaultWeighted,
 		metricClose: DefaultMetricClosure,
 
+		preserveZeroWeights: DefaultPreserveZeroWeights,
+
 		// export policy
 		edgeThreshold: DefaultEdgeThreshold,
 		keepWeights:   DefaultKeepWeights,
@@ -670,36 +924,44 @@ func defaultOptions() Options {
 // gatherOptions applies user-provided Option setters on top of defaults and
 // finalizes derived invariants (e.g., export 'undirected' = !build.directed).
 // This is the canonical internal entry in api/impl layers.
+//   - Builds the canonical runtime policy used by matrix facades and kernels.
+//   - Prevents duplicated option defaults, conflict rules, and validation branches.
+//
 // Implementation:
-//   - Stage 1: start from defaultOptions().
-//   - Stage 2: apply setters in order (last-writer-wins).
-//   - Stage 3: derive export.undirected = !build.directed.
+//   - Stage 1: Install default policy.
+//   - Stage 2: Reject nil Option values before invocation.
+//   - Stage 3: Apply all options left-to-right.
+//   - Stage 4: Finalize derived invariants once.
+//   - Stage 5: Return the frozen policy.
 //
 // Behavior highlights:
-//   - Derivations in one place prevent drift across call sites.
-//     -
-//   - Centralized point ensuring internal invariants before builder use.
+//   - No panic path for ordinary public input.
+//   - The first invalid option aborts assembly.
+//   - On error, the returned Options value must be ignored.
 //
 // Inputs:
-//   - user: sequence of Option setters.
+//   - user: zero or more public Option values.
 //
 // Returns:
-//   - Options: fully resolved configuration, with derived 'undirected' set accordingly.
+//   - Options: finalized policy on success.
+//   - error: nil on success, otherwise sentinel-preserving failure.
+//
+// Errors:
+//   - ErrNilOption: if any option value is nil.
+//   - ErrNaNInf / ErrOutOfRange: from numeric option setters.
 //
 // Determinism:
-//   - Stable for a given sequence of setters.
+//   - Stable left-to-right application.
+//   - Stable last-writer-wins for directly conflicting setters, except derived
+//     invariants enforced by finalizeOptions.
 //
 // Complexity:
-//   - Time O(k), Space O(1) for k=len(user).
-//
-// Notes:
-//   - Builders may ignore Weighted for incidence (sign-based).
-//   - MetricClosure triggers APSP in adjacency builder only.
-//   - If future export needs a distinct undirected toggle, set it here.
+//   - Time O(len(user)), Space O(1).
 //
 // AI-Hints:
-//   - Prefer gatherOptions(...) over ad-hoc defaulting in callers.
-func gatherOptions(user ...Option) Options {
+//   - All public matrix functions accepting opts ...Option should call gatherOptions
+//     exactly once near the top of the facade.
+func gatherOptions(user ...Option) (Options, error) {
 	o := Options{
 		// numeric policy
 		eps:               DefaultEpsilon,
@@ -713,27 +975,40 @@ func gatherOptions(user ...Option) Options {
 		weighted:    DefaultWeighted,
 		metricClose: DefaultMetricClosure,
 
+		preserveZeroWeights: DefaultPreserveZeroWeights,
+
 		// export policy
 		edgeThreshold: DefaultEdgeThreshold,
 		keepWeights:   DefaultKeepWeights,
 		binaryWeights: DefaultBinaryWeights,
 	}
-	for _, set := range user {
-		set(&o) // apply in order; last-writer-wins semantics
+
+	for i, opt := range user {
+		if opt == nil {
+			return Options{}, fmt.Errorf("matrix: option #%d: %w", i, ErrNilOption)
+		}
+		if err := opt(&o); err != nil { // apply in order; last-writer-wins semantics
+			return Options{}, err
+		}
 	}
 
 	finalizeOptions(&o)
-
-	return o
+	return o, nil
 }
 
 // finalizeOptions enforces derived invariants in exactly one place.
+//
 // Implementation:
-//   - Stage 1: Derive distance-policy requirements (MetricClosure ⇒ allowInfDistances).
-//   - Stage 2: Normalize export weight-mode flags into a single consistent state.
+//   - Metric closure requires +Inf as "no path", so it forces allowInfDistances.
+//   - binaryWeights and keepWeights are mutually exclusive.
+//   - Last explicit writer is preserved by the setters themselves; this function
+//     only enforces the final invariant.
 //
 // Behavior highlights:
-//   - Centralized invariant enforcement prevents drift across call sites.
+//   - No validation.
+//   - No allocation.
+//   - No panic.
+//   - Does not silently enable metric closure or binary mode.
 //
 // Inputs:
 //   - o: pointer to Options to normalize.
@@ -755,14 +1030,18 @@ func gatherOptions(user ...Option) Options {
 //
 // AI-Hints:
 //   - If you add a new option that implies others, encode that implication here (single source of truth).
+//   - Do not duplicate this logic inside builders.
+//   - Do not remove the keepWeights/binaryWeights reconciliation branch.
 func finalizeOptions(o *Options) {
-	// Distance-policy requires +Inf as “no path”.
-	if o.metricClose {
-		o.allowInfDistances = true
-	}
 	// If metric closure is requested, the distance policy must allow +Inf sentinels.
 	if o.metricClose {
 		o.allowInfDistances = true
+	}
+
+	// Zero-weight preservation is only meaningful in weighted adjacency.
+	// If a later option forced unweighted mode, clear the preservation flag.
+	if !o.weighted {
+		o.preserveZeroWeights = false
 	}
 
 	// Export weight mode must be internally consistent.

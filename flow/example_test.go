@@ -25,7 +25,7 @@ import (
 // Playground: [![Playground - FordFulkerson](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/1EPGX8HQ4qC)
 func ExampleFordFulkerson_complex() {
 	// 1. Create a directed, weighted graph.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	// 2. Add all edges with their capacities.
 	_, _ = g.AddEdge("S", "A", 5)  // from source to A
@@ -61,7 +61,7 @@ func ExampleFordFulkerson_complex() {
 // Playground: [![Playground - EdmondsKarp](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/hgGauPZZOcV)
 func ExampleEdmondsKarp_complex() {
 	// Build the identical graph as above.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("S", "A", 5)
 	_, _ = g.AddEdge("S", "C", 15)
 	_, _ = g.AddEdge("A", "B", 8)
@@ -95,7 +95,7 @@ func ExampleEdmondsKarp_complex() {
 // Playground: [![Playground - Dinic](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/lnq6XOgGUBn)
 func ExampleDinic_complex() {
 	// Construct the same directed, weighted graph.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("S", "A", 5)
 	_, _ = g.AddEdge("S", "C", 15)
 	_, _ = g.AddEdge("A", "B", 8)

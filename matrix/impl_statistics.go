@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package: matrix
 //
 // Purpose:
@@ -17,7 +19,14 @@
 // Determinism & Performance:
 //   - Fixed i→j traversal for all explicit loops.
 //   - Dense fast-paths avoid At/Set and operate on row-major flat buffers.
-//   - Zero-size matrices (0×N or N×0) are treated as no-ops for centering/normalization.
+//
+// Zero-shape law:
+//   - 0×0, 0×N, and N×0 are valid structural matrices.
+//   - Centering and row normalization treat zero-shape inputs as no-op transforms
+//     and return correctly-sized metadata slices.
+//   - Covariance/correlation return 0×0 for zero-feature inputs (c==0).
+//   - Covariance/correlation still require r>=2 when c>0 because sample statistics
+//     need one degree of freedom.
 //
 // AI-Hints:
 //   - Prefer passing *Dense to unlock flat-slice fast paths.
@@ -36,6 +45,20 @@ const (
 	opCovariance      = "Covariance"
 	opCorrelation     = "Correlation"
 )
+
+// statsDegenerateRowScale is the neutral scale factor for rows whose norm is exactly zero.
+//   - A zero-norm row cannot be normalized to unit norm.
+//   - The least surprising stable policy is to leave it unchanged.
+//   - Using 1 avoids accidental mutation and keeps zero rows zero.
+//
+// Notes:
+//   - This is a package policy constant, not an option.
+//   - Making this configurable would split normalization semantics across callers.
+//
+// AI-Hints:
+//   - Do not replace with 0: that would silently erase non-empty rows if a future
+//     norm policy classifies a row as degenerate for tolerance reasons.
+const statsDegenerateRowScale = 1.0
 
 // centerColumns subtracts the per-column mean from every element (column-wise centering).
 // Implementation:
@@ -79,6 +102,10 @@ func centerColumns(X Matrix) (Matrix, []float64, error) {
 	r, c := X.Rows(), X.Cols()
 	means := make([]float64, c) // always return correct length for callers
 	if r == 0 || c == 0 {
+		// Zero-shape law:
+		//   - 0×N has N column means, all vacuously 0.
+		//   - N×0 has no columns and therefore no means.
+		//   - The matrix itself is returned because there are no elements to transform.
 		return X, means, nil
 	}
 
@@ -167,6 +194,10 @@ func centerRows(X Matrix) (Matrix, []float64, error) {
 	r, c := X.Rows(), X.Cols()
 	means := make([]float64, r) // correct length for row means
 	if r == 0 || c == 0 {
+		// Zero-shape law:
+		//   - 0×N has no rows and therefore no row means.
+		//   - N×0 has N row means, all vacuously 0.
+		//   - The matrix itself is returned because there are no elements to transform.
 		return X, means, nil
 	}
 
@@ -250,17 +281,22 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 	r, c := X.Rows(), X.Cols()
 	norms := make([]float64, r)
 	if r == 0 || c == 0 {
+		// Zero-shape law:
+		//   - 0×N has no row norms.
+		//   - N×0 has N row norms, all vacuously 0.
+		//   - The matrix itself is returned because there are no elements to scale.
 		return X, norms, nil
 	}
 
 	// Stage 2 (Execute): compute L1 norms per row.
-	var i, j int
+	var i, j, base int
 	var s, v float64
+	var err error
 
 	if d, ok := X.(*Dense); ok {
 		for i = 0; i < r; i++ {
 			s = 0.0
-			base := i * c
+			base = i * c
 			for j = 0; j < c; j++ {
 				v = d.data[base+j]
 				if v < 0 {
@@ -271,7 +307,6 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 			norms[i] = s
 		}
 	} else {
-		var err error
 		for i = 0; i < r; i++ {
 			s = 0.0
 			for j = 0; j < c; j++ {
@@ -288,13 +323,16 @@ func normalizeRowsL1(X Matrix) (Matrix, []float64, error) {
 		}
 	}
 
-	// Stage 3 (Prepare scales): 1/norm for normal rows; 1 for degenerate rows (leave unchanged).
+	// Stage 3 (Prepare scales):
+	//   - positive finite norm => scale by 1/norm;
+	//   - exact zero norm      => leave the row unchanged;
+	//   - non-finite norm      => error, because NaN/Inf is invalid data or overflow,
+	//                             not a legitimate degenerate row.
 	scale := make([]float64, r)
 	for i = 0; i < r; i++ {
-		if norms[i] > 0 {
-			scale[i] = 1.0 / norms[i]
-		} else {
-			scale[i] = 1.0 // preserves the row exactly (avoids "zeroing" underflow rows)
+		scale[i], err = rowNormScale(norms[i])
+		if err != nil {
+			return nil, nil, matrixErrorf(opNormalizeRowsL1, err)
 		}
 	}
 
@@ -339,12 +377,17 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 	r, c := X.Rows(), X.Cols()
 	norms := make([]float64, r)
 	if r == 0 || c == 0 {
+		// Zero-shape law:
+		//   - 0×N has no row norms.
+		//   - N×0 has N row norms, all vacuously 0.
+		//   - The matrix itself is returned because there are no elements to scale.
 		return X, norms, nil
 	}
 
 	// Stage 2 (Execute): compute L2 norms per row.
 	var i, j int
 	var sq, v float64
+	var err error
 
 	if d, ok := X.(*Dense); ok {
 		for i = 0; i < r; i++ {
@@ -357,7 +400,6 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 			norms[i] = math.Sqrt(sq)
 		}
 	} else {
-		var err error
 		for i = 0; i < r; i++ {
 			sq = 0.0
 			for j = 0; j < c; j++ {
@@ -371,13 +413,16 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 		}
 	}
 
-	// Stage 3 (Prepare scales): 1/norm for normal rows; 1 for degenerate rows (leave unchanged).
+	// Stage 3 (Prepare scales):
+	//   - positive finite norm => scale by 1/norm;
+	//   - exact zero norm      => leave the row unchanged;
+	//   - non-finite norm      => error. For L2 this can happen through overflow
+	//                             in Σ v² even when individual inputs are finite.
 	scale := make([]float64, r)
 	for i = 0; i < r; i++ {
-		if norms[i] > 0 {
-			scale[i] = 1.0 / norms[i]
-		} else {
-			scale[i] = 1.0
+		scale[i], err = rowNormScale(norms[i])
+		if err != nil {
+			return nil, nil, matrixErrorf(opNormalizeRowsL2, err)
 		}
 	}
 
@@ -391,37 +436,47 @@ func normalizeRowsL2(X Matrix) (Matrix, []float64, error) {
 	return Y, norms, nil
 }
 
-// Computes sample covariance of columns: Cov = (Xcᵀ * Xc)/(r-1).
+// covariance computes sample covariance of columns:
+//
+//	Cov = (Xcᵀ Xc)/(r-1)
+//
 // Implementation:
-//   - Stage 1: Validate X, require r>=2 (sample denominator).
-//   - Stage 2: Center columns once; then accumulate outer-products with deterministic loops.
+//   - Stage 1: Validate X.
+//   - Stage 2: If c==0, return a valid 0×0 covariance with empty means.
+//   - Stage 3: If c>0, require r>=2 for the sample denominator.
+//   - Stage 4: Center columns once.
+//   - Stage 5: Compute Cov through Transpose → Mul → Scale.
 //
 // Behavior highlights:
+//   - Zero-feature input is valid and returns 0×0.
+//   - Positive-feature input requires at least two observations.
 //   - Symmetric output; diagonal equals per-column sample variances.
 //
 // Inputs:
-//   - X: Matrix (r×c), r>=2.
+//   - X: Matrix (r×c). If c>0, r must be >=2.
 //
 // Returns:
-//   - Matrix: Covariance (c×c).
-//   - []float64: column means used for centering.
+//   - Matrix: covariance matrix with shape c×c.
+//   - []float64: column means used for centering, length c.
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch (r<2), wrapped alloc/At/Set errors.
+//   - ErrNilMatrix.
+//   - ErrDimensionMismatch when c>0 and r<2.
+//   - wrapped allocation/kernel errors.
 //
 // Determinism:
-//   - Fixed k→j→i accumulation (outer products), symmetric fill.
+//   - Fixed kernel order through CenterColumns, Transpose, Mul, Scale.
 //
 // Complexity:
-//   - Time O(r*c + r*c^2), Space O(c^2).
+//   - Time O(r*c + r*c²), Space O(r*c + c²).
 //
 // Notes:
-//   - Uses direct loops to avoid dependency on external MatMul; leverages Dense fast-path.
-//   - Result is positive semi-definite on well-formed data (modulo numeric noise).
+//   - The c==0 case is not a “missing data” error; it is the covariance over an
+//     empty feature set.
 //
 // AI-Hints:
-//   - Reuse means with downstream correlation.
-//   - For very large c, consider block accumulation outside this package.
+//   - Do not move the r<2 check before the c==0 check.
+//   - Empty feature covariance is valid even when r<2.
 func covariance(X Matrix) (Matrix, []float64, error) {
 	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
@@ -431,13 +486,16 @@ func covariance(X Matrix) (Matrix, []float64, error) {
 	// Stage 1 (Validate shape): need r>=2 and c>0 for a meaningful sample covariance.
 	r, c := X.Rows(), X.Cols()
 
-	// Empty feature-set policy:
-	// If there are no columns (c==0), the covariance is a valid degenerate 0×0 matrix.
+	// Zero-feature law:
+	// A matrix with no columns has an empty feature set. Its covariance lives in
+	// feature-space, therefore the mathematically correct result shape is 0×0.
+	// This remains valid even when r<2 because no sample variance is requested.
 	if c == 0 {
 		z, err := NewDense(0, 0)
 		if err != nil {
 			return nil, nil, matrixErrorf(opCovariance, err)
 		}
+
 		return z, make([]float64, 0), nil
 	}
 	// Sample covariance requires at least two observations when c>0.
@@ -468,39 +526,55 @@ func covariance(X Matrix) (Matrix, []float64, error) {
 	return Cov, means, nil
 }
 
-// Compute Pearson correlation of columns via z-scoring: Corr = (Zᵀ Z)/(r-1),
-// where Z = (X − mean) * diag(1/std). Degenerate std==0 → that column becomes all zeros.
+// correlation computes Pearson correlation of columns via z-scoring:
+//
+//	Z = (X - mean) / std
+//	Corr = (Zᵀ Z)/(r-1)
+//
+// Degenerate std==0 columns are mapped to zero columns in Z.
+//
 // Implementation:
-//   - Stage 1: Validate X, require r>=2; center columns (means).
-//   - Stage 2: Compute sample stds per column; build invStd with 0 for degenerate columns.
-//   - Stage 3: Z = Xc * diag(invStd) via ewScaleCols; Corr = (Zᵀ Z)/(r-1) via loops.
+//   - Stage 1: Validate X.
+//   - Stage 2: If c==0, return valid 0×0 correlation with empty means/stds.
+//   - Stage 3: If c>0, require r>=2 for sample std/correlation.
+//   - Stage 4: Center columns.
+//   - Stage 5: Compute sample stds.
+//   - Stage 6: Build inverse stds, zeroing degenerate columns.
+//   - Stage 7: Compute Corr through ScaleCols, Transpose, Mul, Scale.
 //
 // Behavior highlights:
-//   - Symmetric; diagonal is 1 for non-degenerate columns, 0 for degenerate (std==0).
+//   - Zero-feature input is valid and returns 0×0.
+//   - Positive-feature input requires at least two observations.
+//   - Degenerate finite columns get correlation row/column 0 by construction.
 //
 // Inputs:
-//   - X: Matrix (r×c), r>=2.
+//   - X: Matrix (r×c). If c>0, r must be >=2.
 //
 // Returns:
-//   - Matrix: Correlation (c×c).
-//   - []float64: column means.
-//   - []float64: column stds (sample).
+//   - Matrix: correlation matrix with shape c×c.
+//   - []float64: column means, length c.
+//   - []float64: sample standard deviations, length c.
 //
 // Errors:
-//   - ErrNilMatrix, ErrDimensionMismatch (r<2), wrapped alloc/At/Set errors.
+//   - ErrNilMatrix.
+//   - ErrDimensionMismatch when c>0 and r<2.
+//   - wrapped allocation/kernel errors.
 //
 // Determinism:
-//   - Fixed accumulation order; stable output.
+//   - Fixed accumulation and kernel order.
 //
 // Complexity:
-//   - Time O(r*c + r*c^2), Space O(c^2).
+//   - Time O(r*c + r*c²), Space O(r*c + c²).
 //
 // Notes:
-//   - Scale-invariant: correlation(α*X) == correlation(X) for α>0.
+//   - The c==0 case has no feature pairs to evaluate, so 0×0 is the correct
+//     structural result.
+//   - Constant columns are not errors; their std is 0 and their normalized column is 0.
 //
 // AI-Hints:
-//   - correlation is scale-invariant: Corr(α*X) == Corr(X) for α>0 on non-degenerate columns.
-//   - Degenerate columns (std==0) become zero columns/rows in Corr by construction.
+//   - Do not move the r<2 check before the c==0 check.
+//   - Do not set inverse std of a degenerate column to 1; that would falsely
+//     preserve a non-informative centered column.
 func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 	// Stage 1 (Validate): ensure X is present.
 	if err := ValidateNotNil(X); err != nil {
@@ -509,8 +583,10 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 
 	// Stage 1 (Validate shape): need r>=2 and c>0.
 	r, c := X.Rows(), X.Cols()
-	// Empty feature-set policy:
-	// If there are no columns (c==0), the correlation is a valid degenerate 0×0 matrix.
+	// Zero-feature law:
+	// Correlation is defined over feature pairs. With zero features there are no
+	// pairs to evaluate, so the correct structural result is a valid 0×0 matrix
+	// with empty means/stds.
 	if c == 0 {
 		z, err := NewDense(0, 0)
 		if err != nil {
@@ -593,4 +669,39 @@ func correlation(X Matrix) (Matrix, []float64, []float64, error) {
 
 	// Return correlation matrix, means, stds.
 	return Corr, means, stds, nil
+}
+
+// ---------- helpers ----------
+
+// rowNormScale converts a computed row norm into a normalization scale.
+//
+// What:
+//   - finite positive norm => 1/norm;
+//   - exact zero norm      => statsDegenerateRowScale;
+//   - NaN/+Inf/-Inf norm   => ErrNaNInf.
+//
+// Why:
+//   - Zero rows should remain unchanged.
+//   - Non-finite norms are not legitimate degeneracy; they indicate invalid
+//     input or floating-point overflow and must not be silently treated as a
+//     zero/degenerate row.
+//
+// Errors:
+//   - ErrNaNInf when norm is NaN or ±Inf.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Keep this helper shared by L1 and L2 normalization.
+//   - Do not inline the norm==0 policy in each normalizer.
+func rowNormScale(norm float64) (float64, error) {
+	if isNonFinite(norm) {
+		return 0, ErrNaNInf
+	}
+	if norm == 0 {
+		return statsDegenerateRowScale, nil
+	}
+
+	return 1.0 / norm, nil
 }

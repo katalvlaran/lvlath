@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix_test provides comprehensive unit tests for incidence-matrix wrappers,
 // using stdlib only. All tests are deterministic and table/parallel where applicable.
@@ -40,7 +41,8 @@ func TestIncidence_Blueprint(t *testing.T) {
 	t.Parallel()
 
 	// nil graph ⇒ ErrGraphNil
-	if im, err := matrix.NewIncidenceMatrix(nil, matrix.NewMatrixOptions()); !errors.Is(err, matrix.ErrGraphNil) || im != nil {
+	mOpts, _ := matrix.NewMatrixOptions()
+	if im, err := matrix.NewIncidenceMatrix(nil, mOpts); !errors.Is(err, matrix.ErrGraphNil) || im != nil {
 		t.Fatalf("nil graph: want ErrGraphNil, got im=%v err=%v", im, err)
 	}
 
@@ -54,7 +56,7 @@ func TestIncidence_Blueprint(t *testing.T) {
 		t.Fatalf("BuildGraph: %v", err)
 	}
 
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}
@@ -74,8 +76,9 @@ func TestIncidence_Blueprint(t *testing.T) {
 func TestIncidence_EmptyGraph_Degenerate(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	g, _ := core.NewGraph()
+	mOpts, _ := matrix.NewMatrixOptions()
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix(empty): %v", err)
 	}
@@ -138,7 +141,8 @@ func TestVertexIncidence_TableDriven(t *testing.T) {
 				t.Fatalf("BuildGraph: %v", err)
 			}
 
-			im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(sc.matrixOpts...))
+			mOpts, _ := matrix.NewMatrixOptions(sc.matrixOpts...)
+			im, err := matrix.NewIncidenceMatrix(g, mOpts)
 			if err != nil {
 				t.Fatalf("NewIncidenceMatrix: %v", err)
 			}
@@ -171,11 +175,12 @@ func TestVertexIncidence_TableDriven(t *testing.T) {
 func TestEdgeEndpoints_Cases(t *testing.T) {
 	t.Parallel()
 
+	mOpts, _ := matrix.NewMatrixOptions()
 	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Path(V))
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}
@@ -211,9 +216,9 @@ func TestIncidence_Idempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
-
-	im1, err1 := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
-	im2, err2 := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	im1, err1 := matrix.NewIncidenceMatrix(g, mOpts)
+	im2, err2 := matrix.NewIncidenceMatrix(g, mOpts)
 	if err1 != nil || err2 != nil {
 		t.Fatalf("NewIncidenceMatrix errs: %v %v", err1, err2)
 	}
@@ -277,7 +282,7 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 	t.Parallel()
 
 	// Prepare a directed graph allowing multi-edges, two identical parallel edges v0->v1
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 	_ = g.AddVertex("v0")
 	_ = g.AddVertex("v1")
 	if _, err := g.AddEdge("v0", "v1", 10); err != nil {
@@ -288,7 +293,8 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 	}
 
 	// DisallowMulti ⇒ only one column
-	imDis, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithDisallowMulti()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithDisallowMulti())
+	imDis, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix disallow: %v", err)
 	}
@@ -305,7 +311,8 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 	}
 
 	// AllowMulti ⇒ two columns
-	imAllow, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowMulti()))
+	mOpts, _ = matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowMulti())
+	imAllow, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix allow: %v", err)
 	}
@@ -325,13 +332,14 @@ func TestIncidence_MultiEdges_FirstEdgeWins(t *testing.T) {
 func TestIncidence_UndirectedLoop_Plus2(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithLoops(), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithLoops(), core.WithWeighted())
 	_ = g.AddVertex("x")
 	if _, err := g.AddEdge("x", "x", 1); err != nil {
 		t.Fatalf("AddEdge loop: %v", err)
 	}
 
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithAllowLoops()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithAllowLoops())
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}
@@ -359,13 +367,14 @@ func TestIncidence_UndirectedLoop_Plus2(t *testing.T) {
 func TestIncidence_DirectedLoop_SkippedColumn(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithLoops(), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithLoops(), core.WithWeighted())
 	_ = g.AddVertex("x")
 	if _, err := g.AddEdge("x", "x", 1); err != nil {
 		t.Fatalf("AddEdge loop: %v", err)
 	}
 
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected())
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}
@@ -385,14 +394,15 @@ func TestIncidence_DirectedLoop_SkippedColumn(t *testing.T) {
 func TestIncidence_WeightsIgnored(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_ = g.AddVertex("a")
 	_ = g.AddVertex("b")
 	if _, err := g.AddEdge("a", "b", 7); err != nil {
 		t.Fatalf("AddEdge: %v", err)
 	}
 
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}
@@ -443,13 +453,14 @@ func TestIncidence_NilReceiver_Errors(t *testing.T) {
 func TestIncidence_Counts_DimensionMismatch(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	for _, id := range []string{"v0", "v1", "v2"} {
 		_ = g.AddVertex(id)
 	}
 	_, _ = g.AddEdge("v0", "v1", 1)
 
-	im, err := matrix.NewIncidenceMatrix(g, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	im, err := matrix.NewIncidenceMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewIncidenceMatrix: %v", err)
 	}

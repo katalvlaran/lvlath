@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix_test contains unit tests for matrix validators.
 //
 // Purpose:
@@ -20,6 +22,7 @@
 package matrix_test
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -158,6 +161,150 @@ func TestValidateAllFinite(t *testing.T) {
 	MustFillRowMajor(t, dirty, bad)
 
 	AssertErrorIs(t, matrix.ValidateAllFinite(dirty), matrix.ErrNaNInf)
+}
+
+// --- Distance-matrix validator ------------------------------------------------
+
+func TestValidateDistanceMatrix_AllowsPositiveInfOffDiagonal(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(2, 2, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	MustSet(t, d, 0, 0, 0)
+	if err = d.Set(0, 1, math.Inf(+1)); err != nil {
+		t.Fatalf("Set(0,1,+Inf): %v", err)
+	}
+	MustSet(t, d, 1, 0, 3)
+	MustSet(t, d, 1, 1, 0)
+
+	if err = matrix.ValidateDistanceMatrix(d); err != nil {
+		t.Fatalf("ValidateDistanceMatrix(+Inf off-diagonal): %v", err)
+	}
+}
+
+func TestValidateDistanceMatrix_RejectsNaNDespiteDisabledDenseValidation(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(
+		2,
+		2,
+		matrix.WithNoValidateNaNInf(),
+		matrix.WithAllowInfDistances(),
+	)
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	if err = d.Set(0, 0, 0); err != nil {
+		t.Fatalf("Set(0,0): %v", err)
+	}
+	if err = d.Set(0, 1, math.NaN()); err != nil {
+		t.Fatalf("Set(0,1,NaN): %v", err)
+	}
+	if err = d.Set(1, 0, 1); err != nil {
+		t.Fatalf("Set(1,0): %v", err)
+	}
+	if err = d.Set(1, 1, 0); err != nil {
+		t.Fatalf("Set(1,1): %v", err)
+	}
+
+	err = matrix.ValidateDistanceMatrix(d)
+	if !errors.Is(err, matrix.ErrNaNInf) {
+		t.Fatalf("ValidateDistanceMatrix(NaN): got %v, want ErrNaNInf", err)
+	}
+}
+
+func TestValidateDistanceMatrix_RejectsNegativeInf(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(
+		2,
+		2,
+		matrix.WithNoValidateNaNInf(),
+		matrix.WithAllowInfDistances(),
+	)
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	if err = d.Set(0, 0, 0); err != nil {
+		t.Fatalf("Set(0,0): %v", err)
+	}
+	if err = d.Set(0, 1, math.Inf(-1)); err != nil {
+		t.Fatalf("Set(0,1,-Inf): %v", err)
+	}
+	if err = d.Set(1, 0, 1); err != nil {
+		t.Fatalf("Set(1,0): %v", err)
+	}
+	if err = d.Set(1, 1, 0); err != nil {
+		t.Fatalf("Set(1,1): %v", err)
+	}
+
+	err = matrix.ValidateDistanceMatrix(d)
+	if !errors.Is(err, matrix.ErrNaNInf) {
+		t.Fatalf("ValidateDistanceMatrix(-Inf): got %v, want ErrNaNInf", err)
+	}
+}
+
+func TestValidateDistanceMatrix_RejectsPositiveInfWhenDisallowed(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(2, 2, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	MustSet(t, d, 0, 0, 0)
+	if err = d.Set(0, 1, math.Inf(+1)); err != nil {
+		t.Fatalf("Set(0,1,+Inf): %v", err)
+	}
+	MustSet(t, d, 1, 0, 1)
+	MustSet(t, d, 1, 1, 0)
+
+	err = matrix.ValidateDistanceMatrix(d, matrix.WithDisallowInfDistances())
+	if !errors.Is(err, matrix.ErrNaNInf) {
+		t.Fatalf("ValidateDistanceMatrix(disallow +Inf): got %v, want ErrNaNInf", err)
+	}
+}
+
+func TestValidateDistanceMatrix_RejectsPositiveInfDiagonal(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(1, 1, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	if err = d.Set(0, 0, math.Inf(+1)); err != nil {
+		t.Fatalf("Set(0,0,+Inf): %v", err)
+	}
+
+	err = matrix.ValidateDistanceMatrix(d)
+	if !errors.Is(err, matrix.ErrBadShape) {
+		t.Fatalf("ValidateDistanceMatrix(+Inf diagonal): got %v, want ErrBadShape", err)
+	}
+}
+
+func TestValidateDistanceMatrix_RejectsNonZeroDiagonalOutsideEpsilon(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(2, 2)
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	MustSet(t, d, 0, 0, 0)
+	MustSet(t, d, 0, 1, 1)
+	MustSet(t, d, 1, 0, 1)
+	MustSet(t, d, 1, 1, 0.25)
+
+	err = matrix.ValidateDistanceMatrix(d, matrix.WithEpsilon(0.01))
+	if !errors.Is(err, matrix.ErrBadShape) {
+		t.Fatalf("ValidateDistanceMatrix(non-zero diagonal): got %v, want ErrBadShape", err)
+	}
 }
 
 // --- Graph adjacency wrapper validator ---------------------------------------

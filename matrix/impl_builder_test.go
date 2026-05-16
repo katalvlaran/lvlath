@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix_test contains unit tests for BuildDenseAdjacency and BuildDenseIncidence
 // functions in the matrix package, ensuring compliance with expected behavior
@@ -18,7 +19,8 @@ import (
 
 // TestBuildDenseAdjacency_EmptyVertices validates that empty vertices are a valid degenerate case.
 func TestBuildDenseAdjacency_EmptyVertices(t *testing.T) {
-	idx, mat, err := matrix.BuildDenseAdjacency([]string{}, nil, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	idx, mat, err := matrix.BuildDenseAdjacency([]string{}, nil, mOpts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency(empty): %v", err)
 	}
@@ -33,7 +35,8 @@ func TestBuildDenseAdjacency_EmptyVertices(t *testing.T) {
 // TestBuildDenseAdjacency_NilEdges ensures nil edges slice is treated as no edges, producing zero matrix.
 func TestBuildDenseAdjacency_NilEdges(t *testing.T) {
 	vertices := []string{"A", "B"}
-	idx, mat, err := matrix.BuildDenseAdjacency(vertices, nil, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	idx, mat, err := matrix.BuildDenseAdjacency(vertices, nil, mOpts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency: %v", err)
 	}
@@ -62,7 +65,8 @@ func TestBuildDenseAdjacency_DirectedVsUndirected(t *testing.T) {
 	edges := []*core.Edge{{From: "A", To: "B", Weight: 5}}
 
 	// Directed, unweighted (default weight=1)
-	opts := matrix.NewMatrixOptions(matrix.WithDirected())
+
+	opts, _ := matrix.NewMatrixOptions(matrix.WithDirected())
 	idx, mat, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency directed: %v", err)
@@ -76,7 +80,7 @@ func TestBuildDenseAdjacency_DirectedVsUndirected(t *testing.T) {
 	}
 
 	// Undirected, weighted
-	opts = matrix.NewMatrixOptions(matrix.WithWeighted())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithWeighted())
 	idx2, mat2, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency undirected weighted: %v", err)
@@ -100,7 +104,7 @@ func TestBuildDenseAdjacency_MultiEdgeCollapse(t *testing.T) {
 	iA, iB := 0, 1 // consistent with vertices order
 
 	// AllowMulti=true (default), weighted: second overwrites first
-	opts := matrix.NewMatrixOptions(matrix.WithWeighted(), matrix.WithAllowMulti())
+	opts, _ := matrix.NewMatrixOptions(matrix.WithWeighted(), matrix.WithAllowMulti())
 	_, mat, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency allow multi: %v", err)
@@ -110,7 +114,7 @@ func TestBuildDenseAdjacency_MultiEdgeCollapse(t *testing.T) {
 	}
 
 	// AllowMulti=false, weighted: first weight only
-	opts = matrix.NewMatrixOptions(matrix.WithWeighted(), matrix.WithDisallowMulti())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithWeighted(), matrix.WithDisallowMulti())
 	_, mat2, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency disallow multi: %v", err)
@@ -126,7 +130,7 @@ func TestBuildDenseAdjacency_Loops(t *testing.T) {
 	edges := []*core.Edge{{From: "A", To: "A", Weight: 7}}
 
 	// AllowLoops=false (default)
-	opts := matrix.NewMatrixOptions()
+	opts, _ := matrix.NewMatrixOptions()
 	idx, mat, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency no loops: %v", err)
@@ -137,7 +141,7 @@ func TestBuildDenseAdjacency_Loops(t *testing.T) {
 	}
 
 	// AllowLoops=true, weighted
-	opts = matrix.NewMatrixOptions(matrix.WithAllowLoops(), matrix.WithWeighted())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithAllowLoops(), matrix.WithWeighted())
 	idx2, mat2, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseAdjacency loops weighted: %v", err)
@@ -164,7 +168,7 @@ func TestBuildDenseAdjacency_MetricClosure(t *testing.T) {
 
 	// Weighted + MetricClosure: APSP is computed over edge weights,
 	// +Inf is used for unreachable pairs, diag is forced to 0.
-	opts := matrix.NewMatrixOptions(
+	opts, _ := matrix.NewMatrixOptions(
 		matrix.WithWeighted(),
 		matrix.WithMetricClosure(),
 	)
@@ -196,6 +200,71 @@ func TestBuildDenseAdjacency_MetricClosure(t *testing.T) {
 	}
 }
 
+func TestBuildDenseAdjacency_MetricClosureRejectsNaNEdgeWeight(t *testing.T) {
+	t.Parallel()
+
+	vertices := []string{"A", "B"}
+	edges := []*core.Edge{
+		{ID: "e1", From: "A", To: "B", Weight: math.NaN(), Directed: true},
+	}
+
+	opts, err := matrix.NewMatrixOptions(
+		matrix.WithDirected(),
+		matrix.WithWeighted(),
+		matrix.WithMetricClosure(),
+		matrix.WithNoValidateNaNInf(),
+	)
+	if err != nil {
+		t.Fatalf("NewMatrixOptions: %v", err)
+	}
+
+	_, _, err = matrix.BuildDenseAdjacency(vertices, edges, opts)
+	if !errors.Is(err, matrix.ErrInvalidWeight) {
+		t.Fatalf("BuildDenseAdjacency(metric closure NaN): got %v, want ErrInvalidWeight", err)
+	}
+}
+
+// TestBuildDenseAdjacency_PreserveAllZeroWeights verifies the explicit P3 escape hatch:
+// WithPreserveZeroWeights forces +Inf absence encoding even when every real edge has weight 0.
+func TestBuildDenseAdjacency_PreserveAllZeroWeights(t *testing.T) {
+	t.Parallel()
+
+	vertices := []string{"A", "B", "C"}
+	edges := []*core.Edge{
+		{ID: "e1", From: "A", To: "B", Weight: 0, Directed: true},
+	}
+
+	opts, err := matrix.NewMatrixOptions(
+		matrix.WithDirected(),
+		matrix.WithWeighted(),
+		matrix.WithPreserveZeroWeights(),
+	)
+	if err != nil {
+		t.Fatalf("NewMatrixOptions: %v", err)
+	}
+
+	idx, mat, err := matrix.BuildDenseAdjacency(vertices, edges, opts)
+	if err != nil {
+		t.Fatalf("BuildDenseAdjacency: %v", err)
+	}
+
+	got, err := mat.At(idx["A"], idx["B"])
+	if err != nil {
+		t.Fatalf("At(A,B): %v", err)
+	}
+	if got != 0 {
+		t.Fatalf("preserved zero edge A->B: got %v, want 0", got)
+	}
+
+	absent, err := mat.At(idx["A"], idx["C"])
+	if err != nil {
+		t.Fatalf("At(A,C): %v", err)
+	}
+	if !math.IsInf(absent, +1) {
+		t.Fatalf("missing edge A->C: got %v, want +Inf", absent)
+	}
+}
+
 // TestBuildDenseAdjacency_InvalidWeight_NaNOrInf ensures that any attempt
 // to use NaN or ±Inf as an edge weight in weighted mode is rejected with
 // ErrInvalidWeight before the value ever reaches the Dense matrix.
@@ -203,7 +272,7 @@ func TestBuildDenseAdjacency_InvalidWeight_NaNOrInf(t *testing.T) {
 	t.Parallel()
 
 	vertices := []string{"A", "B"}
-	opts := matrix.NewMatrixOptions(matrix.WithWeighted())
+	opts, _ := matrix.NewMatrixOptions(matrix.WithWeighted())
 
 	cases := []struct {
 		name  string
@@ -246,7 +315,8 @@ func TestBuildDenseAdjacency_InvalidWeight_NaNOrInf(t *testing.T) {
 func TestBuildDenseAdjacency_UnknownVertex(t *testing.T) {
 	vertices := []string{"A"}
 	edges := []*core.Edge{{From: "A", To: "B", Weight: 1}} // "B" not in vertices
-	_, _, err := matrix.BuildDenseAdjacency(vertices, edges, matrix.NewMatrixOptions(matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithWeighted())
+	_, _, err := matrix.BuildDenseAdjacency(vertices, edges, mOpts)
 	if !errors.Is(err, matrix.ErrUnknownVertex) {
 		t.Fatalf("want ErrUnknownVertex, got %v", err)
 	}
@@ -256,7 +326,8 @@ func TestBuildDenseAdjacency_UnknownVertex(t *testing.T) {
 
 // TestBuildDenseIncidence_EmptyVertices validates that empty vertices are a valid degenerate case.
 func TestBuildDenseIncidence_EmptyVertices(t *testing.T) {
-	idx, cols, mat, err := matrix.BuildDenseIncidence([]string{}, nil, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	idx, cols, mat, err := matrix.BuildDenseIncidence([]string{}, nil, mOpts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence(empty): %v", err)
 	}
@@ -274,7 +345,8 @@ func TestBuildDenseIncidence_EmptyVertices(t *testing.T) {
 // TestBuildDenseIncidence_NilEdges ensures nil edges yields zero-column matrix.
 func TestBuildDenseIncidence_NilEdges(t *testing.T) {
 	vertices := []string{"A", "B"}
-	idx, cols, mat, err := matrix.BuildDenseIncidence(vertices, nil, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	idx, cols, mat, err := matrix.BuildDenseIncidence(vertices, nil, mOpts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence: %v", err)
 	}
@@ -295,7 +367,7 @@ func TestBuildDenseIncidence_DirectedVsUndirected(t *testing.T) {
 	edges := []*core.Edge{{From: "A", To: "B", Weight: 0}}
 
 	// Directed
-	opts := matrix.NewMatrixOptions(matrix.WithDirected())
+	opts, _ := matrix.NewMatrixOptions(matrix.WithDirected())
 	idxD, colsD, matD, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence directed: %v", err)
@@ -312,7 +384,7 @@ func TestBuildDenseIncidence_DirectedVsUndirected(t *testing.T) {
 	}
 
 	// Undirected
-	opts = matrix.NewMatrixOptions()
+	opts, _ = matrix.NewMatrixOptions()
 	idxU, colsU, matU, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence undirected: %v", err)
@@ -337,7 +409,7 @@ func TestBuildDenseIncidence_MultiEdgeCollapse(t *testing.T) {
 	}
 
 	// AllowMulti=true (default)
-	opts := matrix.NewMatrixOptions(matrix.WithAllowMulti())
+	opts, _ := matrix.NewMatrixOptions(matrix.WithAllowMulti())
 	_, cols, _, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence allow multi: %v", err)
@@ -347,7 +419,7 @@ func TestBuildDenseIncidence_MultiEdgeCollapse(t *testing.T) {
 	}
 
 	// AllowMulti=false
-	opts = matrix.NewMatrixOptions(matrix.WithDisallowMulti())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithDisallowMulti())
 	_, cols2, _, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence disallow multi: %v", err)
@@ -363,7 +435,7 @@ func TestBuildDenseIncidence_Loops(t *testing.T) {
 	vertices := []string{"A"}
 	edges := []*core.Edge{{From: "A", To: "A", Weight: 0}}
 
-	opts := matrix.NewMatrixOptions() // AllowLoops=false
+	opts, _ := matrix.NewMatrixOptions() // AllowLoops=false
 	_, cols0, _, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence no loops: %v", err)
@@ -373,7 +445,7 @@ func TestBuildDenseIncidence_Loops(t *testing.T) {
 	}
 
 	// Undirected + AllowLoops=true ⇒ +2 in the single row
-	opts = matrix.NewMatrixOptions(matrix.WithAllowLoops())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithAllowLoops())
 	_, colsU, matU, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence undirected loop: %v", err)
@@ -386,7 +458,7 @@ func TestBuildDenseIncidence_Loops(t *testing.T) {
 	}
 
 	// Directed + AllowLoops=true ⇒ column is skipped
-	opts = matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowLoops())
+	opts, _ = matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowLoops())
 	_, colsD, matD, err := matrix.BuildDenseIncidence(vertices, edges, opts)
 	if err != nil {
 		t.Fatalf("BuildDenseIncidence directed loop: %v", err)
@@ -400,7 +472,8 @@ func TestBuildDenseIncidence_Loops(t *testing.T) {
 func TestBuildDenseIncidence_UnknownVertex(t *testing.T) {
 	vertices := []string{"A"}
 	edges := []*core.Edge{{From: "A", To: "B", Weight: 0}} // "B" not known
-	_, _, _, err := matrix.BuildDenseIncidence(vertices, edges, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	_, _, _, err := matrix.BuildDenseIncidence(vertices, edges, mOpts)
 	if !errors.Is(err, matrix.ErrUnknownVertex) {
 		t.Fatalf("want ErrUnknownVertex, got %v", err)
 	}

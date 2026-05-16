@@ -29,7 +29,7 @@ var (
 //   - Per iteration: expected O(1) amortized (hash-map + adjacency updates).
 func BenchmarkAddEdge_Unweighted(b *testing.B) {
 	// Create a new default Graph (undirected, unweighted)
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 
 	var i int
 	ids := make([]string, b.N)
@@ -61,7 +61,7 @@ func BenchmarkAddEdge_Unweighted(b *testing.B) {
 //   - Per iteration: expected O(1) amortized.
 func BenchmarkAddEdge_Weighted(b *testing.B) {
 	// Create a weighted Graph
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 
 	var i int
 	ids := make([]string, b.N)
@@ -90,7 +90,7 @@ func BenchmarkAddEdge_Weighted(b *testing.B) {
 //   - Per iteration: expected O(1) amortized.
 func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 	// Create graph allowing multi-edges and weights
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 
 	// Keep endpoint cardinality small to force parallel edges.
 	const targets = 100
@@ -121,7 +121,7 @@ func BenchmarkAddEdge_MultiEdges(b *testing.B) {
 //   - Per iteration: O(d log d), where d is the degree of "Center".
 func BenchmarkNeighbors(b *testing.B) {
 	// Create graph with multi-edge support
-	g := core.NewGraph(core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithMultiEdges())
 	// Build a star with 1000 leaves: Center→Node{i}
 	var i int
 	for i = 0; i < 1000; i++ {
@@ -150,7 +150,7 @@ func BenchmarkNeighbors(b *testing.B) {
 //   - Per iteration: O(V+E).
 func BenchmarkClone(b *testing.B) {
 	// Create graph with loops, multi-edges, and weights
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 	// Populate with 1000 edges A→V{i}
 
 	var i int

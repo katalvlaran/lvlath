@@ -18,7 +18,7 @@ func TestDetectCycles_NilGraph(t *testing.T) {
 }
 
 func TestDetectCycles_DirectedNoCycle(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
@@ -36,7 +36,7 @@ func TestDetectCycles_DirectedNoCycle(t *testing.T) {
 }
 
 func TestDetectCycles_SelfLoopAllowed(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true), core.WithLoops())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithLoops())
 	mustNoError(t, g.AddVertex("A"))
 	_, err := g.AddEdge("A", "A", 0)
 	mustNoError(t, err)
@@ -50,7 +50,7 @@ func TestDetectCycles_SelfLoopAllowed(t *testing.T) {
 }
 
 func TestDetectCycles_SimpleTwoNodeCycle(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "A", 0)
 
@@ -63,7 +63,7 @@ func TestDetectCycles_SimpleTwoNodeCycle(t *testing.T) {
 }
 
 func TestDetectCycles_ThreeNodeCycle(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
@@ -77,7 +77,7 @@ func TestDetectCycles_ThreeNodeCycle(t *testing.T) {
 }
 
 func TestDetectCycles_FourNodeCycle(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("V", "W", 0)
 	_, _ = g.AddEdge("W", "X", 0)
 	_, _ = g.AddEdge("X", "Y", 0)
@@ -93,7 +93,7 @@ func TestDetectCycles_FourNodeCycle(t *testing.T) {
 }
 
 func TestDetectCycles_UndirectedTriangle_NoFalseTwoCycle(t *testing.T) {
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
@@ -107,7 +107,7 @@ func TestDetectCycles_UndirectedTriangle_NoFalseTwoCycle(t *testing.T) {
 }
 
 func TestDetectCycles_UndirectedMultipleDisjointCycles(t *testing.T) {
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
@@ -128,7 +128,7 @@ func TestDetectCycles_UndirectedMultipleDisjointCycles(t *testing.T) {
 }
 
 func TestDetectCycles_DirectedMultipleDisjointCycles(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	cycleOne := []string{"A", "B", "C", "D", "E", "A"}
 	for index := 0; index < len(cycleOne)-1; index++ {
@@ -154,7 +154,7 @@ func TestDetectCycles_DirectedMultipleDisjointCycles(t *testing.T) {
 }
 
 func TestDetectCycles_OverlappingDirectedCycles_WitnessContract(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// The graph contains:
 	//   - A->B->C->A
@@ -177,7 +177,7 @@ func TestDetectCycles_OverlappingDirectedCycles_WitnessContract(t *testing.T) {
 }
 
 func TestDetectCycles_DirectedCanonicalizationPreservesOrientation(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// The directed cycle is A->C->B->A.
 	// Its reversed lexical form A->B->C->A is smaller, but must not win canonicalization

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 package matrix_test
 
@@ -99,6 +100,11 @@ func TestCenterColumns_ZeroSizeSafe(t *testing.T) {
 	if Y1.Rows() != 0 || Y1.Cols() != 3 || len(m1) != 3 {
 		t.Fatalf("shape mismatch 0x3")
 	}
+	for j, v := range m1 {
+		if v != 0 {
+			t.Fatalf("0x3 means[%d]: got %v, want 0", j, v)
+		}
+	}
 
 	X2, _ := matrix.NewDense(2, 0)
 	Y2, m2, err := matrix.CenterColumns(X2)
@@ -129,6 +135,11 @@ func TestCenterRows_ZeroSizeSafe(t *testing.T) {
 	}
 	if Y2.Rows() != 2 || Y2.Cols() != 0 || len(m2) != 2 {
 		t.Fatalf("shape mismatch 2x0 (row means must be len=rows=2)")
+	}
+	for i, v := range m2 {
+		if v != 0 {
+			t.Fatalf("2x0 means[%d]: got %v, want 0", i, v)
+		}
 	}
 }
 
@@ -235,6 +246,11 @@ func TestNormalizeRows_ZeroSizeSafe(t *testing.T) {
 	if Y2.Rows() != 2 || Y2.Cols() != 0 || len(n2) != 2 {
 		t.Fatalf("L2 2x0 shape mismatch")
 	}
+	for i, v := range n2 {
+		if v != 0 {
+			t.Fatalf("L2 2x0 norms[%d]: got %v, want 0", i, v)
+		}
+	}
 }
 
 // ------------------------------
@@ -300,6 +316,26 @@ func TestCovariance_RowsLessThan2_Error(t *testing.T) {
 	_, _, err := matrix.Covariance(X)
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
+	}
+}
+
+func TestCovariance_ZeroFeaturesReturnsZeroByZero(t *testing.T) {
+	t.Parallel()
+
+	X, err := matrix.NewDense(1, 0)
+	if err != nil {
+		t.Fatalf("NewDense: %v", err)
+	}
+
+	Cov, means, err := matrix.Covariance(X)
+	if err != nil {
+		t.Fatalf("Covariance zero features: %v", err)
+	}
+	if Cov.Rows() != 0 || Cov.Cols() != 0 {
+		t.Fatalf("cov shape: got %dx%d, want 0x0", Cov.Rows(), Cov.Cols())
+	}
+	if len(means) != 0 {
+		t.Fatalf("means len: got %d, want 0", len(means))
 	}
 }
 
@@ -401,5 +437,28 @@ func TestCorrelation_RowsLessThan2_Error(t *testing.T) {
 	_, _, _, err := matrix.Correlation(X)
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
+	}
+}
+
+func TestCorrelation_ZeroFeaturesReturnsZeroByZero(t *testing.T) {
+	t.Parallel()
+
+	X, err := matrix.NewDense(1, 0)
+	if err != nil {
+		t.Fatalf("NewDense: %v", err)
+	}
+
+	Corr, means, stds, err := matrix.Correlation(X)
+	if err != nil {
+		t.Fatalf("Correlation zero features: %v", err)
+	}
+	if Corr.Rows() != 0 || Corr.Cols() != 0 {
+		t.Fatalf("corr shape: got %dx%d, want 0x0", Corr.Rows(), Corr.Cols())
+	}
+	if len(means) != 0 {
+		t.Fatalf("means len: got %d, want 0", len(means))
+	}
+	if len(stds) != 0 {
+		t.Fatalf("stds len: got %d, want 0", len(stds))
 	}
 }

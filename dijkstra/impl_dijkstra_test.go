@@ -102,7 +102,7 @@ func TestDijkstra_NilGraph(t *testing.T) {
 // AI-Hints:
 //   - Do not merge this case with source-not-found; they classify different contract failures.
 func TestDijkstra_EmptySourceID(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	result, err := dijkstra.Dijkstra(graph, "")
 
@@ -126,7 +126,7 @@ func TestDijkstra_EmptySourceID(t *testing.T) {
 // AI-Hints:
 //   - Do not weaken this into a generic “bad graph” assertion.
 func TestDijkstra_UnweightedGraph(t *testing.T) {
-	graph := core.NewGraph()
+	graph, _ := core.NewGraph()
 
 	if err := graph.AddVertex(testVertexSource); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexSource, err)
@@ -152,7 +152,7 @@ func TestDijkstra_UnweightedGraph(t *testing.T) {
 // AI-Hints:
 //   - Keep source-not-found separate from result-level ErrTargetNotFound semantics.
 func TestDijkstra_SourceNotFound(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if err := graph.AddVertex(testVertexAlternative); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexAlternative, err)
@@ -179,7 +179,7 @@ func TestDijkstra_SourceNotFound(t *testing.T) {
 // AI-Hints:
 //   - Never replace this with panic-oriented testing.
 func TestDijkstra_NilOption(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if err := graph.AddVertex(testVertexSource); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexSource, err)
@@ -208,7 +208,7 @@ func TestDijkstra_NilOption(t *testing.T) {
 // AI-Hints:
 //   - Keep finite negative coverage separate from NaN and -Inf branches.
 func TestDijkstra_NegativeWeight_PreScan(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, -testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,-1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -234,7 +234,7 @@ func TestDijkstra_NegativeWeight_PreScan(t *testing.T) {
 // AI-Hints:
 //   - Keep NaN coverage explicit because it is a live classifier branch.
 func TestDijkstra_NaNWeight_PreScan(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.NaN()); err != nil {
 		t.Fatalf("AddEdge(%q,%q,NaN) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -260,7 +260,7 @@ func TestDijkstra_NaNWeight_PreScan(t *testing.T) {
 // AI-Hints:
 //   - Keep -Inf coverage explicit because it is distinct from finite negative weights.
 func TestDijkstra_NegativeInfinityWeight_PreScan(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.Inf(-1)); err != nil {
 		t.Fatalf("AddEdge(%q,%q,-Inf) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -286,7 +286,7 @@ func TestDijkstra_NegativeInfinityWeight_PreScan(t *testing.T) {
 // AI-Hints:
 //   - Keep public option-error propagation explicit in facade-level tests.
 func TestDijkstra_BadMaxDistance(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if err := graph.AddVertex(testVertexSource); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexSource, err)
@@ -312,7 +312,7 @@ func TestDijkstra_BadMaxDistance(t *testing.T) {
 // AI-Hints:
 //   - Keep threshold-policy admission separate from runtime wall semantics.
 func TestDijkstra_BadInfEdgeThreshold(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if err := graph.AddVertex(testVertexSource); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexSource, err)
@@ -344,7 +344,7 @@ func TestDijkstra_BadInfEdgeThreshold(t *testing.T) {
 // AI-Hints:
 //   - Keep this test exact; do not weaken it into “distance only”.
 func TestDijkstra_Triangle(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -400,7 +400,7 @@ func TestDijkstra_Triangle(t *testing.T) {
 // AI-Hints:
 //   - Keep directed coverage distinct from mixed-edge and tie-break coverage.
 func TestDijkstra_DirectedGraph(t *testing.T) {
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightTwo); err != nil {
 		t.Fatalf("AddEdge(%q,%q,2) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -463,7 +463,7 @@ func TestDijkstra_DirectedGraph(t *testing.T) {
 // AI-Hints:
 //   - Keep mixed-edge coverage explicit; it protects real endpoint-law behavior.
 func TestDijkstra_MixedGraph(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightTwo, core.WithEdgeDirected(true)); err != nil {
 		t.Fatalf("AddEdge(%q,%q,2,directed) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -523,7 +523,7 @@ func TestDijkstra_MixedGraph(t *testing.T) {
 // AI-Hints:
 //   - Keep +Inf assertions explicit; cutoff semantics are part of the public result law.
 func TestDijkstra_MaxDistanceCutoff(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -573,7 +573,7 @@ func TestDijkstra_MaxDistanceCutoff(t *testing.T) {
 // AI-Hints:
 //   - Keep threshold-wall coverage separate from +Inf-edge wall coverage.
 func TestDijkstra_InfEdgeThresholdWall(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightTwo); err != nil {
 		t.Fatalf("AddEdge(%q,%q,2) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -614,7 +614,7 @@ func TestDijkstra_InfEdgeThresholdWall(t *testing.T) {
 // AI-Hints:
 //   - Keep multi-edge optimality separate from equal-cost tie-break coverage.
 func TestDijkstra_MultiEdgeChoosesBestDistance(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightFive); err != nil {
 		t.Fatalf("AddEdge(%q,%q,5) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -673,7 +673,7 @@ func TestDijkstra_MultiEdgeChoosesBestDistance(t *testing.T) {
 // AI-Hints:
 //   - Do not “simplify” endpoint resolution to edge.To and keep this test by accident.
 func TestDijkstra_UndirectedReverseEndpoint_Regression(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexMiddle, testVertexSource, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexMiddle, testVertexSource, err)
@@ -708,7 +708,7 @@ func TestDijkstra_UndirectedReverseEndpoint_Regression(t *testing.T) {
 // AI-Hints:
 //   - Do not weaken this into “one of several valid parents”.
 func TestDijkstra_TieBreakEqualShortestPaths(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -761,7 +761,7 @@ func TestDijkstra_TieBreakEqualShortestPaths(t *testing.T) {
 // AI-Hints:
 //   - Do not infer path tracking implicitly in the base API.
 func TestDijkstra_PrevNilWhenPathTrackingDisabled(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -794,7 +794,7 @@ func TestDijkstra_PrevNilWhenPathTrackingDisabled(t *testing.T) {
 // AI-Hints:
 //   - Keep enabled and disabled tracking covered by separate tests.
 func TestDijkstra_PathTrackingEnabled(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -850,7 +850,7 @@ func TestDijkstra_PathTrackingEnabled(t *testing.T) {
 // AI-Hints:
 //   - Keep +Inf wall coverage separate from NaN and -Inf invalid-weight coverage.
 func TestDijkstra_InfiniteWeightActsAsWall(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.Inf(1)); err != nil {
 		t.Fatalf("AddEdge(%q,%q,+Inf) failed: %v", testVertexSource, testVertexMiddle, err)
@@ -884,7 +884,7 @@ func TestDijkstra_InfiniteWeightActsAsWall(t *testing.T) {
 // AI-Hints:
 //   - Keep source-to-self coverage explicit because it anchors base result semantics.
 func TestDijkstra_SourceToSelf_ZeroDistance(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if err := graph.AddVertex(testVertexSource); err != nil {
 		t.Fatalf("AddVertex(%q) failed: %v", testVertexSource, err)
@@ -924,7 +924,7 @@ func TestDijkstra_SourceToSelf_ZeroDistance(t *testing.T) {
 // AI-Hints:
 //   - Keep self-loop coverage separate from plain source-to-self coverage.
 func TestDijkstra_SelfLoopZeroWeight(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted(), core.WithLoops())
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithLoops())
 
 	if _, err := graph.AddEdge(testVertexLoop, testVertexLoop, 0.0); err != nil {
 		t.Fatalf("AddEdge(%q,%q,0) failed: %v", testVertexLoop, testVertexLoop, err)
@@ -975,7 +975,7 @@ func TestDijkstra_SelfLoopZeroWeight(t *testing.T) {
 // AI-Hints:
 //   - Keep disconnected known-vertex coverage explicit; it protects the result-domain law.
 func TestDijkstra_UnreachableRemainsInf(t *testing.T) {
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 
 	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
 		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)

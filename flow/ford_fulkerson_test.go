@@ -21,7 +21,7 @@ type FordFulkersonSuite struct {
 // TestSimplePath verifies that a single-edge graph yields max flow == that capacity,
 // and that the residual graph has no forward edge and a reverse edge of equal weight.
 func (s *FordFulkersonSuite) TestSimplePath() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("A", "B", 10)
 
 	opts := flow.DefaultOptions()
@@ -37,7 +37,7 @@ func (s *FordFulkersonSuite) TestSimplePath() {
 
 // TestMultiPathGraph verifies that two disjoint paths combine their capacities.
 func (s *FordFulkersonSuite) TestMultiPathGraph() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Path1: A→B cap=5
 	_, _ = g.AddEdge("A", "B", 5)
 	// Path2: A→C cap=7 → C→B cap=4
@@ -53,7 +53,7 @@ func (s *FordFulkersonSuite) TestMultiPathGraph() {
 
 // TestZeroCapacity ensures that edges with zero capacity produce zero flow.
 func (s *FordFulkersonSuite) TestZeroCapacity() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("X", "Y", 0)
 
 	opts := flow.DefaultOptions()
@@ -64,7 +64,7 @@ func (s *FordFulkersonSuite) TestZeroCapacity() {
 
 // TestEpsilonEdgeCase verifies that Epsilon filtering treats small capacities as zero.
 func (s *FordFulkersonSuite) TestEpsilonEdgeCase() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("U", "V", 1)
 
 	opts := flow.DefaultOptions()
@@ -79,7 +79,7 @@ func (s *FordFulkersonSuite) TestEpsilonEdgeCase() {
 // TestMultiEdgeLoop checks multi-edge aggregation and loop-ignoring behavior.
 func (s *FordFulkersonSuite) TestMultiEdgeLoop() {
 	// enable parallel edges and loops
-	g := core.NewGraph(
+	g, _ := core.NewGraph(
 		core.WithDirected(true),
 		core.WithWeighted(),
 		core.WithMultiEdges(),
@@ -101,7 +101,7 @@ func (s *FordFulkersonSuite) TestMultiEdgeLoop() {
 // TestResidualIntegrity constructs a small graph with multiple edges and
 // verifies the residual integrity invariant after running Ford–Fulkerson.
 func (s *FordFulkersonSuite) TestResidualIntegrity() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 	// Build a graph:
 	//   A→B (5, then 3) → total 8
 	//   B→C (4)
@@ -125,7 +125,7 @@ func (s *FordFulkersonSuite) TestResidualIntegrity() {
 
 // TestSourceOrSinkNotFound covers missing source or sink error cases.
 func (s *FordFulkersonSuite) TestSourceOrSinkNotFound() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_ = g.AddVertex("A")
 
 	opts := flow.DefaultOptions()
@@ -139,7 +139,7 @@ func (s *FordFulkersonSuite) TestSourceOrSinkNotFound() {
 
 // TestContextCancellation verifies that a canceled context aborts quickly.
 func (s *FordFulkersonSuite) TestContextCancellation() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// chain graph A→B→C→D
 	_, _ = g.AddEdge("A", "B", 1)
 	_, _ = g.AddEdge("B", "C", 1)

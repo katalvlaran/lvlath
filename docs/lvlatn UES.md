@@ -60,6 +60,7 @@ and verification discipline. It establishes not "how it works somehow", but
 - If a package returns a Result-type, its fields, invariants, ownership rules,
   and interpretations under failure are just as much a part of the API as the 
   function signature itself.
+- For non-trivial algorithm packages, a named `XxxResult` structure is mandatory.
 
 0.8 Documentation is executable truth, not marketing
 - Documentation must describe the real API, real guarantees, real complexity,
@@ -114,7 +115,35 @@ The charter must explicitly declare:
 - Any mode that changes the contract must be enabled explicitly via `Option` 
   or builder configuration. No implicit contract switches.
 
-1.5 Documentation Layer Separation
+1.5 Result Artifact Law
+For every non-trivial algorithm package, the public result must be represented by
+an explicit named `XxxResult` structure.
+
+1.5.1 Mandatory rules:
+- Typed-value public algorithm returns are forbidden for the canonical algorithm surface.
+- Returning raw parallel maps/slices as the primary result contract is forbidden.
+- The result type must expose semantically meaningful helper methods whenever the
+  package domain needs structured result interaction.
+- The result type must document:
+  - field invariants,
+  - ownership,
+  - nil-receiver behavior,
+  - interpretation under failure and partial-result policy.
+- If the package uses the `core.Nilable` convention, the result type must implement
+  its nil-state behavior explicitly and safely.
+
+1.5.2 Examples of acceptable shape:
+- `BFSResult`
+- `DFSResult`
+- `CycleDetectionResult`
+- `DijkstraResult`
+
+1.5.3 Examples of forbidden canonical shape:
+- `(map[string]float64, map[string]string, error)`
+- `([]int, error)` when the result actually carries multiple domain semantics
+- anonymous structs returned from public APIs
+
+1.6 Documentation Layer Separation
 A strict boundary must exist:
 - `doc.go`: package charter, public laws, invariants.
 - Exported GoDoc: per-symbol contract.
@@ -164,6 +193,33 @@ Contains only:
 - adaptation of error/result surfaces.
 *Law:* Facades must never contain alternative mathematics.
 
+2.5.1 Canonical Facade and Wrapper Law
+Every non-trivial lvlath package must expose:
+
+1) a canonical public facade in `api.go`,
+2) optionally, a set of wrapper helpers built strictly on top of the canonical facade.
+
+Canonical facade requirements:
+- validates required public inputs,
+- applies and finalizes options,
+- delegates to exactly one kernel,
+- publishes the canonical result artifact.
+
+Wrapper requirements:
+- wrappers must not introduce alternative mathematics,
+- wrappers must not weaken sentinel classification,
+- wrappers must not invent hidden defaults that change the contract,
+- wrappers must document whether they:
+  - discard part of the canonical result,
+  - force-enable a mode (e.g. path tracking),
+  - perform a point query over the canonical result.
+
+Examples:
+- `Dijkstra(...)` is canonical.
+- `Distances(...)`, `DistanceTo(...)`, `ShortestPathTo(...)` are wrappers.
+- wrappers are allowed only when they reduce caller boilerplate without changing
+  the contract semantics.
+
 2.6 Adapters / Builders
 Allowed to:
 - convert external domain structures (core -> algo, graph -> matrix),
@@ -196,13 +252,17 @@ This is a hard law.
 - benchmarks.
 
 3.2 If an exported function/type/method is documented, it must exist.
+
 3.3 If a public function/type/method exists, its contract must be documented.
+
 3.4 Repository docs must never mention:
 - future APIs,
 - hypothetical helpers,
 - old signatures,
 - removed behaviors,
 - stronger guarantees than the current source provides.
+- primary usage patterns that bypass the canonical result surface when such a
+  result surface exists.
 
 3.5 Compatibility Aliases
 If a backward-compatible alias exists, the docs must explicitly state:
@@ -309,6 +369,20 @@ This helper must:
 - validate all options *before* any heavy allocations occur.
 - enforce "last-writer-wins" unless explicitly documented otherwise.
 
+6.2.1 No-Panic Options Law
+Public option setters and public option assembly must never use panic for
+ordinary contract validation.
+
+Mandatory rule:
+- invalid option input must return an error,
+- invalid callback configuration must return an error,
+- nil option values must return an error,
+- panic is reserved only for unrecoverable internal invariants that cannot be
+  triggered by valid public use.
+
+In lvlath, option validation is part of the public contract surface and must
+participate in the sentinel-first error protocol.
+
 6.3 Two-Level Option Model
 Separate numeric policy options (tolerances, thresholds) from domain policy options 
 (directed, weighted, loops, metric closure).
@@ -335,20 +409,32 @@ Unexported:
   structure an objectively thick method.
 
 7.2 File Layout
-Preferred isolation (one major concern per file):
+Preferred isolation (one major concern per file), with mandatory files for
+non-trivial packages:
+
+Mandatory for algorithm / domain packages:
+- `api.go`               (canonical public facades and wrappers)
+- `bench_test.go`        (benchmark governance)
 - `doc.go`               (package charter)
-- `types.go`             (results, interfaces, package-level types)
 - `errors.go`            (single source of truth for sentinels)
+- `example_test.go`      (stable package examples)
+- `impl_*.go`            (kernels / algorithms)
+- `imp_*_test.go`        (contract tests)
+- `test_helpers_test.go` (explicit testing helpers)
+- `types.go`             (results, interfaces, package-level types)
+- `docs/*.md`            (repository tutorial/specification)
+
+Strongly recommended where applicable:
+- `helpers.go`           (internal shared logic)
 - `options.go`           (options, defaults, application logic)
 - `validators.go`        (structural/numeric validation)
-- `api.go`               (public facades)
-- `impl_*.go`            (kernels / algorithms)
-- `helpers.go`           (internal shared logic)
-- `example_test.go`      (stable package examples)
-- `test_helpers_test.go` (explicit testing helpers)
-- `*_test.go`            (contract tests)
-- `*_bench_test.go`      (benchmark governance)
-- `docs/*.md`            (repository tutorial/specification)
+- `*_test.go`            (others contract tests)
+
+Law:
+- `api.go` is mandatory for every non-trivial package.
+- Public algorithm entry points must not be scattered arbitrarily across impl files.
+- If a package is truly tiny and has no meaningful facade/kernel separation,
+  omission must be explicitly justified and remain exceptional.
 
 7.3 Constants Law
 No magic unnamed values if the value:
@@ -374,6 +460,7 @@ Required block model:
 - Determinism (Exact order source and tie-breaks)
 - Complexity (Honest, current algorithmic complexity)
 - Notes (Edge cases)
+- Nilability (if receiver or result can be nil)
 - AI-Hints (Targeted warnings for IDEs/LLMs to prevent misuse)
 
 ===============================================================================
@@ -431,131 +518,216 @@ If a package exposes views, it must fix:
 - what is preserved and what is transformed,
 - parent lifetime dependency.
 
+10.4 Nilable Result Law
+If a public result type can meaningfully appear as a nil pointer receiver,
+its methods must remain safe and classify nil access explicitly.
+
+Mandatory rules:
+- nil receiver methods must not panic,
+- nil receiver behavior must be documented,
+- nil result access must return a distinct sentinel when the package defines one,
+- tests must explicitly anchor nil-result behavior.
+
+This law is especially important for algorithm result types with helper methods
+such as:
+- `DistanceTo`
+- `HasPathTo`
+- `PathTo`
+- `Clone`
+
 ===============================================================================
-11. Deterministic ID Governance
+11. Public Result & Wrapper Governance
+===============================================================================
+
+11.1 Canonical Result Surface
+Every non-trivial algorithm package must expose one canonical result artifact
+(`XxxResult`) as the primary interaction surface.
+
+11.2 Wrapper Honesty Law
+Wrapper helpers are allowed only if they are semantically honest projections of
+the canonical result surface.
+
+They may:
+- reduce boilerplate,
+- force-enable a necessary mode explicitly,
+- discard unused parts of the canonical result.
+
+They must not:
+- introduce alternative mathematics,
+- silently change determinism,
+- weaken error classification,
+- invent fallback modes.
+
+11.3 Result Helper Methods
+Result helper methods should be introduced when they materially improve
+correctness, ergonomics, or clarity.
+
+Typical examples:
+- `DistanceTo`
+- `HasPathTo`
+- `PathTo`
+- `Clone`
+
+11.4 Nil-Safe Result Methods
+If result methods can be called on nil receivers in real code paths, nil-safe
+classification must be explicit and tested.
+
+11.5 Typed-Value Prohibition for Canonical Algorithms
+The canonical public algorithm facade must not return typed-value bundles such as:
+- multiple parallel maps,
+- loosely related slices,
+- anonymous structs.
+
+Those are allowed only internally or in narrow wrappers, never as the primary
+contract for a non-trivial package.
+
+===============================================================================
+12. Deterministic ID Governance
 ===============================================================================
 
 For identity-heavy packages, the following must be documented:
-1. ID format
-2. Monotonicity law
-3. Collision policy (reject, override, merge)
-4. Sorting semantics (numeric vs lexicographic)
-5. Round-trip preservation policy (serialization parity)
-6. Counter bump policy on user-supplied IDs
+1) ID format
+2) Monotonicity law
+3) Collision policy (reject, override, merge)
+4) Sorting semantics (numeric vs lexicographic)
+5) Round-trip preservation policy (serialization parity)
+6) Counter bump policy on user-supplied IDs
 
 ===============================================================================
-12. Thick Methods Standard
+13. Thick Methods Standard
 ===============================================================================
 
 Every thick algorithmic or pipeline method must follow an auditable stage model.
 
-12.1 Stage 1: Validate & Normalize
+13.1 Stage 1: Validate & Normalize
 - Early-return on nil/invalid.
 - Validate shape, mode, options.
 - Normalize only if normalization is contract-safe.
 
-12.2 Stage 2: Assemble Policy & Allocate Once
+13.2 Stage 2: Assemble Policy & Allocate Once
 - Resolve options and freeze runtime policy.
 - Prepare reusable buffers once.
 - Preallocate capacities honestly (`make(..., cap)`).
 - No hidden allocations in hot loops.
 
-12.3 Stage 3: Core Loops
+13.3 Stage 3: Core Loops
 - Fixed loop order based on the determinism law.
 - Deterministic policy application.
 - No hidden sorting in hot loops.
 - Fast-path execution only if semantics are 100% equivalent.
 
-12.4 Stage 4: Finalize & Post-checks
+13.4 Stage 4: Finalize & Post-checks
 - Enforce final invariants.
 - Execute final sorts, reversals, or canonicalizations.
 - Attach metadata, counts, flags, and anchoring properties.
 
-12.5 Stage 5: Publish Result
+13.5 Stage 5: Publish Result
 - Return public result type.
 - Preserve or clear partial results exactly as the contract requires.
 
-12.6 No-Magic Local State Law
+13.6 No-Magic Local State Law
 Thresholds, root depths, capacity hints, and sentinel constants must be named variables.
 
 ===============================================================================
-13. Partial Result Governance
+14. Partial Result Governance
 ===============================================================================
 
 If a package returns a partial result + error, it must document this strictly.
 
-13.1 Partial-Result Law
+14.1 Partial-Result Law
 Must specify:
 - whether partial result is returned on cancellation,
 - whether partial result is returned on runtime error,
 - which fields remain authoritatively valid,
 - which fields are explicitly cleared or invalidated.
 
-13.2 Testing Partial Results
+14.2 Testing Partial Results
 Tests must anchor partial-result semantics. Every retained or cleared field must 
 be governed by explicit assertions.
 
-13.3 Documentation Strictness
+14.3 Documentation Strictness
 Docs and examples must never imply full success semantics on a partial result.
 
 ===============================================================================
-14. Pseudocode and Visualization Honesty Law
+15. Pseudocode and Visualization Honesty Law
 ===============================================================================
 
 Pseudocode, formulas, and diagrams in docs are allowed only if faithful to the contract.
 
-14.1 Pseudocode Restrictions
+15.1 Pseudocode Restrictions
 Pseudocode must not:
 - invent non-existent APIs,
 - move parent/metadata assignment to the wrong semantic stage,
 - omit critical policy gates,
 - imply exhaustive enumeration where only witness discovery exists.
 
-14.2 Formula Law
+15.2 Formula Law
 Formulas are included only if they genuinely describe the implemented semantics and 
 help understand the contract. "Formulas for the sake of quantity" are forbidden.
 
-14.3 Visualization Law
+15.3 Visualization Law
 ASCII, Mermaid, or diagram sections must genuinely clarify the architecture or contract. 
 Decorative garbage is strictly forbidden.
 
 ===============================================================================
-15. Test Governance
+16. Test Governance
 ===============================================================================
 
-15.1 Minimum Contract Grid
+16.1 Minimum Contract Grid
 Every contract must be covered by:
 - Validation group: nil, bad shape, missing input, policy violations.
 - Medium group: real math on non-trivial data, correct structure, deterministic output.
 - Special group: edge cases, forest/mixed modes, cancellation, multi-layer error 
   preservation, partial results.
 
-15.2 Fast-path / Fallback Coverage
+16.2 Fast-path / Fallback Coverage
 If a fast-path exists, tests must hit both the fast-path and the fallback, explicitly 
 proving contract equivalence.
 
-15.3 Math-First Rule
+16.3 Math-First Rule
 Tests protect correct math. Tests must never coerce the implementation into incorrect 
 semantics to satisfy a poorly written assertion.
 
-15.4 Error Testing Law
+16.4 Error Testing Law
 Classification must use `errors.Is`. Protocol checking via `strings.Contains` is banned.
 
-15.5 Testing Helpers Law
-- Test helpers must be explicit, deterministic, and contract-oriented.
-- `reflect.DeepEqual` should be avoided if an explicit structural comparison yields 
-  superior error messaging and stronger contract defense.
-- External assertion frameworks (e.g., `testify`) are forbidden if the package 
-  style requires explicit, transparent governance.
+16.5 Testing Helpers Law
+Every non-trivial package must provide a dedicated `test_helpers_test.go`.
 
-15.6 Regression Anchors
+Purpose:
+- eliminate any need for reflection-heavy or assertion-framework-heavy testing,
+- provide precise, contract-oriented failure messages,
+- centralize repeated protocol checks for result types, sentinels, nil-state,
+  path/order/result comparisons, and numeric assertions.
+
+Mandatory baseline helper set (adapt and extend per package):
+- `mustErrorIs(t *testing.T, err error, target error)`
+- `mustNilState(t *testing.T, value any, wantNil bool, op string)`
+- `isNilLike(value any) bool`
+- `mustEqualBool(t *testing.T, got, want bool, op string)`
+- `mustEqualInt(t *testing.T, got, want int, op string)`
+- `mustEqualString(t *testing.T, got, want string, op string)`
+
+Additional helpers must be introduced where the domain needs them, for example:
+- numeric comparisons,
+- stable path/order checks,
+- structured result checks,
+- witness/cycle comparison,
+- map-domain assertions.
+
+Hard law:
+- `reflect.DeepEqual` must not be used where explicit structural helpers provide
+  stronger contract defense and clearer failure messages.
+- external assertion frameworks such as `testify` are forbidden in UES-grade packages.
+
+16.6 Regression Anchors
 Every fixed bug must receive a explicitly named regression test anchor.
 
 ===============================================================================
-16. Benchmark Governance
+17. Benchmark Governance
 ===============================================================================
 
-16.1 Setup Integrity Law
+17.1 Setup Integrity Law
 All graph/data building, parsing, and setup must complete before `b.ResetTimer()`.
 
 16.2 Shape Integrity Law
@@ -563,53 +735,107 @@ The benchmark must measure exactly what is claimed. If topology policies (e.g.,
 duplicate rejection, multi-edge constraints) silently shrink the input shape, the 
 benchmark must either regenerate valid input or honestly document the reduced payload.
 
-16.3 Hot Loop Purity Law
+17.2.1 Algorithmic Regime Law
+Every benchmark must answer a concrete question:
+
+"What algorithmic regime am I loading?"
+
+Examples of valid regimes:
+- sparse chain traversal,
+- dense local competition,
+- mixed-edge endpoint resolution,
+- cutoff policy overhead,
+- path-tracking overhead,
+- forest traversal restart logic,
+- cycle witness explosion control.
+
+Mandatory rules:
+- each benchmark name must correspond to a meaningful topology or policy regime,
+- builder helpers are allowed only when they encode reusable topology semantics,
+  not when they merely hide arbitrary setup noise,
+- a benchmark that does not reveal a concrete algorithmic regime should be removed.
+
+Benchmark suites for algorithmic packages should prefer a small number of
+high-value, shape-driven regimes over a large number of decorative or redundant cases.
+
+17.3 Hot Loop Purity Law
 Inside the `b.N` loop:
 - execute only the measured call,
 - perform minimal error checking,
 - no `fmt`, no hidden conversions, no benchmark scaffolding allocations.
 - `b.ReportAllocs()` is mandatory for core and algorithmic packages.
 
-16.4 Seed and Reproducibility
+17.3.1 Setup Failure Integrity Law
+Benchmark setup must fail fast and explicitly on topology-construction errors.
+
+Mandatory rules:
+- setup errors must never be ignored,
+- benchmark fixtures must not silently degrade shape because of rejected inserts,
+- if graph policy rejects part of the generated payload, the benchmark must either:
+  - regenerate until the intended shape is achieved, or
+  - document the reduced shape honestly and explicitly.
+
+17.4 Seed and Reproducibility
 If random generation is used, a fixed seed is mandatory. The input shape must be 
 100% reproducible across runs.
 
-16.5 Error Branch Isolation
+17.5 Error Branch Isolation
 Benchmarks must guarantee they do not accidentally measure an erroneous branch 
 (e.g., failing fast on setup data).
 
 ===============================================================================
-17. Examples Governance
+18. Examples Governance
 ===============================================================================
 
-17.1 Examples must compile, run against the real API, and demonstrate pipeline usage 
+18.1 Examples must compile, run against the real API, and demonstrate pipeline usage 
 (setup -> invoke -> consume). Fake "future methods" are forbidden.
 
-17.2 Stability Law
+18.1.1 Mandatory Heavy Examples Law for Algorithm Packages
+Every non-trivial algorithm package must provide a core package-example suite in
+`example_test.go` built around practical, scenario-driven pipelines.
+
+For algorithm packages, the default expectation is:
+- at least five meaningful package examples,
+- each example demonstrates a distinct contract regime or practical domain story,
+- each example follows:
+  `build -> algorithm -> consume`
+
+Strong default rules:
+- examples should use at least 12 edges / relations unless the example is a
+  deliberately minimal law-demo,
+- examples must have a real operational story, not a toy triangle unless the
+  purpose is a narrowly scoped law demonstration,
+- examples must use the public API meaningfully, not merely call functions “for show”,
+- printed output must be fully deterministic,
+- examples must not imply stronger guarantees than the package contract provides.
+
+Minimal-law examples are allowed, but they do not replace the mandatory heavy scenario set.
+
+18.2 Stability Law
 Examples must not be flaky.
 - `// Output:` must be perfectly deterministic. If order varies by contract, the 
   example must print invariant-only output.
 - Time-based flaky cancellation (timeouts) that risk output drift is forbidden. 
   Use deterministic logical cancellation instead.
 
-17.3 Package Examples vs Scenario Examples
+18.3 Package Examples vs Scenario Examples
 Strict separation:
 - `example_test.go`: stable, package-level contract and pipeline examples.
 - `examples/*.go`: powerful real-world scenarios, rich domain processes, and 
   composition patterns demonstrating business value.
 
 ===============================================================================
-18. Repository Documentation Governance (`docs/*.md`)
+19. Repository Documentation Governance (`docs/*.md`)
 ===============================================================================
 
 Repository docs are the public teaching contract. They must be stronger than a README 
 but must not blindly duplicate `doc.go`.
 
-18.1 Synchronization Law
+19.1 Synchronization Law
 `doc.go`, GoDoc, tests, examples, and `docs/*.md` must describe identical semantics. 
 No fictional APIs or speculative helpers.
 
-18.2 Repository Markdown Header Law
+19.2 Repository Markdown Header Law
 Every fundamental `docs/*.md` file must begin with a repository-comment header fixing:
 - file name,
 - package reference,
@@ -618,33 +844,33 @@ Every fundamental `docs/*.md` file must begin with a repository-comment header f
 - scope,
 - license.
 
-18.3 Complexity Honesty Law
+19.3 Complexity Honesty Law
 Complexity claims in repository docs must reflect the current real algorithm shape. 
 Outdated quadratic claims on now-linear code are treated as documentation bugs.
 
-18.4 Example Bridge Law
+19.4 Example Bridge Law
 Docs examples must either be compact but complete, or explicitly point to 
 `example_test.go` as the canonical executable source. No ambiguous half-teasers.
 
 ===============================================================================
-19. Contract Conflict Resolution Procedure
+20. Contract Conflict Resolution Procedure
 ===============================================================================
 
 When a conflict is discovered between behavior, docs, tests, and math:
 
-19.1 Detect the conflict explicitly.
-19.2 Determine the true law. Resolution priority:
+20.1 Detect the conflict explicitly.
+20.2 Determine the true law. Resolution priority:
      Mathematical correctness > Determinism > Contract stability > Honest operational model.
      Do not pick the "easiest patch" if it violates mathematics.
-19.3 Lock the law in three places:
+20.3 Lock the law in three places:
      - `doc.go`
      - Per-symbol GoDoc
      - Test regression anchor
-19.4 Propagate the fix to all repository docs and examples.
-19.5 Record compatibility impact explicitly.
+20.4 Propagate the fix to all repository docs and examples.
+20.5 Record compatibility impact explicitly.
 
 ===============================================================================
-20. Change Admission Criteria
+21. Change Admission Criteria
 ===============================================================================
 
 A change is explicitly acceptable ONLY if it brings:
@@ -664,23 +890,23 @@ A change is strictly REJECTED if it:
 - increases ambiguity or introduces retention leaks.
 
 ===============================================================================
-21. Algorithm Package Charter Addendum
+22. Algorithm Package Charter Addendum
 ===============================================================================
 
 For algorithms operating over `core.Graph` or equivalent domain structures:
 
-21.1 Graph Policy Declaration
+22.1 Graph Policy Declaration
 The algorithm must explicitly declare:
 - weighted vs unweighted acceptance,
 - directed / undirected / mixed policy,
 - which relation is consumed (NeighborIDs, Edges, local adjacency),
 - whether partial results are supported.
 
-21.2 Deterministic Traversal Law
+22.2 Deterministic Traversal Law
 If returning an `Order`, it must name: root order source, neighbor relation source, 
 tie-break rule, and any final canonicalization sort.
 
-21.3 Visit Definition Law
+22.3 Visit Definition Law
 If distinguishing discovery / enqueue / dequeue / process / finalize, the package 
 must explicitly choose and define what counts as a "visit".
 
@@ -688,51 +914,79 @@ must explicitly choose and define what counts as a "visit".
 Any applied filter must be strictly classified as: relation-level, edge-level, 
 node-level, or component-level.
 
-21.5 Path Reconstruction Law
+22.5 Path Reconstruction Law
 For `PathTo` or predecessor maps, explicitly define:
 - whether it reconstructs one path or all,
 - what counts as reachable,
 - semantics under forest/multi-root modes.
 
-21.6 FullTraversal / Forest Law
+22.5.1 Public Path Query Law
+If a package supports path reconstruction, public path interaction must be exposed
+through the result artifact, not by leaking raw predecessor storage as the primary interface.
+
+Mandatory rules:
+- path queries should be performed via methods such as `PathTo`,
+- the result type must explicitly classify:
+  - unknown target,
+  - known unreachable target,
+  - tracking-disabled mode,
+  - nil-result access,
+- public docs and examples must not teach internal predecessor maps as the primary
+  user-facing contract when a higher-level result surface exists.
+
+22.6 FullTraversal / Forest Law
 Forest modes must define: secondary root ordering, the semantics of Depth and Parent, 
 and what remains anchored to the original source versus what becomes per-component.
 
-21.7 Queue / Frontier Memory Law (Retention Prevention)
+22.7 Queue / Frontier Memory Law (Retention Prevention)
 If the algorithm uses a worklist, queue, or frontier, using slices in the format 
 `queue = queue[1:]` is STRICTLY FORBIDDEN as it pins the underlying array and creates 
 an operational retention leak during long graph traversals. 
 BFS-like packages must use a head-index cursor, a ring buffer, or an equivalent 
 safe frontier discipline.
 
-21.8 Witness vs Exhaustive Law
+22.8 Witness vs Exhaustive Law
 Returned cycles, paths, or proofs must be classified as: exhaustive, representative, 
 witness-only, or best-effort.
 
 ===============================================================================
-22. AI-Hints Governance
+23. AI-Hints Governance
 ===============================================================================
 
 AI-Hints are an operational safety subsystem, not marketing or noise.
 
-22.1 Mandatory Zones
+23.1 Mandatory Zones
 AI-Hints must be present in:
 - `doc.go` (package level),
 - Exported GoDoc for complex symbols,
 - Test/bench/example file headers where misuse risk is high.
 
-22.2 Purpose
+23.2.1 Threat-Model Law
+Every AI-Hint must defend against a concrete, historically plausible failure mode.
+
+Examples of valid threat models:
+- replacing `errors.Is` with string matching,
+- collapsing unknown-target and unreachable-target states,
+- simplifying mixed-edge traversal to `edge.To`,
+- removing heap tie-breaks as a “micro-optimization”,
+- reintroducing panic-based option validation,
+- publishing partial results where the contract forbids them,
+- using `queue = queue[1:]` in long-running frontier algorithms.
+
+Hints without a concrete threat model are noise and must not be added.
+
+23.2 Purpose
 AI-Hints must target real failure patterns: wrong edge semantics, string-based 
 error parsing, aliasing mistakes, fake optimization refactors by LLMs, and stale pseudocode.
 
-22.3 Prohibition on Noise
+23.3 Prohibition on Noise
 AI-Hints are NOT needed where they:
 - repeat the obvious,
 - do not prevent a real error,
 - add noise and dilute meaning.
 They must NEVER contradict the source code.
 
-22.4 AI-Hints Audit Law
+22.3 AI-Hints Audit Law
 After any contract or implementation change, an audit is mandatory:
 - delete obsolete AI-Hints,
 - update changed hints,

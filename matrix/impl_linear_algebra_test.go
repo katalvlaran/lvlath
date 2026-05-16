@@ -1094,7 +1094,7 @@ func TestMatVec_Fallback_Wrapped(t *testing.T) {
 	}
 
 	for i = 0; i < r; i++ {
-		if InDelta(t, y1[i], y2[i], 0.0) {
+		if !InDelta(t, y1[i], y2[i], 0.0) {
 			t.Fatalf("y mismatch at %d: want %.6g, got %.6g", i, y1[i], y2[i])
 		}
 	}
@@ -1166,7 +1166,7 @@ func TestEigen_Diagonal_NoRotation(t *testing.T) {
 	want := append([]float64(nil), diagVals...)
 	sort.Float64s(got)
 	sort.Float64s(want)
-	if AlmostEqualSlice(got, want, 0.0) {
+	if !AlmostEqualSlice(got, want, 0.0) {
 		t.Fatalf("igenvalues mismatch: want=%v got=%v", want, got)
 	}
 
@@ -1205,11 +1205,11 @@ func TestEigen_2x2_Analytic(t *testing.T) {
 
 	got = append([]float64(nil), vals...)
 	sort.Float64s(got)
-	if InDelta(t, got[0], 1.0, 1e-10) {
+	if !InDelta(t, got[0], 1.0, 1e-10) {
 		t.Fatalf("want |%.6g-%.6g|<=%.1e", got[0], 1.0, 1e-10)
 	}
 
-	if InDelta(t, got[1], 3.0, 1e-10) {
+	if !InDelta(t, got[1], 3.0, 1e-10) {
 		t.Fatalf("want |%.6g-%.6g|<=%.1e", got[1], 3.0, 1e-10)
 	}
 
@@ -1240,13 +1240,13 @@ func TestEigen_BlockDiagonal_Degenerate(t *testing.T) {
 
 	got = append([]float64(nil), vals...)
 	sort.Float64s(got)
-	if InDelta(t, got[0], 2.0, 1e-10) {
+	if !InDelta(t, got[0], 2.0, 1e-10) {
 		t.Fatalf("want |%.6g-%.6g|<=%.1e", got[0], 2.0, 1e-10)
 	}
-	if InDelta(t, got[1], 2.0, 1e-10) {
+	if !InDelta(t, got[1], 2.0, 1e-10) {
 		t.Fatalf("want |%.6g-%.6g|<=%.1e", got[1], 2.0, 1e-10)
 	}
-	if InDelta(t, got[2], 4.0, 1e-10) {
+	if !InDelta(t, got[2], 4.0, 1e-10) {
 		t.Fatalf("want |%.6g-%.6g|<=%.1e", got[2], 4.0, 1e-10)
 	}
 
@@ -1338,7 +1338,7 @@ func TestInverse_Known3x3_Adjugate(t *testing.T) {
 	for i = 0; i < 3; i++ {
 		for j = 0; j < 3; j++ {
 			got = MustAt(t, Inv, i, j)
-			if InDelta(t, got, want[i][j], 1e-12) {
+			if !InDelta(t, got, want[i][j], 1e-12) {
 				t.Fatalf("Inv[%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, got, want[i][j], 1e-12)
 			}
 		}
@@ -1360,17 +1360,17 @@ func TestInverse_Known3x3_Adjugate(t *testing.T) {
 			lv, _ = Ileft.At(i, j)
 			rv, _ = Iright.At(i, j)
 			if i == j {
-				if InDelta(t, lv, 1.0, 1e-12) {
+				if !InDelta(t, lv, 1.0, 1e-12) {
 					t.Fatalf("A*Inv diag[%d]: want |%.6g-%.6g|<=%.1e", i, lv, 1.0, 1e-12)
 				}
-				if InDelta(t, rv, 1.0, 1e-12) {
+				if !InDelta(t, rv, 1.0, 1e-12) {
 					t.Fatalf("Inv*A diag[%d]: want |%.6g-%.6g|<=%.1e", i, rv, 1.0, 1e-12)
 				}
 			} else {
-				if InDelta(t, lv, 0.0, 1e-12) {
+				if !InDelta(t, lv, 0.0, 1e-12) {
 					t.Fatalf("A*Inv off[%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, lv, 0.0, 1e-12)
 				}
-				if InDelta(t, rv, 0.0, 1e-12) {
+				if !InDelta(t, rv, 0.0, 1e-12) {
 					t.Fatalf("Inv*A off[%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, rv, 0.0, 1e-12)
 				}
 			}
@@ -1422,7 +1422,7 @@ func TestInverse_WrappedInput_MatchesDense(t *testing.T) {
 		for j = 0; j < n; j++ {
 			v1, _ = Inv1.At(i, j)
 			v2, _ = Inv2.At(i, j)
-			if InDelta(t, v1, v2, 1e-11) {
+			if !InDelta(t, v1, v2, 1e-11) {
 				t.Fatalf("mistmatch at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v1, v2, 1e-11)
 			}
 		}
@@ -1453,9 +1453,11 @@ func TestInverse_IdentityProduct_SPD_6x6(t *testing.T) {
 	for i = 0; i < n; i++ {
 		for j = 0; j < n; j++ {
 			v, _ = PD.At(i, j)
-			MustSet(t, PD, i, j, v)
+			MustSet(t, A, i, j, v)
 		}
-		MustSet(t, A, i, i, +1.0)
+
+		v, _ = A.At(i, i)
+		MustSet(t, A, i, i, v+1.0)
 	}
 
 	Acopy := A.Clone()
@@ -1480,17 +1482,17 @@ func TestInverse_IdentityProduct_SPD_6x6(t *testing.T) {
 			lv, _ = L.At(i, j)
 			rv, _ = R.At(i, j)
 			if i == j {
-				if InDelta(t, lv, 1.0, 1e-8) {
+				if !InDelta(t, lv, 1.0, 1e-8) {
 					t.Fatalf("A*Inv diag[%d]: want |%.6g-%.6g|<=%.1e", i, lv, 1.0, 1e-12)
 				}
-				if InDelta(t, rv, 1.0, 1e-8) {
+				if !InDelta(t, rv, 1.0, 1e-8) {
 					t.Fatalf("Inv*A diag[%d]: want |%.6g-%.6g|<=%.1e", i, rv, 1.0, 1e-12)
 				}
 			} else {
-				if InDelta(t, lv, 0.0, 1e-8) {
+				if !InDelta(t, lv, 0.0, 1e-8) {
 					t.Fatalf("A*Inv off[%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, lv, 0.0, 1e-12)
 				}
-				if InDelta(t, rv, 0.0, 1e-8) {
+				if !InDelta(t, rv, 0.0, 1e-8) {
 					t.Fatalf("Inv*A off[%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, rv, 0.0, 1e-12)
 				}
 			}
@@ -1569,7 +1571,7 @@ func TestInverse_ScaleProperty(t *testing.T) {
 			var left, right float64
 			left, _ = InvAlphaA.At(i, j)
 			right, _ = scaleInvA.At(i, j)
-			if InDelta(t, right, left, 1e-9) {
+			if !InDelta(t, right, left, 1e-9) {
 				t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, right, left, 1e-9)
 			}
 		}
@@ -1885,7 +1887,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 		for j = 0; j < 3; j++ {
 			rv = MustAt(t, R, i, j)
 			if i > j {
-				if InDelta(t, rv, 0.0, 1e-12) {
+				if !InDelta(t, rv, 0.0, 1e-12) {
 					t.Fatalf("R[%d,%d] must be 0 below diagonal: want |%.6g-%.6g|<=%.1e", i, j, rv, 0.0, 1e-12)
 				}
 				continue
@@ -1893,7 +1895,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 			if rv < 0 {
 				rv = -rv
 			}
-			if InDelta(t, rv, RabsWant[i][j], 1e-12) {
+			if !InDelta(t, rv, RabsWant[i][j], 1e-12) {
 				t.Fatalf("abs(R[%d,%d]): want |%.6g-%.6g|<=%.1e", i, j, rv, RabsWant[i][j], 1e-12)
 			}
 		}
@@ -1928,7 +1930,7 @@ func TestQR_Classic3x3_Householder_Known(t *testing.T) {
 		}
 		for i = 0; i < 3; i++ {
 			qv = MustAt(t, Qt, i, j)
-			if InDelta(t, qv, sign*Qwant[i][j], 1e-9) {
+			if !InDelta(t, qv, sign*Qwant[i][j], 1e-9) {
 				t.Fatalf("Qt[%d,%d] up to sign: want |%.6g-%.6g|<=%.1e", i, j, qv, sign*Qwant[i][j], 1e-9)
 			}
 		}
@@ -1978,7 +1980,7 @@ func TestQR_Fallback_MatchesFast_5x5(t *testing.T) {
 	Mw := hide{M}
 	Q2, R2, err := matrix.QR(Mw)
 	if err != nil {
-		t.Fatalf("matrix.QR(Mv): want err == nil, got: %v", err)
+		t.Fatalf("matrix.QR(Mw): want err == nil, got: %v", err)
 	}
 
 	// Elementwise comparison with small tolerance
@@ -1987,13 +1989,13 @@ func TestQR_Fallback_MatchesFast_5x5(t *testing.T) {
 		for j = 0; j < n; j++ {
 			v1, _ = Q1.At(i, j)
 			v2, _ = Q2.At(i, j)
-			if InDelta(t, v1, v2, 1e-11) {
-				t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v1, v1, 1e-11)
+			if !InDelta(t, v1, v2, 1e-11) {
+				t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v1, v2, 1e-11)
 			}
 
 			v1, _ = R1.At(i, j)
 			v2, _ = R2.At(i, j)
-			if InDelta(t, v1, v2, 1e-11) {
+			if !InDelta(t, v1, v2, 1e-11) {
 				t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v1, v2, 1e-11)
 			}
 		}
@@ -2089,11 +2091,11 @@ func propOrthonormal(t *testing.T, Q matrix.Matrix, delta float64) {
 		for j = 0; j < n; j++ {
 			v = MustAt(t, QtQ, i, j)
 			if i == j {
-				if InDelta(t, v, 1.0, delta) {
+				if !InDelta(t, v, 1.0, delta) {
 					t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 1.0, delta)
 				}
 			} else {
-				if InDelta(t, v, 0.0, delta) {
+				if !InDelta(t, v, 0.0, delta) {
 					t.Fatalf("at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 0.0, delta)
 				}
 			}
@@ -2147,7 +2149,7 @@ func propReconstruction(t *testing.T, A, Q matrix.Matrix, vals []float64, delta 
 		for j = 0; j < n; j++ {
 			w = MustAt(t, A, i, j)
 			g = MustAt(t, QDQt, i, j)
-			if InDelta(t, g, w, delta) {
+			if !InDelta(t, g, w, delta) {
 				t.Fatalf("reconstruction mismatch at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, g, w, delta)
 			}
 		}
@@ -2196,7 +2198,7 @@ func propEigenEquation(t *testing.T, A, Q matrix.Matrix, vals []float64, delta f
 		for j = 0; j < n; j++ {
 			l = MustAt(t, AQ, i, j)
 			r = MustAt(t, QD, i, j)
-			if InDelta(t, l, r, delta) {
+			if !InDelta(t, l, r, delta) {
 				t.Fatalf("A*Q vs Q*D mismatch at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, l, r, delta)
 			}
 		}
@@ -2225,7 +2227,7 @@ func propUnitLowerTriangular(t *testing.T, L matrix.Matrix, delta float64) {
 						t.Fatalf("diag(L)[%d]: want v == %b, got: %.6g", i, 1.0, v)
 					}
 				} else {
-					if InDelta(t, v, 1.0, delta) {
+					if !InDelta(t, v, 1.0, delta) {
 						t.Fatalf("diag(L) [%d]: want |%.6g-%.6g|<=%.1e", i, v, 1.0, delta)
 					}
 				}
@@ -2235,7 +2237,7 @@ func propUnitLowerTriangular(t *testing.T, L matrix.Matrix, delta float64) {
 						t.Fatalf("upper(L)[%d,%d]: want v == %b, got: %.6g", i, j, 0.0, v)
 					}
 				} else {
-					if InDelta(t, v, 0.0, delta) {
+					if !InDelta(t, v, 0.0, delta) {
 						t.Fatalf("upper(L) at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 0.0, delta)
 					}
 				}
@@ -2266,7 +2268,7 @@ func propUpperTriangular(t *testing.T, U matrix.Matrix, delta float64) {
 						t.Fatalf("upper(L)[%d,%d]: want v == %b, got: %.6g", i, j, 0.0, v)
 					}
 				} else {
-					if InDelta(t, v, 0.0, delta) {
+					if !InDelta(t, v, 0.0, delta) {
 						t.Fatalf("upper(L) at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, v, 0.0, delta)
 					}
 				}
@@ -2308,7 +2310,7 @@ func propReconstructionLU(t *testing.T, A, L, U matrix.Matrix, delta float64) {
 					t.Fatalf("A vs L*U at [%d,%d]: want %.6g, got %.6g", i, j, ar, lr)
 				}
 			} else {
-				if InDelta(t, lr, ar, delta) {
+				if !InDelta(t, lr, ar, delta) {
 					t.Fatalf("A vs L*U at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, lr, ar, delta)
 				}
 			}
@@ -2349,7 +2351,7 @@ func propReconstructionQR(t *testing.T, A, Q, R matrix.Matrix, delta float64) {
 		for j = 0; j < A.Cols(); j++ {
 			lv = MustAt(t, A, i, j)
 			rv = MustAt(t, QtR, i, j)
-			if InDelta(t, lv, rv, delta) {
+			if !InDelta(t, lv, rv, delta) {
 				t.Fatalf("A vs Qᵀ*R mismatch at [%d,%d]: want |%.6g-%.6g|<=%.1e", i, j, lv, rv, delta)
 			}
 		}

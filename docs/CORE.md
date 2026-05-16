@@ -81,7 +81,7 @@ The package utilizes the **Functional Options Pattern** to enforce immutability 
 // Pattern A: "The Social Graph" (Simple)
 // Use Case: Users and Friendships.
 // Behavior: Undirected (friendship is mutual), Unweighted, No Loops (cannot friend self).
-socialGraph := core.NewGraph()
+socialGraph, _ := core.NewGraph()
 
 _ = socialGraph.AddVertex("Alice")
 _ = socialGraph.AddVertex("Bob")
@@ -91,9 +91,9 @@ _, _ = socialGraph.AddEdge("Alice", "Bob", 0) // Friendship established
 // Pattern B: "The CI/CD Pipeline" (Weighted DAG)
 // Scenario: A task execution system where time is money.
 // Behavior: Directed (Dependency flow). Weighted (Execution time in seconds). No Loops (Circular dependencies are fatal).
-pipeline := core.NewGraph(
-core.WithDirected(true), // Dependencies flow one way
-core.WithWeighted(),     // Edge weight = Duration
+pipeline, _ := core.NewGraph(
+    core.WithDirected(true), // Dependencies flow one way
+    core.WithWeighted(),     // Edge weight = Duration
 )
 // Defining the Critical Path
 _, _ = pipeline.AddEdge("git_clone", "build_core", 45.0)
@@ -110,11 +110,11 @@ _, _ = pipeline.AddEdge("run_tests", "deploy", 15.0)
 //    Mixed: Some streets are one-way (Directed), avenues are two-way (Undirected).
 //    Multi: A tunnel and a bridge can connect the same two districts (Parallel edges).
 //    Loops: Roundabouts (Internal routing).
-cityMap := core.NewGraph(
-core.WithMixedEdges(), // Essential for mixing one-way and two-way streets
-core.WithMultiEdges(), // Allows Tunnel AND Bridge between same points
-core.WithLoops(),      // Roundabouts
-core.WithWeighted(),   // Distance in km
+cityMap, _ := core.NewGraph(
+    core.WithMixedEdges(), // Essential for mixing one-way and two-way streets
+    core.WithMultiEdges(), // Allows Tunnel AND Bridge between same points
+    core.WithLoops(),      // Roundabouts
+    core.WithWeighted(),   // Distance in km
 )
 
 // 1. Two-way Avenue (Undirected Override)
@@ -389,7 +389,7 @@ import (
 func main() {
     // 1. Initialize Ukraine Transport Map
     // Needs Weights (Distance) and Mixed Edges (Roads vs One-ways)
-    g := core.NewGraph(
+    g, _ := core.NewGraph(
         core.WithWeighted(),
         core.WithMultiEdges(),
         core.WithMixedEdges(),

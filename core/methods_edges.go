@@ -107,17 +107,18 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //   - If endpoints are missing, they are created atomically as part of this transaction.
 //
 // Implementation:
-//   - Stage 1: Validate inputs (stateless checks).
+//   - Stage 1: Validate inputs (stateless checks, including nil EdgeOption rejection).
 //   - Stage 2: Acquire muVert.Lock() (Transaction Start).
 //   - Stage 3: Ensure 'from' and 'to' vertices exist in the catalog.
 //   - Stage 4: Acquire muEdgeAdj.Lock().
 //   - Stage 5: Enforce edge policies (multi, loops, mixed).
-//   - Stage 6: Create edge, assign ID, update adjacency buckets.
+//   - Stage 6: Create edge, apply options, assign ID, and update adjacency.
 //   - Stage 7: Release locks (Transaction End).
 //
 // Behavior highlights:
 //   - Strict sentinel errors only (errors.Is).
 //   - No panics as part of the public contract.
+//   - Nil EdgeOption values fail fast before lock acquisition, vertex auto-creation, or adjacency mutation.
 //   - No lock gap between vertex creation and edge insertion.
 //
 // Inputs:
@@ -134,11 +135,13 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //   - ErrEmptyVertexID: if from == "" or to == "".
 //   - ErrBadWeight: if weight != 0 on an unweighted graph.
 //   - ErrLoopNotAllowed: if from == to and loops are disabled.
+//   - ErrNilEdgeOption: if opts contains a nil EdgeOption value.
 //   - ErrMultiEdgeNotAllowed: if a parallel edge is attempted and multi-edges are disabled.
 //   - ErrMixedEdgesNotAllowed: if a directedness override is attempted without mixed mode.
 //   - ErrEmptyEdgeID / ErrEdgeIDConflict: from WithID / ValidateEdgeID rules.
 //
 // Determinism:
+//   - Option validation order is stable (call order).
 //   - Option application order is stable (call order).
 //   - Auto-ID assignment uses a monotonic counter (no randomness, no time).
 //
@@ -162,6 +165,13 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 	}
 	if from == to && !g.allowLoops {
 		return "", ErrLoopNotAllowed
+	}
+
+	var opt EdgeOption
+	for _, opt = range opts {
+		if opt == nil {
+			return "", ErrNilEdgeOption
+		}
 	}
 
 	// 2. Start Transaction: Lock Vertices (Write Lock)
@@ -204,7 +214,7 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 
 	// 8. Apply Options
 	// Note: Options are simple mutators; they do not require extra locks.
-	for _, opt := range opts {
+	for _, opt = range opts {
 		if err := opt(g, e); err != nil {
 			return "", err
 		}
@@ -436,6 +446,12 @@ func (g *Graph) SetEdgeID(oldID, newID string) error {
 //   - Stage 2: Filter edges whose IDs do not match matchesAutoIDPattern.
 //   - Stage 3: Sort results by Edge.ID asc for deterministic order.
 //
+// Behavior highlights:
+// - Deterministic output order (Edge.ID lex asc).
+// - The returned slice container is freshly allocated.
+// - Slice elements alias live catalog edges.
+// - Structural edge fields MUST be treated as immutable once published in a graph.
+//
 // Returns:
 //   - []*Edge: edges with non-auto-shaped IDs, sorted by ID.
 //
@@ -446,7 +462,9 @@ func (g *Graph) SetEdgeID(oldID, newID string) error {
 //   - Time O(E log E), Space O(E).
 //
 // NOTES:
-//   - safe for concurrent use; acquires muEdgeAdj read lock.
+//   - Reordering or truncating the returned slice does not mutate the graph.
+//   - Retaining a returned *Edge does not pin graph membership or extend graph locks.
+//   - Use external value copies if detached mutable edge ownership is required.
 func (g *Graph) GetNamedEdges() []*Edge {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
@@ -493,9 +511,11 @@ func (g *Graph) GetNamedEdges() []*Edge {
 //   - Time O(1) average, Space O(1).
 //
 // Notes:
-//   - The returned pointer refers to the live catalog object.
-//     Callers MUST treat it as immutable; mutation would break graph invariants.
-//   - If you need a stable snapshot object for external ownership, copy the Edge value.
+//   - The returned pointer aliases the live catalog object.
+//   - Edge.ID, Edge.From, Edge.To, Edge.Weight, and Edge.Directed MUST be treated
+//     as immutable once the edge is published in the graph.
+//   - Retaining the pointer does not pin membership and does not extend graph locks.
+//   - If detached mutable ownership is required, copy the Edge value externally.
 //
 // AI-Hints:
 //   - Use errors.Is(err, ErrEdgeNotFound) to branch without string matching.

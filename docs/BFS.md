@@ -536,7 +536,7 @@ import (
 )
 
 func main() {
-    g := core.NewGraph(core.WithDirected(true))
+    g, _ := core.NewGraph(core.WithDirected(true))
 
     edges := [][2]string{
         {"gateway", "auth"},

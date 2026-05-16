@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix_test provides comprehensive unit tests for adjacency-matrix wrappers,
 // using stdlib only. All tests are deterministic and table/parallel where applicable.
@@ -7,7 +8,7 @@ package matrix_test
 import (
 	"errors"
 	"fmt"
-	"sort"
+	"math"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/builder"
@@ -27,28 +28,14 @@ func edgesMap(g *core.Graph) map[[2]string]float64 {
 	return m
 }
 
-// edgesMultiMap collects multi-edges; weights per (from,to) are sorted for stable compare.
-func edgesMultiMap(g *core.Graph) map[[2]string][]float64 {
-	m := map[[2]string][]float64{}
-	for _, e := range g.Edges() {
-		k := [2]string{e.From, e.To}
-		m[k] = append(m[k], e.Weight)
-	}
-	for k := range m {
-		sort.Slice(m[k], func(i, j int) bool { return m[k][i] < m[k][j] })
-	}
-
-	return m
-}
-
 // --- tests ---
 
 // TestAdjacency_Blueprint validates constructor guards and basic shape.
 func TestAdjacency_Blueprint(t *testing.T) {
 	t.Parallel()
-
+	mOpts, _ := matrix.NewMatrixOptions()
 	// nil graph ⇒ ErrGraphNil
-	if am, err := matrix.NewAdjacencyMatrix(nil, matrix.NewMatrixOptions()); !errors.Is(err, matrix.ErrGraphNil) || am != nil {
+	if am, err := matrix.NewAdjacencyMatrix(nil, mOpts); !errors.Is(err, matrix.ErrGraphNil) || am != nil {
 		t.Fatalf("nil graph: want ErrGraphNil, got am=%v err=%v", am, err)
 	}
 
@@ -62,11 +49,12 @@ func TestAdjacency_Blueprint(t *testing.T) {
 		t.Fatalf("BuildGraph: %v", err)
 	}
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(
+	mOpts, _ = matrix.NewMatrixOptions(
 		matrix.WithWeighted(),
 		matrix.WithAllowMulti(),
 		matrix.WithAllowLoops(),
-	))
+	)
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -124,7 +112,8 @@ func TestNeighbors_TableDriven(t *testing.T) {
 			if err != nil {
 				t.Fatalf("BuildGraph: %v", err)
 			}
-			am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(sc.matrixOpts...))
+			mOpts, _ := matrix.NewMatrixOptions(sc.matrixOpts...)
+			am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 			if err != nil {
 				t.Fatalf("NewAdjacencyMatrix: %v", err)
 			}
@@ -150,7 +139,7 @@ func TestNeighbors_TableDriven(t *testing.T) {
 func TestFirstEdgeWins_DisallowMulti_Directed(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 	if err := g.AddVertex("v0"); err != nil {
 		t.Fatalf("AddVertex: %v", err)
 	}
@@ -166,11 +155,12 @@ func TestFirstEdgeWins_DisallowMulti_Directed(t *testing.T) {
 		t.Fatalf("AddEdge 99: %v", err)
 	}
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(
+	mOpts, _ := matrix.NewMatrixOptions(
 		matrix.WithDirected(),
 		matrix.WithWeighted(),
 		matrix.WithDisallowMulti(),
-	))
+	)
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -202,7 +192,7 @@ func TestFirstEdgeWins_DisallowMulti_Directed(t *testing.T) {
 func TestFirstEdgeWins_DisallowMulti_Undirected(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMultiEdges())
 	_ = g.AddVertex("v0")
 	_ = g.AddVertex("v1")
 
@@ -214,11 +204,12 @@ func TestFirstEdgeWins_DisallowMulti_Undirected(t *testing.T) {
 		t.Fatalf("AddEdge 99: %v", err)
 	}
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(
+	mOpts, _ := matrix.NewMatrixOptions(
 		matrix.WithUndirected(),
 		matrix.WithWeighted(),
 		matrix.WithDisallowMulti(),
-	))
+	)
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -248,13 +239,14 @@ func TestFirstEdgeWins_DisallowMulti_Undirected(t *testing.T) {
 func TestLoops_DisallowLoops(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithLoops(), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithLoops(), core.WithWeighted())
 	_ = g.AddVertex("v0")
 	if _, err := g.AddEdge("v0", "v0", 7); err != nil {
 		t.Fatalf("AddEdge loop: %v", err)
 	}
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDisallowLoops()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDisallowLoops())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -281,7 +273,7 @@ func TestLoops_DisallowLoops(t *testing.T) {
 func TestToGraph_RoundTrip_PreserveIDsAndWeights(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	ids := []string{"v0", "v1", "v2", "v3"}
 	for _, id := range ids {
 		if err := g.AddVertex(id); err != nil {
@@ -299,7 +291,8 @@ func TestToGraph_RoundTrip_PreserveIDsAndWeights(t *testing.T) {
 	add("v3", "v1", 11)
 	add("v0", "v3", 13)
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -333,7 +326,7 @@ func TestAdjacency_Idempotency(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
-	opts := matrix.NewMatrixOptions(matrix.WithWeighted())
+	opts, _ := matrix.NewMatrixOptions(matrix.WithWeighted())
 
 	am1, err1 := matrix.NewAdjacencyMatrix(g, opts)
 	am2, err2 := matrix.NewAdjacencyMatrix(g, opts)
@@ -376,7 +369,8 @@ func TestNeighbors_ErrorCases(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -397,12 +391,13 @@ func TestNeighbors_ErrorCases(t *testing.T) {
 func TestToGraph_MetricClosure_Unsupported(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 	_ = g.AddVertex("v0")
 	_ = g.AddVertex("v1")
 	_, _ = g.AddEdge("v0", "v1", 1)
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithMetricClosure()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithMetricClosure())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -415,14 +410,15 @@ func TestToGraph_MetricClosure_Unsupported(t *testing.T) {
 func TestToGraph_ThresholdAndBinary(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	for _, id := range []string{"v0", "v1", "v2"} {
 		_ = g.AddVertex(id)
 	}
 	_, _ = g.AddEdge("v0", "v1", 1) // low
 	_, _ = g.AddEdge("v0", "v2", 3) // high
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -453,11 +449,12 @@ func TestToGraph_ThresholdAndBinary(t *testing.T) {
 func TestAdjacency_NoEdges(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 	for i := 0; i < 5; i++ {
 		_ = g.AddVertex(fmt.Sprintf("v%d", i))
 	}
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -484,57 +481,118 @@ func TestAdjacency_NoEdges(t *testing.T) {
 	}
 }
 
-// TestAdjacency_ZeroWeightEdge_TreatedAsNoEdge illustrates the "0 == no-edge" adjacency contract.
-func TestAdjacency_ZeroWeightEdge_TreatedAsNoEdge(t *testing.T) {
+// TestAdjacency_MixedZeroWeightEdge_PreservedAsFiniteEdge verifies the P3 contract:
+// in mixed zero/non-zero weighted adjacency, finite 0 is a real edge weight,
+// while absence is represented by +Inf. The test also verifies that Neighbors()
+// and ToGraph() do not accidentally drop the zero-weight edge.
+func TestAdjacency_MixedZeroWeightEdge_PreservedAsFiniteEdge(t *testing.T) {
 	t.Parallel()
 
-	// Weighted+directed graph: we keep weights in the adjacency cells when weighted-mode is effective.
-	// We include one non-zero edge to avoid "all-zero weights" downgrade to binary adjacency.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-	_ = g.AddVertex("A")
-	_ = g.AddVertex("B")
-	_ = g.AddVertex("C")
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
-	// The edge under test: weight=0 is indistinguishable from "no edge" in 0/weight adjacency.
-	_, _ = g.AddEdge("A", "B", 0)
-	// A non-zero edge to preserve weighted-mode behavior.
-	_, _ = g.AddEdge("B", "C", 1)
+	_, _ = g.AddEdge("A", "B", 0) // real zero-weight edge
+	_, _ = g.AddEdge("A", "C", 2) // non-zero edge in the same outgoing row
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
+
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
 
-	// Neighbors must treat A->B (0) as absent.
-	nb, err := am.Neighbors("A")
+	gotNeighbors, err := am.Neighbors("A")
 	if err != nil {
 		t.Fatalf("Neighbors(A): %v", err)
 	}
-	if len(nb) != 0 {
-		t.Fatalf("Neighbors(A): got %v, want empty (0-weight treated as no-edge)", nb)
+	wantNeighbors := []string{"B", "C"}
+	if len(gotNeighbors) != len(wantNeighbors) {
+		t.Fatalf("Neighbors(A): got %v, want %v", gotNeighbors, wantNeighbors)
+	}
+	for i := range wantNeighbors {
+		if gotNeighbors[i] != wantNeighbors[i] {
+			t.Fatalf("Neighbors(A)[%d]: got %q, want %q; full=%v",
+				i, gotNeighbors[i], wantNeighbors[i], gotNeighbors)
+		}
 	}
 
-	// Default export thresholding must not materialize A->B (0).
+	a := am.VertexIndex["A"]
+	b := am.VertexIndex["B"]
+	c := am.VertexIndex["C"]
+
+	zeroEdge, err := am.Mat.At(a, b)
+	if err != nil {
+		t.Fatalf("At(A,B): %v", err)
+	}
+	if zeroEdge != 0 {
+		t.Fatalf("A->B weight: got %v, want 0", zeroEdge)
+	}
+
+	nonZeroEdge, err := am.Mat.At(a, c)
+	if err != nil {
+		t.Fatalf("At(A,C): %v", err)
+	}
+	if nonZeroEdge != 2 {
+		t.Fatalf("A->C weight: got %v, want 2", nonZeroEdge)
+	}
+
+	absent, err := am.Mat.At(b, a)
+	if err != nil {
+		t.Fatalf("At(B,A): %v", err)
+	}
+	if !math.IsInf(absent, +1) {
+		t.Fatalf("B->A absent marker: got %v, want +Inf", absent)
+	}
+
 	g2, err := am.ToGraph()
 	if err != nil {
 		t.Fatalf("ToGraph: %v", err)
 	}
+
 	em := edgesMap(g2)
-	if _, ok := em[[2]string{"A", "B"}]; ok {
-		t.Fatalf("export must not include A->B when weight is 0")
+	if len(em) != 2 {
+		t.Fatalf("export edge count: got %d edges=%v, want 2", len(em), em)
 	}
-	if w, ok := em[[2]string{"B", "C"}]; !ok || w != 1 {
-		t.Fatalf("export must include B->C with weight=1; ok=%v w=%v", ok, w)
+	if w, ok := em[[2]string{"A", "B"}]; !ok || w != 0 {
+		t.Fatalf("export must include A->B with weight=0; ok=%v w=%v", ok, w)
+	}
+	if w, ok := em[[2]string{"A", "C"}]; !ok || w != 2 {
+		t.Fatalf("export must include A->C with weight=2; ok=%v w=%v", ok, w)
+	}
+}
+
+func TestAdjacency_AllZeroWeightedAutoMode_DegradesToBinary(t *testing.T) {
+	t.Parallel()
+
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	_, _ = g.AddEdge("A", "B", 0)
+
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithWeighted())
+
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
+	if err != nil {
+		t.Fatalf("NewAdjacencyMatrix: %v", err)
+	}
+
+	a := am.VertexIndex["A"]
+	b := am.VertexIndex["B"]
+
+	got, err := am.Mat.At(a, b)
+	if err != nil {
+		t.Fatalf("At(A,B): %v", err)
+	}
+	if got != 1 {
+		t.Fatalf("all-zero weighted auto mode: got %v, want binary 1", got)
 	}
 }
 
 func TestAdjacency_SingleVertex(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 	_ = g.AddVertex("v0")
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
+	mOpts, _ := matrix.NewMatrixOptions()
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -555,7 +613,7 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	// A->B, A->C, B->C, C->C(loop), D isolated
 	// core forbids non-zero weights in unweighted graphs, so we must enable weighted mode.
 	// Matrix options still build an unweighted adjacency (presence==1), but core accepts edge insertion.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithLoops())
 	for _, id := range []string{"A", "B", "C", "D"} {
 		_ = g.AddVertex(id)
 	}
@@ -564,7 +622,8 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	_, _ = g.AddEdge("B", "C", 1)
 	_, _ = g.AddEdge("C", "C", 1) // loop
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowLoops()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithDirected(), matrix.WithAllowLoops())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -574,7 +633,7 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 	}
 	// Expected: A=2, B=1, C=1(loop counts 1), D=0
 	want := []float64{2, 1, 1, 0}
-	if AlmostEqualSlice(vec, want, 1e-12) {
+	if !AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }
@@ -583,8 +642,9 @@ func TestDegreeVector_Directed_Unweighted(t *testing.T) {
 func TestAdjacency_EmptyGraph_Degenerate(t *testing.T) {
 	t.Parallel()
 
-	g := core.NewGraph()
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions())
+	g, _ := core.NewGraph()
+	mOpts, _ := matrix.NewMatrixOptions()
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix(empty): %v", err)
 	}
@@ -617,14 +677,15 @@ func TestAdjacency_EmptyGraph_Degenerate(t *testing.T) {
 
 func TestDegreeVector_Undirected_Unweighted(t *testing.T) {
 	// Undirected edges: A-B, B-C
-	g := core.NewGraph(core.WithDirected(false), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted())
 	for _, id := range []string{"A", "B", "C", "D"} {
 		_ = g.AddVertex(id)
 	}
 	_, _ = g.AddEdge("A", "B", 1)
 	_, _ = g.AddEdge("B", "C", 1)
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithUndirected()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithUndirected())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -633,17 +694,18 @@ func TestDegreeVector_Undirected_Unweighted(t *testing.T) {
 		t.Fatalf("DegreeVector: %v", err)
 	}
 	want := []float64{1, 2, 1, 0}
-	if AlmostEqualSlice(vec, want, 1e-12) {
+	if !AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }
 
 func TestDegreeVector_LoopWeightedCountsAsOne(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithLoops())
 	_ = g.AddVertex("X")
 	_, _ = g.AddEdge("X", "X", 7)
 
-	am, err := matrix.NewAdjacencyMatrix(g, matrix.NewMatrixOptions(matrix.WithAllowLoops(), matrix.WithWeighted()))
+	mOpts, _ := matrix.NewMatrixOptions(matrix.WithAllowLoops(), matrix.WithWeighted())
+	am, err := matrix.NewAdjacencyMatrix(g, mOpts)
 	if err != nil {
 		t.Fatalf("NewAdjacencyMatrix: %v", err)
 	}
@@ -652,7 +714,7 @@ func TestDegreeVector_LoopWeightedCountsAsOne(t *testing.T) {
 		t.Fatalf("DegreeVector: %v", err)
 	}
 	want := []float64{1}
-	if AlmostEqualSlice(vec, want, 1e-12) {
+	if !AlmostEqualSlice(vec, want, 1e-12) {
 		t.Fatalf("degree mismatch: got %v, want %v", vec, want)
 	}
 }

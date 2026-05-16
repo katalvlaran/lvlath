@@ -317,7 +317,7 @@ func buildBenchmarkDirectedChain(b *testing.B, vertexCount int) *core.Graph {
 		b.Fatalf("invalid chain vertex count: got=%d want>=2", vertexCount)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	for index := 0; index < vertexCount-1; index++ {
 		fromID := fmt.Sprintf("N%d", index)
@@ -352,7 +352,7 @@ func buildBenchmarkForestGraph(b *testing.B, componentCount, componentLength int
 		b.Fatalf("invalid component length: got=%d want>=1", componentLength)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	for componentIndex := 0; componentIndex < componentCount; componentIndex++ {
 		for localIndex := 0; localIndex < componentLength; localIndex++ {
@@ -389,7 +389,7 @@ func buildBenchmarkLayeredDAG(b *testing.B, layerCount, layerWidth int) *core.Gr
 		b.Fatalf("invalid layer width: got=%d want>=1", layerWidth)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	for layerIndex := 0; layerIndex < layerCount; layerIndex++ {
 		for widthIndex := 0; widthIndex < layerWidth; widthIndex++ {
@@ -451,7 +451,7 @@ func buildBenchmarkDenseCycleGraph(b *testing.B, cliqueSize int) *core.Graph {
 		b.Fatalf("invalid dense-cycle clique size: got=%d want>=3", cliqueSize)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	for index := 0; index < cliqueSize; index++ {
 		vertexID := fmt.Sprintf("K%d", index)

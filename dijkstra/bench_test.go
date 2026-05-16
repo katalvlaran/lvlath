@@ -266,7 +266,7 @@ func buildBenchmarkDirectedChain(b *testing.B, vertexCount int) benchmarkFixture
 		vertexIDs[index] = benchmarkVertexID(index)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	edgeCount := 0
 
 	for index := 0; index < vertexCount-1; index++ {
@@ -340,7 +340,7 @@ func buildBenchmarkDirectedGrid(b *testing.B, side int) benchmarkFixture {
 		vertexIDs[row] = rowIDs
 	}
 
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	for row := 0; row < side; row++ {
 		for column := 0; column < side; column++ {
@@ -435,7 +435,7 @@ func buildBenchmarkMixedCorridor(b *testing.B, segmentCount int) benchmarkFixtur
 		vertexIDs[index] = benchmarkVertexID(index)
 	}
 
-	graph := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 	edgeCount := 0
 
 	for index := 0; index < segmentCount; index++ {
@@ -523,7 +523,7 @@ func buildBenchmarkThresholdWallCorridor(b *testing.B, segmentCount int) benchma
 		mainIDs[index] = benchmarkVertexID(index)
 	}
 
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	edgeCount := 0
 
 	for index := 0; index < segmentCount; index++ {

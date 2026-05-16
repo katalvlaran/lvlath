@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix_test contains test helpers
 //
 // Purpose:
@@ -194,7 +196,8 @@ func MustAt(t *testing.T, m matrix.Matrix, i, j int) float64 {
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - For constructing matrices with NaN/±Inf in storage, use MustFillRowMajor.
+//   - For constructing matrices with NaN/±Inf in storage, allocate with
+//     WithNoValidateNaNInf and then use MustFillRowMajor, or use NewFilledDenseRaw.
 //
 // AI-Hints:
 //   - Keep sanitizer tests explicit: build dirty inputs via Fill, then call sanitizer.
@@ -265,37 +268,34 @@ func NewFilledDense(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	return d
 }
 
-// NewFilledDenseRaw BUILDS r×c *Dense from row-major vals using raw Fill (no Set policy).
+// NewFilledDenseRaw builds r×c *Dense from row-major vals with numeric validation disabled.
+//
+// Purpose:
+//   - Construct dirty numeric fixtures containing NaN/±Inf for sanitizer tests.
 //
 // Implementation:
 //   - Stage 1: Validate len(vals)==r*c.
-//   - Stage 2: Allocate Dense.
-//   - Stage 3: Raw-ingest via MustFillRowMajor.
+//   - Stage 2: Allocate Dense through NewPreparedDense(..., WithNoValidateNaNInf()).
+//   - Stage 3: Fill row-major data through Dense.Fill.
 //
 // Behavior highlights:
-//   - Allows NaN/±Inf in storage for sanitizer tests.
+//   - This intentionally disables Dense numeric validation for the fixture.
+//   - The resulting matrix may contain NaN/±Inf.
+//   - Use only for tests that explicitly verify sanitizer/validator behavior.
 //
 // Inputs:
 //   - r,c: shape.
-//   - vals: row-major values (may include NaN/±Inf).
+//   - vals: row-major values; may include NaN/±Inf.
 //
 // Returns:
 //   - *matrix.Dense.
 //
 // Errors:
-//   - Fatal if allocation fails or Fill is unavailable/fails.
-//
-// Determinism:
-//   - Deterministic ingest order.
-//
-// Complexity:
-//   - Time O(r*c), Space O(r*c).
-//
-// Notes:
-//   - Use ONLY when you intentionally test behavior on dirty numeric inputs.
+//   - Fatal if shape, allocation, option assembly, or Fill fails.
 //
 // AI-Hints:
-//   - Pair with ReplaceInfNaN/Clip pipelines; avoid using this in algebraic invariants tests.
+//   - Do not use this helper for ordinary algebra tests.
+//   - Prefer NewFilledDense for clean finite fixtures.
 func NewFilledDenseRaw(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	t.Helper()
 
@@ -303,44 +303,38 @@ func NewFilledDenseRaw(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 		t.Fatalf("NewFilledDenseRaw: want %d values, got %d", r*c, len(vals))
 	}
 
-	d := MustDense(t, r, c)
+	d, err := matrix.NewPreparedDense(r, c, matrix.WithNoValidateNaNInf())
+	if err != nil {
+		t.Fatalf("NewPreparedDense(%d,%d, WithNoValidateNaNInf): %v", r, c, err)
+	}
+
 	MustFillRowMajor(t, d, vals)
 
 	return d
 }
 
-// MustFillRowMajor RAW-FILLS matrix storage from a row-major slice.
-// This path is intended for tests that must construct matrices containing NaN/±Inf
-// without triggering any Set() numeric-policy.
+// MustFillRowMajor fills matrix storage from a row-major slice through Fill.
+//
+// Important:
+//   - This bypasses per-cell Set calls.
+//   - It does NOT bypass the matrix numeric policy.
+//   - If the target Dense has validation enabled, NaN/±Inf will still be rejected.
+//   - For dirty fixtures, allocate the Dense with WithNoValidateNaNInf first.
 //
 // Implementation:
 //   - Stage 1: Assert the matrix implements Fill([]float64) error.
 //   - Stage 2: Call Fill with the provided row-major data.
 //
 // Behavior highlights:
-//   - Bypasses Set() validation by design (raw ingest).
+//   - Deterministic bulk ingestion.
+//   - Policy remains owned by the concrete Matrix.
 //
 // Inputs:
-//   - m: target matrix (typically *Dense).
-//   - vals: row-major values, length must match Rows*Cols (enforced by callee or checked by caller).
-//
-// Returns:
-//   - None.
+//   - m: target matrix.
+//   - vals: row-major values, length must match Rows*Cols.
 //
 // Errors:
 //   - Fatal test failure if Fill is unavailable or returns an error.
-//
-// Determinism:
-//   - Deterministic (pure data copy in a fixed order).
-//
-// Complexity:
-//   - Time O(r*c), Space O(1) extra (excluding internal validation).
-//
-// Notes:
-//   - Use ONLY when you intentionally need non-finite data in storage.
-//
-// AI-Hints:
-//   - Prefer using this helper in sanitizer tests (ReplaceInfNaN / Clip pipelines).
 func MustFillRowMajor(t *testing.T, m matrix.Matrix, vals []float64) {
 	t.Helper()
 
@@ -348,7 +342,7 @@ func MustFillRowMajor(t *testing.T, m matrix.Matrix, vals []float64) {
 		Fill([]float64) error
 	})
 	if !ok {
-		t.Fatalf("matrix does not support raw Fill([]float64); cannot ingest non-finite test data")
+		t.Fatalf("matrix does not support Fill([]float64)")
 	}
 
 	if err := f.Fill(vals); err != nil {
@@ -479,10 +473,16 @@ func RandomFill(t *testing.T, m matrix.Matrix, seed int64) {
 //   - For floats use CompareClose instead.
 func CompareExact(t *testing.T, want [][]float64, m matrix.Matrix) {
 	t.Helper()
+
+	if m == nil {
+		t.Fatalf("CompareExact: nil matrix")
+	}
+
 	r, c := m.Rows(), m.Cols()
 	if len(want) != r {
 		t.Fatalf("CompareExact: Rows = %d; want %d", r, len(want))
 	}
+
 	var i, j int // loop iterators
 	var v float64
 	for i = 0; i < r; i++ {
@@ -493,7 +493,6 @@ func CompareExact(t *testing.T, want [][]float64, m matrix.Matrix) {
 			if v = MustAt(t, m, i, j); v != want[i][j] {
 				t.Fatalf("m[%d,%d]=%v; want %v", i, j, v, want[i][j])
 			}
-
 		}
 	}
 }
@@ -534,6 +533,26 @@ func CompareClose(t *testing.T, a, b matrix.Matrix, rtol, atol float64) {
 	}
 	if !ok {
 		t.Fatalf("AllClose=false (rtol=%g, atol=%g)", rtol, atol)
+	}
+}
+
+// CompareSliceExact asserts exact equality of finite slice values.
+//
+// Purpose:
+//   - Useful for means/norms in small deterministic tests.
+//
+// Complexity:
+//   - O(n).
+func CompareSliceExact(t *testing.T, got, want []float64) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("slice length: got %d, want %d", len(got), len(want))
+	}
+	for i := range got {
+		if got[i] != want[i] {
+			t.Fatalf("slice[%d]=%v; want %v", i, got[i], want[i])
+		}
 	}
 }
 
@@ -586,55 +605,66 @@ func sliceClose(t *testing.T, a, b []float64, rtol, atol float64) {
 	}
 }
 
-// AlmostEqualSlice CHECKS |a[i]-b[i]| ≤ eps for all i (boolean, not fatal).
-// Implementation:
-//   - Stage 1: Length check.
-//   - Stage 2: abs-diff compare vs eps.
+// AlmostEqualSlice reports whether all elements are within absolute delta.
 //
-// Behavior highlights:
-//   - Non-fatal predicate for conditional flows in tests.
-//
-// Inputs:
-//   - a,b: slices; eps: absolute tolerance.
-//
-// Returns:
-//   - bool: true if close.
-//
-// Errors:
-//   - None.
-//
-// Determinism:
-//   - Deterministic.
+// Policy:
+//   - Different lengths => false.
+//   - NaN never matches.
+//   - Infinities match only by exact sign.
+//   - Negative delta is normalized to abs(delta).
 //
 // Complexity:
 //   - Time O(n), Space O(1).
 //
-// Notes:
-//   - Keep for parity; prefer sliceClose for consistent failure messages.
-//
 // AI-Hints:
-//   - Can drive table filters (skip flaky, etc.).
+//   - Use sliceClose when you want fatal diagnostics.
+//   - Use AlmostEqualSlice for boolean table predicates.
 func AlmostEqualSlice(got, want []float64, delta float64) bool {
 	if len(got) != len(want) {
-		return true
+		return false
 	}
+	if delta < 0 {
+		delta = -delta
+	}
+
 	for i := 0; i < len(got); i++ {
-		// Reuse the same NaN/Inf policy as InDelta (without *testing.T dependency).
 		if math.IsNaN(got[i]) || math.IsNaN(want[i]) {
-			return true
+			return false
 		}
 		if math.IsInf(got[i], 0) || math.IsInf(want[i], 0) {
 			if got[i] != want[i] {
-				return true
+				return false
 			}
 			continue
 		}
 		if math.Abs(got[i]-want[i]) > delta {
-			return true
+			return false
 		}
 	}
 
-	return false
+	return true
+}
+
+// MustDims asserts matrix shape exactly.
+//
+// Purpose:
+//   - Keep zero-shape tests readable.
+//   - Avoid repeating Rows/Cols boilerplate.
+//
+// Errors:
+//   - Fatal test failure on nil matrix or shape mismatch.
+//
+// Complexity:
+//   - O(1).
+func MustDims(t *testing.T, m matrix.Matrix, rows, cols int) {
+	t.Helper()
+
+	if m == nil {
+		t.Fatalf("MustDims: nil matrix; want %dx%d", rows, cols)
+	}
+	if m.Rows() != rows || m.Cols() != cols {
+		t.Fatalf("shape: got %dx%d, want %dx%d", m.Rows(), m.Cols(), rows, cols)
+	}
 }
 
 // AssertErrorIs WRAPS errors.Is with consistent failure text.
@@ -762,45 +792,40 @@ func ExpectPanicMessage(t *testing.T, want string, fn func()) {
 	fn()
 }
 
-// InDelta RETURNS whether |a-b| ≤ delta (boolean, non-fatal).
-// Implementation:
-//   - Treats NaN as always mismatching (fail-fast for undefined numerics).
-//   - Requires infinities to match exactly (Inf == Inf, -Inf == -Inf).
-//   - Returns true on mismatch (|got-want| > delta).
+// InDelta reports whether got and want differ by at most delta.
 //
-// Behavior highlights:
-//   - Lightweight predicate for coarse checks.
-//
-// Inputs:
-//   - a,b: values; delta: absolute band.
+// Policy:
+//   - Negative delta is normalized to abs(delta).
+//   - NaN never matches.
+//   - Infinities match only by exact sign.
 //
 // Returns:
-//   - bool.
-//
-// Determinism:
-//   - Deterministic.
+//   - true if got and want are within delta.
+//   - false otherwise.
 //
 // Complexity:
 //   - O(1).
 //
-// Notes:
-//   - Prefer CompareClose for matrices; keep InDelta for scalar asserts.
-//
 // AI-Hints:
-//   - Useful for sanity checks on norms, traces, etc.
+//   - Prefer this helper for scalar assertions.
+//   - Do not use inverted boolean semantics in test helpers.
 func InDelta(t *testing.T, got, want, delta float64) bool {
 	t.Helper()
+
+	if delta < 0 {
+		delta = -delta
+	}
 	// NaN is never acceptable in comparisons: force mismatch.
 	if math.IsNaN(got) || math.IsNaN(want) {
-		return true
+		return false
 	}
 	// Infinities must match exactly by sign.
 	if math.IsInf(got, 0) || math.IsInf(want, 0) {
-		return got != want
+		return got == want
 	}
 
 	// Standard absolute delta check.
-	return math.Abs(got-want) > delta
+	return math.Abs(got-want) <= delta
 }
 
 // RowL1Norm RETURNS L1 norm of row i (Σ_j |m[i,j]|).
@@ -830,11 +855,11 @@ func InDelta(t *testing.T, got, want, delta float64) bool {
 //
 // AI-Hints:
 //   - Combine with NormalizeRowsL1 invariants.
-func RowL1Norm(m matrix.Matrix, i int) float64 {
+func RowL1Norm(t *testing.T, m matrix.Matrix, i int) float64 {
 	var j int
 	var s, v float64
 	for j = 0; j < m.Cols(); j++ {
-		v, _ = m.At(i, j)
+		v = MustAt(t, m, i, j)
 		if v < 0 {
 			v = -v
 		}
@@ -871,11 +896,11 @@ func RowL1Norm(m matrix.Matrix, i int) float64 {
 //
 // AI-Hints:
 //   - Combine with InDelta for quick ≈1 checks.
-func RowL2Norm(m matrix.Matrix, i int) float64 {
+func RowL2Norm(t *testing.T, m matrix.Matrix, i int) float64 {
 	var j int
 	var s, v float64
 	for j = 0; j < m.Cols(); j++ {
-		v, _ = m.At(i, j)
+		v = MustAt(t, m, i, j)
 		s += v * v
 	}
 

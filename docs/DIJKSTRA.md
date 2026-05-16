@@ -479,7 +479,7 @@ import (
 
 func main() {
 	// 1. Build a mixed-edge distribution network.
-	g := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 
 	// Explicitly check AddEdge errors in production
 	if _, err := g.AddEdge("gateway", "hub:north", 2.0, core.WithEdgeDirected(true)); err != nil {

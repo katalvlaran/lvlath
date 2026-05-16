@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package: matrix
 //
 // Purpose:
@@ -77,9 +79,14 @@ func InitDistancesInPlace(mat *Dense) error {
 				if err != nil {
 					return fmt.Errorf("initDistancesInPlace: At(%d,%d): %w", i, j, err)
 				}
-				// Reject non-finite values early; distances use +Inf only off-diagonal.
-				if isNonFinite(v) {
-					return fmt.Errorf("initDistancesInPlace: invalid diagonal [%d,%d]=%v: %w", i, j, v, ErrInvalidWeight)
+				// Reject invalid diagonal values early.
+				// +Inf is valid only off-diagonal as "no path"; diagonal +Inf is a distance-shape error.
+				// NaN and -Inf are numeric-domain errors.
+				if isNaNOrNegInf(v) {
+					return fmt.Errorf("initDistancesInPlace: invalid diagonal [%d,%d]=%v: %w", i, j, v, ErrNaNInf)
+				}
+				if math.IsInf(v, 1) {
+					return fmt.Errorf("initDistancesInPlace: +Inf diagonal [%d,%d]: %w", i, j, ErrBadShape)
 				}
 				// Keep negative self-loop weight; otherwise enforce 0.
 				if v < 0.0 {
@@ -103,9 +110,9 @@ func InitDistancesInPlace(mat *Dense) error {
 			if err != nil {
 				return fmt.Errorf("initDistancesInPlace: At(%d,%d): %w", i, j, err)
 			}
-			// Reject NaN and -Inf; +Inf is only meaningful as "no path" sentinel.
+			// Reject NaN and -Inf; +Inf is allowed off-diagonal as an idempotent no-path sentinel.
 			if isNaNOrNegInf(v) {
-				return fmt.Errorf("initDistancesInPlace: invalid entry [%d,%d]=%v: %w", i, j, v, ErrInvalidWeight)
+				return fmt.Errorf("initDistancesInPlace: invalid entry [%d,%d]=%v: %w", i, j, v, ErrNaNInf)
 			}
 			// Convert absent edge marker into distance sentinel.
 			if v == 0.0 {
@@ -119,16 +126,93 @@ func InitDistancesInPlace(mat *Dense) error {
 	return nil
 }
 
+// validateNoNegativeDistanceCycle scans the distance diagonal after APSP relaxation.
+// Detects negative cycles by checking whether any final diagonal entry is < -tol.
+//
+// Why:
+//   - Floyd–Warshall exposes negative cycles as negative diagonal distances.
+//   - This is an algorithmic postcondition, not a general shape validator.
+//
+// Implementation:
+//   - Stage 1: validate square non-nil structure.
+//   - Stage 2: normalize tolerance via validateTol.
+//   - Stage 3: scan diagonal in increasing index order.
+//
+// Behavior highlights:
+//   - Deterministic first-cycle witness by diagonal index.
+//   - Does not scan off-diagonal entries.
+//   - Does not mutate the matrix.
+//
+// Inputs:
+//   - m: completed distance matrix.
+//   - tol: finite tolerance; negative is normalized by validateTol.
+//
+// Returns:
+//   - nil if no negative diagonal is found.
+//   - ErrNegativeCycle if a negative diagonal below tolerance exists.
+//
+// Errors:
+//   - ErrNilMatrix / ErrNonSquare from ValidateSquareNonNil.
+//   - ErrNaNInf from validateTol or corrupted diagonal values.
+//   - ErrNegativeCycle for detected negative cycle.
+//
+// Determinism:
+//   - Fixed diagonal scan order i=0..n-1.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// AI-Hints:
+//   - Do not use full ValidateDistanceMatrix here; post-FW only needs the diagonal
+//     negative-cycle witness because input validation already ran.
+func validateNoNegativeDistanceCycle(m Matrix, tol float64) error {
+	if err := ValidateSquareNonNil(m); err != nil {
+		return err
+	}
+
+	t, err := validateTol(tol)
+	if err != nil {
+		return err
+	}
+
+	n := m.Rows()
+	var i int
+	var v float64
+
+	for i = 0; i < n; i++ {
+		v, err = m.At(i, i)
+		if err != nil {
+			return fmt.Errorf("FloydWarshall: diagonal At(%d,%d): %w", i, i, err)
+		}
+		if isNonFinite(v) {
+			return fmt.Errorf("FloydWarshall: invalid diagonal[%d,%d]=%v: %w", i, i, v, ErrNaNInf)
+		}
+		if v < -t {
+			return fmt.Errorf("FloydWarshall: negative cycle at diagonal[%d,%d]=%v: %w", i, i, v, ErrNegativeCycle)
+		}
+	}
+
+	return nil
+}
+
 // floydWarshallInPlace RUNS dense APSP closure on a square *Dense in place.
 // Implementation:
 //   - Stage 1: read order n once; alias row-major buffer for tight loops.
 //   - Stage 2: triple loop k→i→j with early-continue if i→k or k→j is +Inf.
+//   - Stage 3: reject non-finite candidates created by finite overflow.
+//   - Stage 4: relax only on strict improvement.
 //
 // Behavior highlights:
 //   - Strict improvement only (cand < current), providing deterministic tie behavior.
+//   - Assumes caller already validated distance-matrix semantics.
+//   - Does not allocate in hot loops.
 //
 // Inputs:
-//   - d: *Dense square distance matrix (+Inf marks unreachable, diagonal 0).
+//   - d: *Dense square distance matrix (+Inf marks unreachable).
+//
+// Returns:
+//   - nil on successful relaxation.
+//   - ErrNilMatrix / ErrNaNInf on corrupted input or arithmetic overflow.
 //
 // Determinism:
 //   - Fixed loop order (k, then i, then j).
@@ -140,8 +224,12 @@ func InitDistancesInPlace(mat *Dense) error {
 //   - Negative cycles propagate to negative diagonals for nodes on reachable cycles.
 //
 // AI-Hints:
-//   - Prefer calling through FloydWarshall so the fast path is selected automatically.
-func floydWarshallInPlace(d *Dense) {
+//   - Do not call this directly from builders without FloydWarshall-level validation.
+//   - Do not replace +Inf early-continues with arithmetic on infinities.
+func floydWarshallInPlace(d *Dense) error {
+	if d == nil {
+		return ErrNilMatrix
+	}
 	// Read matrix order once; upstream guarantees square shape.
 	n := d.r // direct field access avoids a virtual call
 
@@ -175,53 +263,81 @@ func floydWarshallInPlace(d *Dense) {
 				}
 				ij = data[baseI+j] // current shortest distance i→j
 				cand = ik + kj     // candidate path length via k
-				if cand < ij {     // strict improvement only (deterministic tie rule)
+
+				// At this point ik/kj are finite under the prevalidated distance contract.
+				// A non-finite candidate therefore means floating-point overflow or data
+				// corruption, not a valid no-path sentinel.
+				if isNonFinite(cand) {
+					return ErrNaNInf
+				}
+
+				if cand < ij { // strict improvement only (deterministic tie rule)
 					data[baseI+j] = cand // relax edge i→j in place
 				}
 			}
 		}
 	}
+
+	return nil
 }
 
-// FloydWarshall COMPUTES all-pairs shortest paths in-place over a Matrix.
+// FloydWarshall COMPUTES all-pairs shortest paths in-place over a distance Matrix.
+//
 // Implementation:
-//   - Stage 1: validate non-nil and square shape (ValidateSquare).
-//   - Stage 2: if *Dense, use fast path; otherwise run generic interface triple loop.
+//   - Stage 1: validate distance-matrix semantics via ValidateDistanceMatrix.
+//   - Stage 2: if *Dense, use the row-major fast path.
+//   - Stage 3: otherwise run generic interface triple loop.
+//   - Stage 4: detect negative cycles through the final diagonal.
 //
 // Behavior highlights:
-//   - +Inf denotes “no path”; diagonal must be 0 on entry.
+//   - +Inf denotes “no path”.
+//   - NaN and -Inf are rejected before relaxation.
+//   - Finite negative off-diagonal distances are allowed.
+//   - Strict improvement only (candidate < current).
+//   - Mutates the input matrix in place.
 //
 // Inputs:
-//   - m: Matrix (square). Use +Inf for no-edge and 0 on the diagonal.
+//   - m: square distance matrix. Use +Inf for no path and 0 on the diagonal.
 //
 // Returns:
-//   - error: ErrNilMatrix, ErrDimensionMismatch, or Matrix.At/Set errors (interface path).
+//   - error: nil on success; sentinel-preserving error otherwise.
 //
 // Errors:
-//   - ErrNilMatrix (nil m), ErrDimensionMismatch (non-square), wrapped Matrix access errors.
+//   - ErrNilMatrix / ErrNonSquare from distance validation.
+//   - ErrNaNInf for NaN, -Inf, disallowed non-finite arithmetic, or corrupted values.
+//   - ErrBadShape for invalid diagonal shape.
+//   - ErrNegativeCycle if APSP relaxation reveals a negative cycle.
+//   - wrapped Matrix.At/Set errors in generic path.
 //
 // Determinism:
-//   - Fixed (k,i,j) loop order in both fast and generic paths.
+//   - Fixed k→i→j loop order in both Dense and generic paths.
+//   - Strict tie behavior; equal candidates do not overwrite existing distances.
 //
 // Complexity:
-//   - Time O(n^3); Extra space O(1).
+//   - Time O(n³), Extra space O(1).
 //
 // Notes:
-//   - Running FW again on its output is idempotent (no further relaxations).
+//   - This function consumes distance matrices, not raw 0/weight adjacency.
+//   - Use InitDistancesInPlace before FloydWarshall when starting from standard adjacency.
 //
 // AI-Hints:
-//   - Prefer passing *Dense to trigger the zero-overhead fast path.
-//   - Ensure diagonal zeros before calling; replace missing edges with +Inf.
-//   - For very sparse graphs consider a sparse APSP instead; this routine is dense.
+//   - Do not bypass ValidateDistanceMatrix with ValidateSquareNonNil only.
+//   - Do not perform arithmetic on +Inf candidates; early-continue preserves no-path semantics.
+//   - Do not make relaxation epsilon-based; eps belongs to validation, not DP ordering.
 func FloydWarshall(m Matrix) error {
-	// Validate: non-nil; square (shape n×n).
-	if err := ValidateSquareNonNil(m); err != nil {
+	// Validate: non-nil; square (shape n×n); valid diagonal.
+	if err := ValidateDistanceMatrix(m); err != nil {
 		return matrixErrorf(opFloydWarshall, err)
 	}
 
 	// Fast-path: direct dense traversal via a single source of truth.
 	if d, ok := m.(*Dense); ok {
-		floydWarshallInPlace(d) // single source of truth for Dense
+		if err := floydWarshallInPlace(d); err != nil { // single source of truth for Dense
+			return matrixErrorf(opFloydWarshall, err)
+		}
+		if err := validateNoNegativeDistanceCycle(d, DefaultEpsilon); err != nil {
+			return matrixErrorf(opFloydWarshall, err)
+		}
 		return nil
 	}
 
@@ -258,13 +374,21 @@ func FloydWarshall(m Matrix) error {
 					return matrixErrorf(opFloydWarshall, err)
 				}
 				cand = dik + dkj // compute candidate
-				if cand < dij {  // relax if strictly better
+				if isNonFinite(cand) {
+					return matrixErrorf(opFloydWarshall, ErrNaNInf)
+				}
+
+				if cand < dij { // relax if strictly better
 					if err = m.Set(i, j, cand); err != nil {
 						return matrixErrorf(opFloydWarshall, err)
 					}
 				}
 			}
 		}
+	}
+
+	if err = validateNoNegativeDistanceCycle(m, DefaultEpsilon); err != nil {
+		return matrixErrorf(opFloydWarshall, err)
 	}
 
 	return nil

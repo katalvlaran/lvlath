@@ -15,7 +15,7 @@ import (
 
 // buildChain creates a directed chain graph of length n: N0->N1->...->N(n-1).
 func buildChain(n int) *core.Graph {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	for index := 0; index < n-1; index++ {
 		fromID := fmt.Sprintf("N%d", index)
@@ -32,7 +32,7 @@ func buildChain(n int) *core.Graph {
 // buildBinaryTree creates a complete directed binary tree of the requested depth.
 // Vertex IDs are T-1, T-2, ..., T-(2^depth-1).
 func buildBinaryTree(depth int) *core.Graph {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	vertexCount := (1 << depth) - 1
 
 	for index := 1; index <= vertexCount; index++ {
@@ -58,7 +58,7 @@ func TestDFS_NilGraph(t *testing.T) {
 }
 
 func TestDFS_StartVertexNotFound(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	result, err := dfs.DFS(g, "missing")
 
@@ -67,7 +67,7 @@ func TestDFS_StartVertexNotFound(t *testing.T) {
 }
 
 func TestDFS_InvalidOptionNilContext(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_ = g.AddVertex("A")
 
 	result, err := dfs.DFS(g, "A", dfs.WithContext(nil))
@@ -77,7 +77,7 @@ func TestDFS_InvalidOptionNilContext(t *testing.T) {
 }
 
 func TestDFS_InvalidOptionNegativeMaxDepth(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_ = g.AddVertex("A")
 
 	result, err := dfs.DFS(g, "A", dfs.WithMaxDepth(dfs.NoDepthLimit-1))
@@ -87,7 +87,7 @@ func TestDFS_InvalidOptionNegativeMaxDepth(t *testing.T) {
 }
 
 func TestDFS_SingleVertex_NoEdges(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	mustNoError(t, g.AddVertex("X"))
 
 	result, err := dfs.DFS(g, "X")
@@ -106,7 +106,7 @@ func TestDFS_SingleVertex_NoEdges(t *testing.T) {
 }
 
 func TestDFS_SelfLoop(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true), core.WithLoops())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithLoops())
 	mustNoError(t, g.AddVertex("A"))
 
 	edgeID, err := g.AddEdge("A", "A", 0)
@@ -128,7 +128,7 @@ func TestDFS_SelfLoop(t *testing.T) {
 }
 
 func TestDFS_ChainDepthParentExactOrder(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
@@ -154,7 +154,7 @@ func TestDFS_ChainDepthParentExactOrder(t *testing.T) {
 }
 
 func TestDFS_DisconnectedSingleSource(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	mustNoError(t, g.AddVertex("C"))
 
@@ -177,7 +177,7 @@ func TestDFS_DisconnectedSingleSource(t *testing.T) {
 }
 
 func TestDFS_FullTraversal_IgnoresMissingStartVertex(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	mustNoError(t, g.AddVertex("C"))
 
@@ -204,7 +204,7 @@ func TestDFS_FullTraversal_IgnoresMissingStartVertex(t *testing.T) {
 }
 
 func TestDFS_MaxDepthZero(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
@@ -223,7 +223,7 @@ func TestDFS_MaxDepthZero(t *testing.T) {
 }
 
 func TestDFS_FilterNeighbor(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("A", "C", 0)
 
@@ -249,7 +249,7 @@ func TestDFS_FilterNeighbor(t *testing.T) {
 }
 
 func TestDFS_OnExitErrorPreservesCauseAndClearsOrder(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 
 	hookErr := errors.New("stop on B exit")
@@ -387,7 +387,7 @@ func TestDFS_CancellationImmediate(t *testing.T) {
 }
 
 func TestDFS_FullTraversalForestSemantics(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("C", "D", 0)
 	mustNoError(t, g.AddVertex("E"))
@@ -421,7 +421,7 @@ func TestDFS_FullTraversalForestSemantics(t *testing.T) {
 }
 
 func TestDFS_UndirectedRegression_StartFromToEndpointVisitsOppositeEndpoint(t *testing.T) {
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 	_, _ = g.AddEdge("A", "B", 0)
 
 	result, err := dfs.DFS(g, "B")
@@ -443,7 +443,7 @@ func TestDFS_UndirectedRegression_StartFromToEndpointVisitsOppositeEndpoint(t *t
 }
 
 func TestDFS_MixedGraph_PerEdgeDirectionIsRespected(t *testing.T) {
-	g := core.NewMixedGraph(core.WithDirected(true))
+	g, _ := core.NewMixedGraph(core.WithDirected(true))
 
 	// Directed edge B->A.
 	_, _ = g.AddEdge("B", "A", 0, core.WithEdgeDirected(true))

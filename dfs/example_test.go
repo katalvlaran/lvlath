@@ -57,7 +57,7 @@ import (
 //   - FilterNeighbor affects reachability and diagnostics, not graph structure.
 //   - Order is post-order finish order, not discovery order.
 func ExampleDFS_infrastructureInspection() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("gateway", "auth", 0)
 	_, _ = graph.AddEdge("gateway", "billing", 0)
@@ -160,7 +160,7 @@ func ExampleDFS_infrastructureInspection() {
 //   - Root vertices must not appear in Parent.
 //   - FullTraversal is appropriate for inventory/indexing sweeps over disconnected topology.
 func ExampleDFS_fullTraversalInventorySweep() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-api", 0)
 	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-auth", 0)
@@ -257,7 +257,7 @@ func ExampleDFS_fullTraversalInventorySweep() {
 //   - WithMaxDepth limits traversal reachability, not graph structure.
 //   - Depth-limited DFS is useful for bounded blast-radius and local impact analysis.
 func ExampleDFS_depthLimitedBlastRadius() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("incident", "api", 0)
 	_, _ = graph.AddEdge("incident", "audit", 0)
@@ -337,7 +337,7 @@ func ExampleDFS_depthLimitedBlastRadius() {
 //   - This algorithm is only valid for directed graphs.
 //   - Example output is exact here because the constructed DAG fixes one deterministic plan.
 func ExampleTopologicalSort_releasePipeline() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("01-spec-freeze", "02-schema-lock", 0)
 	_, _ = graph.AddEdge("02-schema-lock", "03-codegen", 0)
@@ -401,7 +401,7 @@ func ExampleTopologicalSort_releasePipeline() {
 //   - DetectCycles returns witness cycles, not an exhaustive simple-cycle catalogue.
 //   - Directed cycle canonicalization must preserve edge orientation.
 func ExampleDetectCycles_escalationLoopWitness() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("entry", "triage", 0)
 	_, _ = graph.AddEdge("triage", "security", 0)

@@ -1,10 +1,14 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix - adjacency builders (dense) and metric-closure transform.
 //
 // Deliverables:
 //   1) Directed + AllowMulti=false → first-edge-wins (ordered key (u,v)).
 //   2) Undirected mirroring without loops (u==v is not mirrored).
-//   3) Weighted=true but effectively-unweighted input → degrade to binary (1).
+//   3) Weighted adjacency preserves zero-weight edges by switching to +Inf no-edge
+//      encoding when mixed zero/non-zero weights make 0-as-no-edge ambiguous.
+//      Effectively-unweighted all-zero input may still degrade to binary in auto mode.
 //   4) MetricClosure (Floyd–Warshall): diag=0, unreachable=+Inf (off-diagonal).
 //   5) Deterministic iteration & stable vertex/edge order (no map order reliance).
 //
@@ -17,6 +21,18 @@
 //     a binary adjacency (1) to avoid an all-zero matrix.
 //   - MetricClosure turns adjacency into pairwise shortest-path distances. It is
 //     *not* an adjacency anymore, and ToGraph must return ErrMatrixNotImplemented
+//   - Weighted mixed zero/non-zero input cannot use 0 as “no edge”. The builder
+//     uses +Inf as the absence sentinel so finite 0 remains a real edge weight.
+//
+// Warning:
+//   - IMPORTANT (0-weight edges):
+//     Standard adjacency uses 0 as “no edge”. That encoding cannot represent
+//     a real zero-weight edge. When weighted input contains both zero and non-zero
+//     weights, the builder switches to +Inf-as-no-edge encoding so every finite
+//     value, including 0, remains a valid edge weight.
+//     All-zero input remains treated as effectively unweighted in auto mode to
+//     preserve existing graph-adapter behavior; use explicit weighted-preservation
+//     options in a follow-up if your domain needs all-zero weighted graphs.
 
 package matrix
 
@@ -41,6 +57,30 @@ type AdjacencyMatrix struct {
 	VertexIndex   map[string]int // mapping of VertexID to index
 	vertexByIndex []string       // reverse lookup by index
 	opts          Options        // original construction options
+}
+
+// adjacencyExportPolicy freezes ToGraph export decisions for a single matrix scan.
+//
+// What:
+//   - Holds threshold, weight-output mode, and adjacency absence encoding.
+//
+// Why:
+//   - returnEdge is called inside an O(n²) loop; passing one resolved policy object
+//     avoids repeated option/encoding decisions and prevents boolean-argument soup.
+//
+// Behavior highlights:
+//   - thresholdSet distinguishes default threshold from an explicit user filter.
+//   - infNoEdge preserves finite zero-weight edges during default export.
+//
+// AI-Hints:
+//   - Do not apply DefaultEdgeThreshold to +Inf-no-edge weighted adjacency unless
+//     the caller explicitly set a threshold.
+type adjacencyExportPolicy struct {
+	threshold     float64
+	thresholdSet  bool
+	keepWeights   bool
+	binaryWeights bool
+	infNoEdge     bool
 }
 
 // NewAdjacencyMatrix BUILD adjacency container from core.Graph.
@@ -182,7 +222,9 @@ func (am *AdjacencyMatrix) VertexCount() (int, error) {
 //   - Stage 3: scan row i over columns j and collect non-zero, finite entries.
 //
 // Behavior highlights:
-//   - Deterministic: fixed vertex order (vertexByIndex), no map iteration order; skips 0 and +Inf.
+//   - Deterministic: fixed vertex order (vertexByIndex), no map iteration order.
+//   - In 0-as-no-edge adjacency, skips 0 and non-finite entries.
+//   - In +Inf-as-no-edge weighted adjacency, finite 0 is returned as a real neighbor.
 //
 // Inputs:
 //   - u: vertex ID (string) present in VertexIndex.
@@ -203,9 +245,9 @@ func (am *AdjacencyMatrix) VertexCount() (int, error) {
 //   - Time O(n), Space O(k) for k neighbors.
 //
 // Notes:
-//   - Normal adjacency uses unreachableWeight (currently 0) to represent “no edge”.
-//     Therefore, a 0-valued entry is treated as absent and is NOT returned as a neighbor.
-//   - +Inf is also treated as “no edge” (distance/metric-closure semantics); NaN is not expected.
+//   - Standard adjacency uses unreachableWeight (0) as no-edge.
+//   - Finite weighted adjacency may use +Inf as no-edge so zero-weight edges remain visible.
+//   - NaN/-Inf are skipped defensively; builders should not produce them.
 //
 // AI-Hints:
 //   - Use WithWeighted/WithBinary builders to control adjacency semantics before calling.
@@ -236,8 +278,9 @@ func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 		colIdx    int     // column index
 		w         float64 // weight placeholder
 		neighbors = make([]string, 0, defaultReserve)
-		err       error  // error placeholder
-		vid       string //
+		err       error                         // error placeholder
+		vid       string                        // vertex ID resolved from the stable column index
+		infNoEdge = am.adjacencyUsesInfNoEdge() // true when finite 0 is a real edge weight
 	)
 
 	// Execute scan
@@ -250,10 +293,13 @@ func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 		if err != nil {
 			return nil, fmt.Errorf("Neighbors: At(%d,%d): %w", srcIdx, colIdx, err)
 		}
-		// Skip “no edge” sentinels:
-		//   - unreachableWeight (normal adjacency no-edge sentinel),
-		//   - any non-finite value (+Inf used by distance matrices).
-		if w == unreachableWeight || isNonFinite(w) {
+
+		// Classify absence under the matrix's resolved adjacency encoding.
+		// In +Inf-no-edge mode, finite 0 is a real edge and must be returned.
+		if adjacencyEntryAbsent(w, infNoEdge) {
+			continue
+		}
+		if adjacencyEntryAbsent(w, infNoEdge) {
 			continue
 		}
 
@@ -274,6 +320,67 @@ func (am *AdjacencyMatrix) indexToVertex(idx int) (string, error) {
 	}
 
 	return am.vertexByIndex[idx], nil
+}
+
+// adjacencyUsesInfNoEdge reports whether this adjacency interprets +Inf as absence.
+//
+// What:
+//   - Returns true for metric/distance matrices and finite weighted adjacency
+//     matrices built with +Inf-as-no-edge encoding.
+//
+// Why:
+//   - In +Inf-no-edge encoding, finite 0 is a real edge weight.
+//   - Consumers such as Neighbors, ToGraph, and DegreeVector must not treat 0 as absence.
+//
+// Implementation:
+//   - MetricClosure always uses +Inf as no-path.
+//   - For Dense-backed weighted adjacency, allowInfDistances indicates that the
+//     builder selected a +Inf-capable absence encoding.
+//   - Non-Dense externally mutated wrappers fall back to conservative 0-as-no-edge
+//     behavior because their storage policy cannot be inspected.
+//
+// Determinism:
+//   - O(1), pure metadata check.
+//
+// AI-Hints:
+//   - Do not infer zero-weight absence without checking this helper.
+//   - Do not expose Dense.allowInfDistances publicly just for this check.
+func (am *AdjacencyMatrix) adjacencyUsesInfNoEdge() bool {
+	if am == nil || am.Mat == nil {
+		return false
+	}
+	if am.opts.metricClose {
+		return true
+	}
+	if d, ok := am.Mat.(*Dense); ok {
+		return am.opts.weighted && d.allowInfDistances
+	}
+
+	return false
+}
+
+// adjacencyEntryAbsent classifies a matrix entry as absent under the selected encoding.
+//
+// What:
+//   - In +Inf-no-edge mode, +Inf/NaN/-Inf are treated as non-neighbor entries.
+//   - In 0-as-no-edge mode, 0 and non-finite values are treated as absent.
+//
+// Why:
+//   - This centralizes the zero-weight preservation law for adjacency consumers.
+//
+// Notes:
+//   - Neighbors/DegreeVector are read-oriented convenience methods and skip non-finite
+//     values defensively.
+//   - ToGraph uses stricter export logic and reports NaN/-Inf as errors.
+//
+// AI-Hints:
+//   - Do not use v == 0 directly in adjacency consumers.
+func adjacencyEntryAbsent(v float64, infNoEdge bool) bool {
+	if infNoEdge {
+		return isNonFinite(v)
+	}
+
+	return v == unreachableWeight || isNonFinite(v)
 }
 
 // buildDenseAdjacencyFromGraph is a convenience wrapper used by tests
@@ -332,13 +439,15 @@ func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, 
 //   - Stage 4: add vertices in stable order, then emit edges deterministically.
 //
 // Behavior highlights:
-//   - Threshold is strict (a[i,j] > threshold).
+//   - In classic 0-as-no-edge adjacency, threshold is strict: a[i,j] > threshold.
+//   - In +Inf-as-no-edge weighted adjacency, default export preserves every finite
+//     edge including 0; explicit WithEdgeThreshold enables strict filtering.
 //   - keepWeights casts a[i,j] to float64 (truncate toward zero); binary emits weight=1.
 //   - Orientation is inherited from the original build options (am.opts.directed).
 //   - IMPORTANT (0-weight entries):
-//     With the default strict thresholding and normal adjacency semantics, a value of 0
-//     is treated as “no edge” and will not be exported unless a caller explicitly sets
-//     a negative threshold. This matches Neighbors behavior, which also skips 0-valued entries.
+//     If the source adjacency uses +Inf as no-edge, finite 0 is a real edge and
+//     default export preserves it. If the source adjacency uses 0 as no-edge,
+//     finite 0 is absence and cannot be exported as an edge.
 //
 // Inputs:
 //   - optFns ...Option: optional export overrides (edge threshold, weight policy).
@@ -386,10 +495,18 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	}
 
 	// Gather export options (threshold/weights). Direction comes from source options.
-	exp := gatherOptions(optFns...) // apply user overrides on documented defaults
-	thr := exp.edgeThreshold        // a[i,j] must be strictly greater to emit an edge
-	keepWeights := exp.keepWeights  // true ⇒ weight=a[i,j]; false ⇒ weight=1
-	binary := exp.binaryWeights
+	exp, err := gatherOptions(optFns...) // apply user overrides on documented defaults
+	if err != nil {
+		return nil, err
+	}
+	exportPolicy := adjacencyExportPolicy{
+		threshold:     exp.edgeThreshold, // a[i,j] must be strictly greater to emit an edge
+		thresholdSet:  exp.edgeThresholdSet,
+		keepWeights:   exp.keepWeights, // true ⇒ weight=a[i,j]; false ⇒ weight=1
+		binaryWeights: exp.binaryWeights,
+		infNoEdge:     am.adjacencyUsesInfNoEdge(),
+	}
+
 	directed := am.opts.directed     // inherit orientation of the built adjacency
 	allowLoops := am.opts.allowLoops // snapshot loop policy for core construction
 	allowMulti := am.opts.allowMulti // snapshot multi-edge policy for core construction
@@ -400,7 +517,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	gOpts = append(gOpts, core.WithDirected(directed)) // pass through directedness as is
 	// Core forbids non-zero weights in unweighted graphs.
 	// Therefore, any export mode that emits a non-zero weight must build a weighted graph.
-	if keepWeights /* && weightedSrc */ || binary { // only mark weighted if it matters
+	if exportPolicy.keepWeights /* && weightedSrc */ || exportPolicy.binaryWeights { // only mark weighted if it matters
 		gOpts = append(gOpts, core.WithWeighted())
 	}
 	// Loops / multi-edges: preserve build-time policy snapshot where sensible.
@@ -411,10 +528,11 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	if allowMulti {
 		gOpts = append(gOpts, core.WithMultiEdges())
 	}
-	g := core.NewGraph(gOpts...) // construction is O(1); core owns its internals
-
+	g, err := core.NewGraph(gOpts...) // construction is O(1); core owns its internals
+	if err != nil {
+		return nil, fmt.Errorf("ToGraph: NewGraph: %w", err)
+	}
 	// Vertex IDs are already in deterministic order within am.vertexByIndex.
-	var err error
 	for _, vid := range am.vertexByIndex {
 		// AddVertex is idempotent in core (by contract); ignore returned id if any.
 		if err = g.AddVertex(vid); err != nil {
@@ -437,8 +555,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 				if err != nil {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err) // surface matrix read error
 				}
-				if err = returnEdge(g, fromID, toID, val, thr, keepWeights, binary); err != nil {
-					return nil, err // already wrapped with context
+				if err = returnEdge(g, fromID, toID, val, exportPolicy); err != nil {
 				}
 			}
 		}
@@ -451,8 +568,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 				if err != nil {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err)
 				}
-				if err = returnEdge(g, fromID, toID, val, thr, keepWeights, binary); err != nil {
-					return nil, err
+				if err = returnEdge(g, fromID, toID, val, exportPolicy); err != nil {
 				}
 			}
 		}
@@ -462,42 +578,68 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 	return g, nil
 }
 
-// returnEdge EMIT a single edge when aij passes threshold under the chosen weight policy.
+// returnEdge emits one graph edge when the matrix entry represents presence.
+//
 // Implementation:
-//   - Stage 1: skip +Inf and sub-threshold entries.
-//   - Stage 2: derive integer weight: keep ⇒ float64(aij) (truncate toward zero), binary ⇒ 1.
-//   - Stage 3: call core.AddEdge(fromID, toID, w).
+//   - Stage 1: classify invalid non-finite values.
+//   - Stage 2: classify absence according to adjacency encoding.
+//   - Stage 3: apply threshold filtering:
+//     classic 0-as-no-edge always uses threshold;
+//     +Inf-as-no-edge uses threshold only when caller explicitly set it.
+//   - Stage 4: derive exported weight and call core.AddEdge.
 //
 // Behavior highlights:
-//   - No captures; small non-allocating helper used in tight loops.
+//   - Preserves finite zero-weight edges in +Inf-no-edge weighted adjacency.
+//   - Rejects NaN and -Inf instead of silently dropping corrupted entries.
+//   - Keeps default binary export behavior for classic adjacency.
 //
 // Inputs:
-//   - g: target graph; fromID,toID: vertex IDs; aij: matrix entry; threshold; keep: weight policy.
+//   - g: target graph.
+//   - fromID, toID: endpoints.
+//   - aij: matrix entry.
+//   - policy: frozen export policy.
 //
 // Returns:
-//   - error: wrapped with precise context; nil on success.
+//   - nil on skip or successful AddEdge.
+//   - sentinel-preserving error on invalid data or core insertion failure.
+//
+// Errors:
+//   - ErrNaNInf for NaN/-Inf matrix entries.
+//   - core AddEdge errors wrapped with endpoint context.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
 //
 // AI-Hints:
-//   - Provide integer-native adjacency if you want exact equality without truncation semantics.
-func returnEdge(g *core.Graph, fromID, toID string, aij, threshold float64, keep, binary bool) error {
-	// Skip distances/+Inf (metric-closure never reaches here) and sub-threshold values.
-	if math.IsInf(aij, +1) || !(aij > threshold) {
-		return nil // not an edge per strict policy
+//   - Do not use aij > threshold as the only presence test in +Inf-no-edge mode.
+//   - Do not silently ignore NaN/-Inf during graph export.
+func returnEdge(g *core.Graph, fromID, toID string, aij float64, policy adjacencyExportPolicy) error {
+	if math.IsNaN(aij) || math.IsInf(aij, -1) {
+		return fmt.Errorf("ToGraph: invalid entry %q->%q=%v: %w", fromID, toID, aij, ErrNaNInf)
 	}
-	// Derive integer weight for core: keep ⇒ cast a[i,j]; binary ⇒ 1.
-	var w float64
-	if keep {
-		w = aij // adjacency values originate from edge weights
-	} else if binary {
-		w = 1.0
+
+	if policy.infNoEdge {
+		if math.IsInf(aij, 1) {
+			return nil
+		}
+		if policy.thresholdSet && !(aij > policy.threshold) {
+			return nil
+		}
 	} else {
-		// Optional "unweighted export" mode: keep topology, but emit weight=0.
-		w = 0.0
+		if math.IsInf(aij, 1) || !(aij > policy.threshold) {
+			return nil
+		}
 	}
-	// Insert the edge; core enforces multi/loop constraints and ordering.
+
+	var w float64
+	if policy.keepWeights {
+		w = aij
+	} else if policy.binaryWeights {
+		w = defaultWeight
+	} else {
+		w = 0
+	}
+
 	if _, err := g.AddEdge(fromID, toID, w); err != nil {
 		return fmt.Errorf("ToGraph: AddEdge %q->%q: %w", fromID, toID, err)
 	}
@@ -507,16 +649,18 @@ func returnEdge(g *core.Graph, fromID, toID string, aij, threshold float64, keep
 
 // DegreeVector COMPUTE per-vertex degree/strength from adjacency semantics.
 //
-//	– Directed: out-degree is row sum of outgoing entries.
-//	– Undirected: degree equals row sum for binary symmetric adjacency.
-//	– Loops: counted as exactly 1 (if present), regardless of stored weight.
+//	– Unweighted/binary: degree counts present off-diagonal edges as 1.
+//	– Weighted: strength sums present off-diagonal finite weights.
+//	– Loops: counted as exactly 1 if present, regardless of stored weight.
 //
 // Implementation:
 //   - Stage 1: validate container and square shape.
 //   - Stage 2: fast-path on *Dense with direct flat access; else fallback via At.
 //
 // Behavior highlights:
-//   - +Inf denotes “no edge” and is ignored; NaN is ignored for robustness.
+//   - Absence is encoding-aware: 0-as-no-edge or +Inf-as-no-edge.
+//   - In +Inf-as-no-edge weighted adjacency, finite 0 is present.
+//   - NaN/-Inf are ignored defensively for this read-only summary.
 //   - Deterministic i→j traversal.
 //
 // Returns:
@@ -550,6 +694,8 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 
 	n := am.Mat.Rows()        // dimension of the matrix
 	out := make([]float64, n) // allocate exactly one result vector
+	infNoEdge := am.adjacencyUsesInfNoEdge()
+	weighted := am.opts.weighted
 	// Fast-path: direct flat access on *Dense (row-major).
 	if d, ok := am.Mat.(*Dense); ok {
 		var i, j, base int      // loop indices and row base offset
@@ -559,19 +705,21 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 			base = i * n            // compute base offset once per row
 			for j = 0; j < n; j++ { // fixed inner loop (col)
 				v = d.data[base+j] // read A[i,j]
+
 				// Ignore invalid/unreachable (policy).
-				if isNaNOrPosInf(v) {
+				if adjacencyEntryAbsent(v, infNoEdge) {
 					continue
 				}
-				// Early filter: only positive entries contribute.
-				if v > 0 {
-					if i == j {
-						// Loop contributes exactly 1 if present.
-						s += 1.0
-					} else {
-						// Off-diagonal contributes raw positive weight.
-						s += v
-					}
+				if i == j {
+					s += 1.0
+					continue
+				}
+				if weighted {
+					// Off-diagonal contributes raw positive weight.
+					s += v
+				} else {
+					// Loop contributes exactly 1 if present.
+					s += defaultWeight
 				}
 			}
 			out[i] = s // store degree/strength of vertex i
@@ -591,17 +739,21 @@ func (am *AdjacencyMatrix) DegreeVector() ([]float64, error) {
 			if err != nil {
 				return nil, fmt.Errorf("DegreeVector: At(%d,%d): %w", i, j, err)
 			}
-			// Skip invalid/unreachable.
-			if isNaNOrPosInf(v) {
+
+			// Ignore invalid/unreachable (policy).
+			if adjacencyEntryAbsent(v, infNoEdge) {
 				continue
 			}
-			// Only positive entries contribute.
-			if v > 0 {
-				if i == j {
-					s += 1.0 // loop → exactly one
-				} else {
-					s += v // off-diagonal weight
-				}
+			if i == j {
+				s += 1.0
+				continue
+			}
+			if weighted {
+				// Off-diagonal contributes raw positive weight.
+				s += v
+			} else {
+				// Loop contributes exactly 1 if present.
+				s += defaultWeight
 			}
 		}
 		out[i] = s // assign row sum

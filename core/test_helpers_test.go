@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 // Package core_test contains test helpers for lvlath/core.
 //
 // Purpose:
@@ -76,10 +77,64 @@ const (
 	NCloners = 20
 )
 
+// MustNewGraph constructs a graph for tests and fails the owning test on constructor error.
+//
+// Implementation:
+// - Stage 1: Call core.NewGraph with the provided options.
+// - Stage 2: Fail the test immediately if constructor validation returns an error.
+// - Stage 3: Fail the test if the returned graph is nil.
+// - Stage 4: Return the validated graph.
+//
+// Behavior highlights:
+// - Centralizes constructor error handling for tests.
+// - Keeps test bodies compact after NewGraph becomes error-returning.
+//
+// Inputs:
+// - t: test context.
+// - opts: zero or more constructor options.
+//
+// Returns:
+// - *core.Graph: non-nil graph fixture.
+//
+// Errors:
+// - Fatal test failure if core.NewGraph returns an error or nil graph.
+//
+// Determinism:
+// - Deterministic.
+//
+// Complexity:
+// - Time O(len(opts)), Space O(1) excluding graph allocation.
+//
+// Notes:
+// - This is test-only glue; production code should handle constructor errors directly.
+//
+// AI-Hints:
+// - Prefer MustNewGraph(...) over repeating g, err := core.NewGraph(...) in every test.
+func MustNewGraph(t *testing.T, opts ...core.GraphOption) *core.Graph {
+	t.Helper()
+
+	g, err := core.NewGraph(opts...)
+	MustErrorNil(t, err, "core.NewGraph(...)")
+	MustNotNil(t, g, "core.NewGraph(...)")
+
+	return g
+}
+
+// MustNewMixedGraph constructs a mixed graph for tests and fails the owning test on constructor error.
+func MustNewMixedGraph(t *testing.T, opts ...core.GraphOption) *core.Graph {
+	t.Helper()
+
+	g, err := core.NewMixedGraph(opts...)
+	MustErrorNil(t, err, "core.NewMixedGraph(...)")
+	MustNotNil(t, g, "core.NewMixedGraph(...)")
+
+	return g
+}
+
 // NewGraphFull RETURNS a Graph configured for broad contract coverage.
 //
 // Implementation:
-//   - Stage 1: Call core.NewGraph with WithWeighted/WithMultiEdges/WithLoops.
+//   - Stage 1: Call MustNewGraph with WithWeighted/WithMultiEdges/WithLoops.
 //   - Stage 2: Return the constructed *core.Graph.
 //
 // Behavior highlights:
@@ -88,13 +143,13 @@ const (
 //   - Enables loops to exercise self-loop semantics.
 //
 // Inputs:
-//   - None.
+//   - t: test context.
 //
 // Returns:
 //   - *core.Graph: graph with {Weighted=true, MultiEdges=true, Loops=true}.
 //
 // Errors:
-//   - None.
+//   - Fatal test failure if construction fails.
 //
 // Determinism:
 //   - Deterministic configuration (no randomness).
@@ -109,8 +164,9 @@ const (
 // AI-Hints:
 //   - Use NewGraphFull when you need maximum feature surface with minimal setup.
 //   - For strict-policy tests, prefer building graphs explicitly to isolate constraints.
-func NewGraphFull() *core.Graph {
-	return core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
+func NewGraphFull(t *testing.T) *core.Graph {
+	t.Helper()
+	return MustNewGraph(t, core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 }
 
 // MustNotNil fails the test if val is nil, including "typed nil" values stored in interfaces.

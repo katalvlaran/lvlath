@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix: domain types used by adapters and dense operations.
 // This file intentionally contains ONLY domain-facing types (IDs, weights,
@@ -29,16 +30,29 @@ type pairKey struct {
 
 // Matrix represents a two-dimensional mutable array of float64 values.
 //
+// Zero-shape law:
+//   - Matrix implementations may legally have shape 0×0, 0×N, or N×0.
+//   - Rows and Cols must always be non-negative.
+//   - A zero-sized matrix has an empty element domain; element-wise scans are
+//     deterministic no-ops.
+//   - At/Set on any coordinate outside the empty domain must return ErrOutOfRange.
+//
 // Contract:
-//   - Matrix may be zero-size (0×0, 0×N, N×0).
 //   - At/Set MUST return ErrOutOfRange on invalid indices.
 //   - Set may additionally return ErrNaNInf when numeric policy rejects a value.
 //   - Clone returns a deep copy independent of the original.
+//   - Clone of a zero-sized matrix must preserve shape and numeric policy when
+//     the concrete implementation supports policy state.
 //
 // Complexity notes:
 //   - Rows/Cols: O(1)
 //   - At/Set: O(1)
 //   - Clone: expected O(r*c) for dense implementations.
+//
+// AI-Hints:
+//   - Do not special-case zero-sized matrices as nil.
+//   - Use ValidateNotNil for presence and explicit shape validators for operations
+//     that require non-empty dimensions.
 type Matrix interface {
 	// Rows returns the number of rows in the matrix.
 	// Complexity: O(1).
@@ -52,7 +66,7 @@ type Matrix interface {
 	// Returns ErrOutOfRange if i<0, i>=Rows(), j<0 or j>=Cols().
 	// Concrete implementations may return additional sentinel errors per
 	// numeric policy.
-	//Complexity: O(1).
+	// Complexity: O(1).
 	At(i, j int) (float64, error)
 
 	// Set assigns the value v at position (i, j).

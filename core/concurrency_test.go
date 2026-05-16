@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 // Package core_test verifies thread-safety of core.Graph under concurrent operations.
 //
 // Purpose:
@@ -8,6 +9,7 @@
 package core_test
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -49,7 +51,7 @@ import (
 // AI-Hints:
 //   - Keep N moderate; pair with `go test -race` to validate locking rigorously.
 func TestConcurrentAddEdge(t *testing.T) {
-	g := core.NewGraph(core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithMultiEdges())
 
 	var (
 		wg    sync.WaitGroup
@@ -122,7 +124,7 @@ func TestConcurrentAddEdge(t *testing.T) {
 // AI-Hints:
 //   - Keep the “acceptable error set” explicit; never silently ignore unknown errors.
 func TestConcurrentAddRemoveEdge(t *testing.T) {
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 
 	MustErrorNil(t, g.AddVertex(VertexBase), "AddVertex(Base)")
 
@@ -154,7 +156,7 @@ func TestConcurrentAddRemoveEdge(t *testing.T) {
 				if err == nil {
 					continue
 				}
-				if err == core.ErrEdgeNotFound {
+				if errors.Is(err, core.ErrEdgeNotFound) {
 					continue
 				}
 				errCh <- err
@@ -201,7 +203,7 @@ func TestConcurrentAddRemoveEdge(t *testing.T) {
 // AI-Hints:
 //   - If internal representation changes, update ONLY the contract statement, not the test harness style.
 func TestConcurrentNeighborsAndClone(t *testing.T) {
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 
 	var (
 		i   int

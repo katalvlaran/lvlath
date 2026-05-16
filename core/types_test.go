@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 // Package core_test verifies core.Graph configuration, identity contracts, and cloning semantics.
 //
 // Purpose:
@@ -49,21 +50,69 @@ import (
 // AI-Hints:
 //   - Prefer option tests to stay minimal: assert flags and one representative behavior per flag.
 func TestGraph_Options(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	MustEqualBool(t, g.Directed(), false, "Directed() default must be false (undirected)")
 	MustEqualBool(t, g.Weighted(), true, "Weighted() must be true on NewGraphFull")
 	MustEqualBool(t, g.HasVertex(VertexEmpty), false, "HasVertex(empty) must be false")
 
-	dg := core.NewGraph(core.WithDirected(true))
+	dg := MustNewGraph(t, core.WithDirected(true))
 	MustEqualBool(t, dg.Directed(), true, "WithDirected(true) must set Directed()==true")
 
-	sg := core.NewGraph()
+	sg := MustNewGraph(t)
 	_, err := sg.AddEdge(VertexX, VertexY, Weight0)
 	MustErrorNil(t, err, "AddEdge(X,Y,0) first on default graph")
 
 	_, err = sg.AddEdge(VertexX, VertexY, Weight0)
 	MustErrorIs(t, err, core.ErrMultiEdgeNotAllowed, "AddEdge(X,Y,0) second on default graph")
+}
+
+// TestGraph_NewGraphRejectsNilOption ASSERTS constructor-level nil-option validation.
+//
+// Implementation:
+// - Stage 1: Call NewGraph with a nil GraphOption.
+// - Stage 2: Assert ErrNilGraphOption and nil graph result.
+// - Stage 3: Call NewGraph with a valid option prefix followed by a nil GraphOption.
+// - Stage 4: Assert the same sentinel and nil graph result.
+//
+// Behavior highlights:
+// - Locks in fail-fast nil-option validation for constructor inputs.
+// - Prevents panic-based option handling from re-entering the public contract.
+//
+// Inputs:
+// - None.
+//
+// Returns:
+// - None.
+//
+// Errors:
+// - Fatal on mismatch.
+//
+// Determinism:
+// - Deterministic.
+//
+// Complexity:
+// - Time O(len(opts)), Space O(1).
+//
+// Notes:
+// - This is a regression anchor for the public no-panic constructor contract.
+//
+// AI-Hints:
+// - Nil option slots are invalid inputs, not no-ops.
+func TestGraph_NewGraphRejectsNilOption(t *testing.T) {
+	var nilOpt core.GraphOption
+
+	g, err := core.NewGraph(nilOpt)
+	MustErrorIs(t, err, core.ErrNilGraphOption, "NewGraph(nil GraphOption)")
+	if g != nil {
+		t.Fatalf("NewGraph(nil GraphOption): got non-nil graph on error")
+	}
+
+	g, err = core.NewGraph(core.WithWeighted(), nilOpt)
+	MustErrorIs(t, err, core.ErrNilGraphOption, "NewGraph(WithWeighted(), nil GraphOption)")
+	if g != nil {
+		t.Fatalf("NewGraph(WithWeighted(), nil GraphOption): got non-nil graph on error")
+	}
 }
 
 // TestGraph_VertexLifecycle ASSERTS AddVertex/HasVertex/RemoveVertex invariants.
@@ -100,7 +149,7 @@ func TestGraph_Options(t *testing.T) {
 // AI-Hints:
 //   - Keep vertex IDs short and consistent to avoid noise in failure output.
 func TestGraph_VertexLifecycle(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	err := g.AddVertex(VertexEmpty)
 	MustErrorIs(t, err, core.ErrEmptyVertexID, "AddVertex(empty)")
@@ -155,7 +204,7 @@ func TestGraph_VertexLifecycle(t *testing.T) {
 // AI-Hints:
 //   - If you later formalize ID format, extend this test with a parser and pattern assertions.
 func TestGraph_AtomicEdgeIDs(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	idCh := make(chan string, NAtomicEdgeIDs)
 	errCh := make(chan error, NAtomicEdgeIDs)
@@ -228,7 +277,7 @@ func TestGraph_AtomicEdgeIDs(t *testing.T) {
 // AI-Hints:
 //   - Keep HasEdge usable as a fast-path predicate (must never panic on unknown IDs).
 func TestGraph_AdjacencyMap(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), false, "HasEdge(P,Q) on empty graph must be false")
 
@@ -271,7 +320,7 @@ func TestGraph_AdjacencyMap(t *testing.T) {
 // AI-Hints:
 //   - Verify deep-copy by pointer identity, not by mutating Weight (avoids contract violations).
 func TestGraph_CloneMethods(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	eidXY, err := g.AddEdge(VertexX, VertexY, Weight1)
 	MustErrorNil(t, err, "AddEdge(X,Y,1)")
@@ -327,7 +376,7 @@ func TestGraph_CloneMethods(t *testing.T) {
 // AI-Hints:
 //   - Prefer snapshot APIs when you want a safe iteration without holding graph locks.
 func TestGraph_VerticesMapReadOnly(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	MustErrorNil(t, g.AddVertex("Z"), "AddVertex(Z)")
 
@@ -368,7 +417,7 @@ func TestGraph_VerticesMapReadOnly(t *testing.T) {
 // AI-Hints:
 //   - Keep this test lightweight; rely on -race to detect unsynchronized access.
 func TestGraph_HasVertexConcurrency(t *testing.T) {
-	g := NewGraphFull()
+	g := NewGraphFull(t)
 
 	const M = 50
 

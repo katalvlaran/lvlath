@@ -30,13 +30,13 @@ func TestBFS_Validation(t *testing.T) {
 	})
 
 	t.Run("unknown start", func(t *testing.T) {
-		g := core.NewGraph()
+		g, _ := core.NewGraph()
 		_, err := bfs.BFS(g, "missing")
 		mustErrorIs(t, err, bfs.ErrStartVertexNotFound)
 	})
 
 	t.Run("weighted graph unsupported", func(t *testing.T) {
-		g := core.NewGraph(core.WithWeighted())
+		g, _ := core.NewGraph(core.WithWeighted())
 		mustNoError(t, g.AddVertex("A"))
 
 		_, err := bfs.BFS(g, "A")
@@ -44,7 +44,7 @@ func TestBFS_Validation(t *testing.T) {
 	})
 
 	t.Run("invalid option - nil option", func(t *testing.T) {
-		g := core.NewGraph()
+		g, _ := core.NewGraph()
 		mustNoError(t, g.AddVertex("A"))
 
 		var opt bfs.Option // nil option value
@@ -53,7 +53,7 @@ func TestBFS_Validation(t *testing.T) {
 	})
 
 	t.Run("invalid option - depth below MaxDepthUnlimited", func(t *testing.T) {
-		g := core.NewGraph()
+		g, _ := core.NewGraph()
 		mustNoError(t, g.AddVertex("A"))
 
 		const invalidDepth = bfs.MaxDepthUnlimited - 1
@@ -66,7 +66,7 @@ func TestBFS_Validation(t *testing.T) {
 
 func TestBFS_Medium_ShortestPathAnchor(t *testing.T) {
 	// Directed graph to make reachability and parent choices explicit.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
@@ -107,7 +107,7 @@ func TestBFS_Medium_DeterminismAnchor_NeighborIDsLexOrder(t *testing.T) {
 	// core.NeighborIDs() returns unique neighbor IDs sorted lex asc.
 	// Even if edges are added out-of-order, BFS must follow NeighborIDs order.
 
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	_, err := g.AddEdge("A", "C", 0)
 	mustNoError(t, err)
@@ -125,7 +125,7 @@ func TestBFS_Medium_DeterminismAnchor_NeighborIDsLexOrder(t *testing.T) {
 
 func TestBFS_Special_MaxDepthInclusive(t *testing.T) {
 	// A -> B -> C directed chain.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 	_, err = g.AddEdge("B", "C", 0)
@@ -151,7 +151,7 @@ func TestBFS_Special_MaxDepthInclusive(t *testing.T) {
 
 func TestBFS_Special_DirectedReachabilityAnchor(t *testing.T) {
 	// A -> B directed. Start from B, A is unreachable.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 
@@ -171,7 +171,7 @@ func TestBFS_Special_PartialResult_OnVisitError(t *testing.T) {
 	// NeighborIDs are lex-sorted: B then C.
 	// BFS will enqueue both B and C when processing A.
 	// If OnVisit errors at B, Order must be [A, B], while Visited may include C (enqueued but not visited).
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 	_, err = g.AddEdge("A", "C", 0)
@@ -200,7 +200,7 @@ func TestBFS_Special_PartialResult_OnVisitError(t *testing.T) {
 
 func TestBFS_Special_FilterNeighbor_Skipped(t *testing.T) {
 	// A -> B and A -> C (directed). Filter out A->C.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 	_, err = g.AddEdge("A", "C", 0)
@@ -224,7 +224,7 @@ func TestBFS_Special_FilterNeighbor_Skipped(t *testing.T) {
 func TestBFS_Special_LoopsAndMultiEdges_NoDoubleEnqueue(t *testing.T) {
 	// This test anchors: loops and parallel edges do not cause multiple enqueues of the same vertex.
 	// Graph is unweighted (BFS rejects weighted graphs).
-	g := core.NewGraph(core.WithLoops(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithLoops(), core.WithMultiEdges())
 
 	_, err := g.AddEdge("A", "A", 0) // loop
 	mustNoError(t, err)
@@ -242,7 +242,7 @@ func TestBFS_Special_LoopsAndMultiEdges_NoDoubleEnqueue(t *testing.T) {
 
 func TestBFS_Special_Cancellation(t *testing.T) {
 	// Cancellation is checked in the kernel loop; result may be partial.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	for i := 0; i < 100; i++ {
 		u := mustFmt(t, "v%d", i)
 		v := mustFmt(t, "v%d", i+1)
@@ -262,7 +262,7 @@ func TestBFS_Special_Cancellation(t *testing.T) {
 func TestBFS_Special_ConcurrentRuns(t *testing.T) {
 	// This test asserts that concurrent BFS calls do not interfere.
 	// NOTE: Do not call t.Fatal inside goroutines; report errors via channels.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 
@@ -285,7 +285,7 @@ func TestBFS_Special_ConcurrentRuns(t *testing.T) {
 
 func TestComponents_WeakConnectivity_DirectedChain(t *testing.T) {
 	// Directed chain A->B->C must still be a single weakly-connected component.
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 	_, err = g.AddEdge("B", "C", 0)
@@ -302,7 +302,7 @@ func TestComponents_WeakConnectivity_DirectedChain(t *testing.T) {
 }
 
 func TestComponents_Cancellation_PartialResult(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, err := g.AddEdge("A", "B", 0)
 	mustNoError(t, err)
 	_, err = g.AddEdge("B", "C", 0)

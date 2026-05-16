@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package core - deterministic, thread-safe in-memory graphs for serious work.
 //
@@ -25,7 +26,7 @@
 //
 //   - Mixed-Mode Mastery:
 //     Per-edge directedness overrides are explicit and legal only when mixed-mode
-//     is enabled. Violations return ErrMixedEdgesNotAllowed (no silent fallback).
+//     is enabled. Violations return ErrMixedEdgesNotAllowed; there is no silent fallback.
 //
 //   - Identity Discipline:
 //     Default Edge IDs are monotonic textual identifiers ("e1","e2",...).
@@ -36,8 +37,8 @@
 //     of multiple graph types that fragment algorithms.
 //
 //   - No Magic, No Surprises:
-//     Sentinel errors only (errors.Is), no fmt-wrapping of sentinels, and no
-//     hidden global state. If a capability is disabled, you receive ErrX.
+//     Sentinel errors only (errors.Is), explicit capability flags, and no hidden
+//     global state. If a capability is disabled, the package returns the relevant ErrX.
 //
 // -----------------------------------------------------------------------------
 // -- WHEN ---------------------------------------------------------------------
@@ -46,6 +47,43 @@
 //   - Need to combine directed/undirected/loops/multi-edges within one instance.
 //   - Need safe concurrent reads with a clear lock model and controlled mutations.
 //   - Need stable Edge IDs across clones/views for debugging/analytics.
+//
+// -----------------------------------------------------------------------------
+// -- CONTRACT LAWS ------------------------------------------------------------
+//
+// Determinism law:
+//   - Vertices() returns Vertex.ID values sorted lexicographically ascending.
+//   - Edges(), GetNamedEdges(), and Neighbors() return edges sorted by Edge.ID ascending.
+//   - NeighborIDs() returns unique adjacent vertex IDs sorted lexicographically ascending.
+//   - AdjacencyList() returns fresh per-vertex edge-ID slices sorted by Edge.ID ascending;
+//     map key iteration order remains Go-map order and is therefore not deterministic.
+//
+// Construction / validation law:
+//   - NewGraph and NewMixedGraph validate public GraphOption inputs and return errors;
+//     constructor validation is part of the public contract.
+//   - AddEdge validates public EdgeOption inputs before lock acquisition, vertex
+//     auto-creation, or edge publication.
+//
+// Ownership / aliasing law:
+//   - Detached container/value surfaces include Vertices(), NeighborIDs(),
+//     AdjacencyList(), Stats(), counts, and membership predicates.
+//   - Alias-based catalog accessors include VerticesMap(), GetEdge(),
+//     GetNamedEdges(), Edges(), and Neighbors().
+//   - Alias-based accessors may return freshly allocated containers, but the
+//     contained *Vertex/*Edge values alias live catalog records.
+//   - Structural records MUST be treated as immutable once published in a graph:
+//     Vertex.ID, Edge.ID, Edge.From, Edge.To, Edge.Weight, and Edge.Directed.
+//   - Vertex.Metadata is caller-managed payload. Clone/View operations shallow-copy
+//     the Metadata map pointer; core neither deep-copies nor synchronizes it.
+//
+// Compatibility law:
+//   - InternalVertices() is retained only as a deprecated compatibility surface.
+//     New code must not treat it as an internal-storage escape hatch.
+//
+// Concurrency law:
+//   - Public methods are safe for concurrent use according to their documented locks.
+//   - Retained aliased pointers do not extend lock scope, do not provide snapshot
+//     isolation, and do not remain membership proofs after later mutations.
 //
 // -----------------------------------------------------------------------------
 // -- DESIGN INVARIANTS --------------------------------------------------------
@@ -197,6 +235,15 @@
 //	CloneEmpty / Clone                           O(V) / O(V+E)
 //	Clear                                        O(1) (map reinit + counter reset)
 //	Stats                                        O(V+E)
+//
+// -----------------------------------------------------------------------------
+// -- NON-GOALS ----------------------------------------------------------------
+//
+// - No immutable persistent graph structure.
+// - No automatic deep-copy policy for Metadata.
+// - No silent policy fallback for weighted / mixed / loop / multigraph behavior.
+// - No hidden mutation channel through accessor APIs.
+// - No package-level snapshot isolation beyond documented method scope.
 //
 // -----------------------------------------------------------------------------
 // -- AI-HINT (LLM/Copilot/ChatGPT/Claude/Gemini/Qwen guidance) ----------------

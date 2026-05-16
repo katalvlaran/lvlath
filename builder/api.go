@@ -57,7 +57,10 @@ type Constructor func(g *core.Graph, cfg builderConfig) error
 //     against builder sentinels (ErrTooFewVertices, ErrInvalidProbability, ...).
 func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constructor) (*core.Graph, error) {
 	// Create a new graph using the provided core graph options (O(1) here).
-	g := core.NewGraph(gopts...)
+	g, err := core.NewGraph(gopts...)
+	if err != nil {
+		return nil, err
+	}
 
 	// Resolve deterministic builder configuration from functional options (O(len(bopts))).
 	cfg := newBuilderConfig(bopts...)

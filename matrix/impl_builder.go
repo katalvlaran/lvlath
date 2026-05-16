@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix - canonical builders for Dense adjacency and incidence matrices.
 // Deterministic, sentinel-accurate, and aligned with contracts.
 //
@@ -23,9 +25,89 @@ package matrix
 
 import (
 	"fmt"
+	"math"
 
 	"github.com/katalvlaran/lvlath/core"
 )
+
+// adjacencyNoEdgeEncoding identifies the dense numeric sentinel used for absent edges.
+//
+// What:
+//   - adjacencyNoEdgeZero means classic adjacency encoding: 0 is absence.
+//   - adjacencyNoEdgeInf means finite-weight encoding: +Inf is absence and every
+//     finite value, including 0 and negative values, is a real edge weight.
+//
+// Why:
+//   - Weighted adjacency cannot use 0 for both “no edge” and “zero-weight edge”.
+//   - +Inf is already the package-wide no-path/no-edge sentinel for distance-like
+//     representations and is compatible with Dense.allowInfDistances.
+//
+// Determinism:
+//   - The encoding is resolved once before allocation and never changes during the build.
+//
+// AI-Hints:
+//   - Do not use NaN as an absence sentinel.
+//   - Do not use -Inf as an absence sentinel.
+//   - Do not infer edge presence from numeric truthiness in weighted +Inf encoding.
+type adjacencyNoEdgeEncoding uint8
+
+const (
+	// adjacencyNoEdgeZero is the standard 0/weight adjacency encoding.
+	//
+	// Contract:
+	//   - 0 means no edge.
+	//   - Non-zero finite values may represent edge presence or edge weight.
+	//   - A true zero-weight edge cannot be represented in this encoding.
+	//
+	// Use:
+	//   - unweighted/binary adjacency;
+	//   - weighted adjacency with no zero-weight edges;
+	//   - compatibility all-zero auto-degrade mode.
+	adjacencyNoEdgeZero adjacencyNoEdgeEncoding = iota
+
+	// adjacencyNoEdgeInf is the finite-weight adjacency encoding.
+	//
+	// Contract:
+	//   - +Inf means no edge.
+	//   - Every finite value is an edge weight, including 0 and negative values.
+	//   - Dense must be allocated with allowInfDistances=true.
+	//
+	// Use:
+	//   - mixed zero/non-zero weighted input;
+	//   - all-zero weighted input when WithPreserveZeroWeights is enabled;
+	//   - weighted metric-closure preparation where zero edges must survive.
+	adjacencyNoEdgeInf
+)
+
+// adjacencyBuildPolicy is the resolved local encoding contract for BuildDenseAdjacency.
+//
+// What:
+//   - useWeight decides whether edge.Weight is written or binary defaultWeight is written.
+//   - noEdge decides how absent edges are represented in the Dense matrix.
+//
+// Why:
+//   - The builder must choose a single encoding before allocation so Dense policy,
+//     initialization, edge writes, metric closure, Neighbors, ToGraph, and DegreeVector
+//     all interpret the same matrix consistently.
+//
+// Behavior highlights:
+//   - Resolved once before Dense allocation.
+//   - Never recomputed inside edge loops.
+//   - Does not mutate Options; it is a derived local policy.
+//
+// AI-Hints:
+//   - Do not use opts.weighted directly inside write loops after this policy exists.
+//   - Do not let downstream methods guess zero-edge support from raw values only.
+type adjacencyBuildPolicy struct {
+	// useWeight is true when raw edge.Weight values must be written.
+	// false means topology is encoded with defaultWeight.
+	useWeight bool
+
+	// noEdge fixes the absent-edge sentinel for the entire matrix.
+	// adjacencyNoEdgeZero uses 0 as absence.
+	// adjacencyNoEdgeInf uses +Inf as absence.
+	noEdge adjacencyNoEdgeEncoding
+}
 
 // defaultWeight - unit weight for unweighted adjacency/incidence writes.
 const defaultWeight = 1.0
@@ -34,6 +116,92 @@ const defaultWeight = 1.0
 // We use 0 in adjacency (standard 0/weight adjacency). During metric-closure
 // this turns into +Inf on off-diagonals, while diag is forced to 0.
 const unreachableWeight = 0.0
+
+// edgeWeightProfile summarizes edge-weight shape before adjacency allocation.
+//
+// What:
+//   - hasEdges reports that at least one non-nil edge exists.
+//   - hasZero reports that at least one edge has Weight == 0.
+//   - hasNonZero reports that at least one edge has Weight != 0.
+//
+// Why:
+//   - The builder needs to distinguish three cases:
+//     1) no zero weights        => 0-as-no-edge is safe;
+//     2) mixed zero/non-zero    => +Inf-as-no-edge is required;
+//     3) all zero weights       => ambiguous, controlled by preserveZeroWeights.
+//
+// Notes:
+//   - This profile does not classify NaN/Inf as valid or invalid.
+//     BuildDenseAdjacency still validates actual writes and returns ErrInvalidWeight.
+//
+// AI-Hints:
+//   - Do not treat hasZero alone as “effectively unweighted”;
+//     mixed zero/non-zero must preserve zero edges.
+type edgeWeightProfile struct {
+	hasEdges   bool // at least one non-nil edge was inspected
+	hasZero    bool // at least one inspected edge has Weight == 0
+	hasNonZero bool // at least one inspected edge has Weight != 0
+}
+
+// inspectEdgeWeights scans edge weights once for adjacency encoding selection.
+//
+// Implementation:
+//   - Stage 1: iterate the stable edge slice exactly once.
+//   - Stage 2: reject nil edge slots as bad input shape.
+//   - Stage 3: record zero/non-zero presence without validating numeric finiteness.
+//
+// Behavior highlights:
+//   - Deterministic scan order.
+//   - No allocation.
+//   - Does not replace per-edge validation during writing.
+//
+// Inputs:
+//   - edges: stable edge slice provided by core or explicit caller.
+//
+// Returns:
+//   - edgeWeightProfile on success.
+//   - ErrBadShape when an edge slot is nil.
+//
+// Complexity:
+//   - Time O(E), Space O(1).
+//
+// AI-Hints:
+//   - Keep NaN/Inf validation at the write site so ErrInvalidWeight can include endpoints.
+//   - Do not silently skip nil edges; explicit edge slices are part of public input shape.
+func inspectEdgeWeights(edges []*core.Edge) (edgeWeightProfile, error) {
+	var p edgeWeightProfile
+
+	for i := 0; i < len(edges); i++ {
+		if edges[i] == nil {
+			return p, fmt.Errorf("inspectEdgeWeights: nil edge at index %d: %w", i, ErrBadShape)
+		}
+
+		p.hasEdges = true
+		if edges[i].Weight == 0 {
+			p.hasZero = true
+			continue
+		}
+
+		p.hasNonZero = true
+	}
+
+	return p, nil
+}
+
+// allZeroWeights reports whether no inspected edge has a non-zero weight.
+//
+// Notes:
+//   - Kept as a compatibility/internal readability helper.
+//   - Nil edge slots make the input invalid; this helper returns false in that case
+//     because callers that need diagnostics should use inspectEdgeWeights directly.
+func allZeroWeights(edges []*core.Edge) bool {
+	p, err := inspectEdgeWeights(edges)
+	if err != nil {
+		return false
+	}
+
+	return !p.hasNonZero
+}
 
 // orderedPair builds (u,v) key for directed de-duplication.
 // Complexity: O(1).
@@ -59,18 +227,6 @@ func lookupIndex(idx map[string]int, id string) (int, error) {
 	return 0, fmt.Errorf("matrix: unknown vertex %q: %w", id, ErrUnknownVertex)
 }
 
-// allZeroWeights returns true if every edge in the slice has Weight == 0.
-// Complexity: O(E) with early-exit on the first non-zero.
-func allZeroWeights(edges []*core.Edge) bool {
-	for i := 0; i < len(edges); i++ {
-		if edges[i].Weight != 0 {
-			return false
-		}
-	}
-
-	return true
-}
-
 // isLexSorted returns true if s is non-decreasing in lexicographic order.
 // Used defensively for vertex-list order enforcement in wrapper.
 // Complexity: O(n).
@@ -82,6 +238,194 @@ func isLexSorted(s []string) bool {
 	}
 
 	return true
+}
+
+// resolveAdjacencyBuildPolicy derives the exact dense adjacency encoding.
+//
+// Implementation:
+//   - Stage 1: inspect edge-weight profile once.
+//   - Stage 2: start from Options.weighted and classic 0-as-no-edge encoding.
+//   - Stage 3: if unweighted, keep binary 0/1 adjacency.
+//   - Stage 4: if weighted all-zero:
+//     preserveZeroWeights=false => degrade to binary compatibility mode;
+//     preserveZeroWeights=true  => use +Inf-as-no-edge and preserve finite 0.
+//   - Stage 5: if weighted mixed zero/non-zero, use +Inf-as-no-edge.
+//   - Stage 6: otherwise keep 0-as-no-edge weighted adjacency.
+//
+// Behavior highlights:
+//   - Mixed zero/non-zero weighted input is always preserved.
+//   - All-zero weighted input is controlled explicitly by Options.preserveZeroWeights.
+//   - No hidden mutation of Options.
+//
+// Errors:
+//   - ErrBadShape from nil edge slots.
+//
+// Determinism:
+//   - Stable O(E) scan; same inputs/options produce the same policy.
+//
+// Complexity:
+//   - Time O(E), Space O(1).
+//
+// AI-Hints:
+//   - Do not silently binary-degrade mixed zero/non-zero input.
+//   - Do not remove all-zero auto-degrade; it preserves core unweighted adapter compatibility.
+//   - Use WithPreserveZeroWeights for exact all-zero weighted graphs.
+func resolveAdjacencyBuildPolicy(opts Options, edges []*core.Edge) (adjacencyBuildPolicy, error) {
+	p, err := inspectEdgeWeights(edges)
+	if err != nil {
+		return adjacencyBuildPolicy{}, err
+	}
+
+	policy := adjacencyBuildPolicy{
+		useWeight: opts.weighted,
+		noEdge:    adjacencyNoEdgeZero,
+	}
+
+	if !policy.useWeight {
+		return policy, nil
+	}
+
+	// Preserve existing useful behavior: all-zero weighted-looking input is treated
+	// as effectively unweighted unless a future explicit option says otherwise.
+	if p.hasZero && !p.hasNonZero {
+		if !opts.preserveZeroWeights {
+			policy.useWeight = false
+			return policy, nil
+		}
+
+		policy.noEdge = adjacencyNoEdgeInf
+		return policy, nil
+	}
+
+	// Mixed zero/non-zero weighted input requires +Inf no-edge encoding so that
+	// finite zero remains a real edge weight.
+	if p.hasZero && p.hasNonZero {
+		policy.noEdge = adjacencyNoEdgeInf
+	}
+
+	return policy, nil
+}
+
+// initAdjacencyNoEdgeInf initializes every cell as absent using +Inf.
+//
+// What:
+//   - Pre-fills a Dense adjacency matrix with +Inf before edge writes.
+//
+// Why:
+//   - In finite weighted adjacency, 0 can be a valid edge weight.
+//   - Therefore absence must be represented by a value outside the finite weight domain.
+//   - +Inf is the selected sentinel because Dense.validateValue already supports it
+//     under allowInfDistances=true.
+//
+// Implementation:
+//   - Stage 1: validate receiver.
+//   - Stage 2: row-major Set(i,j,+Inf) for every cell.
+//
+// Behavior highlights:
+//   - Uses Dense.Set, not direct data writes.
+//   - Requires the matrix to have allowInfDistances=true.
+//   - Does not force diagonal to 0; ordinary adjacency diagonal absence is still absence.
+//   - Metric closure normalizes the diagonal later before FloydWarshall.
+//
+// Errors:
+//   - ErrNilMatrix for nil receiver.
+//   - ErrNaNInf if Dense was not allocated with allowInfDistances=true.
+//   - ErrOutOfRange should not occur unless Dense invariants are corrupted.
+//
+// Determinism:
+//   - Fixed row-major initialization.
+//
+// Complexity:
+//   - Time O(V²), Space O(1).
+//
+// AI-Hints:
+//   - Do not replace this with direct d.data writes.
+//   - Do not use this for binary adjacency.
+//   - Do not normalize diagonal here; that belongs to distance conversion.
+func initAdjacencyNoEdgeInf(d *Dense) error {
+	if d == nil {
+		return ErrNilMatrix
+	}
+
+	var (
+		i, j int
+		err  error
+	)
+	for i = 0; i < d.Rows(); i++ {
+		for j = 0; j < d.Cols(); j++ {
+			if err = d.Set(i, j, math.Inf(1)); err != nil {
+				return fmt.Errorf("initAdjacencyNoEdgeInf: Set(%d,%d,+Inf): %w", i, j, err)
+			}
+		}
+	}
+
+	return nil
+}
+
+// normalizeInfNoEdgeDistanceDiagonal prepares a +Inf-no-edge adjacency for APSP.
+//
+// What:
+//   - Converts diagonal absence/positive self-loop entries into distance diagonal 0.
+//   - Preserves finite negative self-loops as negative-cycle witnesses.
+//
+// Why:
+//   - Floyd–Warshall consumes distance matrices, whose diagonal baseline is 0.
+//   - In +Inf-no-edge adjacency, missing loops are stored as +Inf.
+//   - Positive self-loops do not improve dist(i,i), so min(0,w_loop>=0) is 0.
+//   - Negative self-loops prove a negative cycle and must be preserved for
+//     FloydWarshall/ValidateDistanceMatrix to classify as ErrNegativeCycle.
+//
+// Implementation:
+//   - Stage 1: validate receiver.
+//   - Stage 2: scan diagonal in increasing index order.
+//   - Stage 3: reject NaN and -Inf.
+//   - Stage 4: set +Inf, zero, and positive diagonal values to 0.
+//   - Stage 5: keep finite negative diagonal values unchanged.
+//
+// Behavior highlights:
+//   - Does not touch off-diagonal values.
+//   - Assumes off-diagonal absence is already +Inf.
+//   - Uses Dense.Set so numeric policy remains centralized.
+//
+// Errors:
+//   - ErrNilMatrix for nil receiver.
+//   - ErrNaNInf for NaN or -Inf diagonal values.
+//   - Dense.Set errors wrapped with coordinates.
+//
+// Determinism:
+//   - Fixed diagonal order.
+//
+// Complexity:
+//   - Time O(V), Space O(1).
+//
+// AI-Hints:
+//   - Do not call InitDistancesInPlace on +Inf-no-edge adjacency; it would erase
+//     real zero-weight off-diagonal edges by converting 0 to +Inf.
+//   - Do not preserve positive self-loop weights on the distance diagonal.
+func normalizeInfNoEdgeDistanceDiagonal(d *Dense) error {
+	if d == nil {
+		return ErrNilMatrix
+	}
+
+	var v float64
+	var err error
+
+	for i := 0; i < d.Rows(); i++ {
+		v, err = d.At(i, i)
+		if err != nil {
+			return fmt.Errorf("normalizeInfNoEdgeDistanceDiagonal: At(%d,%d): %w", i, i, err)
+		}
+		if isNaNOrNegInf(v) {
+			return fmt.Errorf("normalizeInfNoEdgeDistanceDiagonal: invalid diagonal[%d,%d]=%v: %w", i, i, v, ErrNaNInf)
+		}
+		if math.IsInf(v, 1) || v >= 0 {
+			if err = d.Set(i, i, 0); err != nil {
+				return fmt.Errorf("normalizeInfNoEdgeDistanceDiagonal: Set(%d,%d,0): %w", i, i, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // BuildDenseAdjacency CONSTRUCTS a dense adjacency matrix from explicit vertices/edges
@@ -124,15 +468,19 @@ func isLexSorted(s []string) bool {
 //     that allows zero-sized shapes and enables “empty graph” pipelines without
 //     special-casing at call sites.
 //   - IMPORTANT (0-weight edges):
-//     In a normal adjacency matrix (MetricClosure=false), the sentinel for “no edge”
-//     is unreachableWeight (currently 0). Therefore, an edge with weight 0 is
-//     indistinguishable from “no edge” at the matrix level.
-//     As a consequence, adjacency-level consumers (e.g., Neighbors, default ToGraph
-//     thresholding) treat 0-valued entries as absent edges.
-//     If your domain requires meaningful 0-weight edges, consider:
-//     (a) using MetricClosure mode (+Inf is “no edge”), or
-//     (b) encoding presence separately (binary adjacency + external weights), or
-//     (c) shifting/offsetting weights so present edges are strictly positive.
+//     Dense adjacency has two valid absence encodings:
+//     1) standard 0-as-no-edge encoding;
+//     2) +Inf-as-no-edge encoding for finite weighted adjacency.
+//     When weighted input contains both zero and non-zero edge weights, the builder
+//     automatically selects +Inf-as-no-edge so finite 0 remains a real edge weight.
+//     When weighted input is all-zero, auto mode preserves historical behavior and
+//     degrades to binary adjacency. Use WithPreserveZeroWeights to force exact
+//     all-zero weighted adjacency.
+//   - MetricClosure:
+//     If +Inf-as-no-edge was already selected, metric closure preserves zero-weight
+//     off-diagonal edges and only normalizes the diagonal before FloydWarshall.
+//     If standard 0-as-no-edge was selected, InitDistancesInPlace converts
+//     off-diagonal zeros to +Inf.
 //
 // AI-Hints:
 //   - Use MetricClosure to turn adjacency into distances (+Inf as unreachable), diag forced to 0.
@@ -153,23 +501,24 @@ func BuildDenseAdjacency(
 				len(edges), ErrInvalidDimensions,
 			)
 		}
-		// Allocate the degenerate matrix using a policy consistent with opts.metricClose.
-		// Note: for 0×0 there are no entries, but we keep flags coherent for callers.
-		var (
-			mat *Dense
-			err error
+
+		// Zero-graph law:
+		// An empty graph maps to a valid 0×0 adjacency matrix. There are no entries
+		// to initialize, but preserving numeric policy keeps downstream Clone/Induced
+		// behavior coherent.
+		mat, err := newDenseWithPolicy(
+			0,
+			0,
+			opts.validateNaNInf,
+			opts.allowInfDistances || opts.metricClose,
 		)
-		if opts.metricClose {
-			mat, err = newDenseWithPolicy(0, 0, true, true)
-		} else {
-			mat, err = NewDense(0, 0)
-		}
 		if err != nil {
 			return nil, nil, fmt.Errorf("BuildDenseAdjacency: NewDense(0,0): %w", err)
 		}
 		// Return a non-nil empty map to make “empty index” explicit to callers.
 		return make(map[string]int), mat, nil
 	}
+
 	V := len(vertices)
 
 	// Build stable vertex→index mapping with linear scan in provided order.
@@ -184,21 +533,41 @@ func BuildDenseAdjacency(
 		idx[id] = i
 	}
 
-	// --- Stage 2: Allocate dense V×V and decide weight policy ---
+	// --- Stage 2: Resolve adjacency encoding and allocate Dense ---
 	//
-	// For pure adjacency we keep the default strict NaN/Inf policy on Dense.
-	// For APSP/metric-closure we must allow +Inf as a sentinel for
-	// "no path". Contractually, we still reject NaN and -Inf, so we keep
-	// validateNaNInf=true and enable allowInfDistances=true.
+	// Encoding decision is made before allocation because Dense must know whether
+	// +Inf writes are legal. This is the only place where weighted zero-edge
+	// ambiguity is resolved.
+	//
+	// Cases:
+	//   - unweighted/binary adjacency:
+	//       0 means no edge, present edges write defaultWeight.
+	//   - weighted input without zero weights:
+	//       0 can still mean no edge safely, raw weights are written.
+	//   - weighted mixed zero/non-zero input:
+	//       +Inf means no edge, every finite value including 0 is an edge weight.
+	//   - weighted all-zero input:
+	//       auto mode degrades to binary for compatibility;
+	//       WithPreserveZeroWeights uses +Inf no-edge encoding.
 	var (
-		mat *Dense
-		err error
+		mat         *Dense
+		err         error
+		buildPolicy adjacencyBuildPolicy
 	)
 
-	if opts.metricClose {
-		// APSP / metric-closure path:
-		//   - validateNaNInf=true  => NaN and -Inf remain rejected (always).
-		//   - allowInfDistances=true => +Inf is permitted as "unreachable".
+	buildPolicy, err = resolveAdjacencyBuildPolicy(opts, edges)
+	if err != nil {
+		return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
+	}
+
+	useWeight := buildPolicy.useWeight
+
+	// Dense must allow +Inf when either:
+	//   - metric closure needs +Inf as no-path;
+	//   - weighted adjacency uses +Inf as no-edge to preserve finite zero weights.
+	allowInfDistances := opts.metricClose || buildPolicy.noEdge == adjacencyNoEdgeInf
+
+	if allowInfDistances {
 		mat, err = newDenseWithPolicy(V, V, true, true)
 	} else {
 		// Regular adjacency: keep strict NaN/Inf validation.
@@ -209,14 +578,13 @@ func BuildDenseAdjacency(
 		return nil, nil, fmt.Errorf("BuildDenseAdjacency: NewDense(%d,%d): %w", V, V, err)
 	}
 
-	// Determine whether we should use actual edge weights.
-	// useWeight starts from opts.Weighted but may be degraded to false if the input
-	// graph is effectively unweighted (all weights are 0, or graph flags say unweighted).
-	useWeight := opts.weighted
-	if useWeight && allZeroWeights(edges) {
-		// If the edge slice is present, scan it for a non-zero weight.
-		// Early exit on the first non-zero to keep it O(E) best-case.
-		useWeight = false // degrade to binary if effectively unweighted
+	// For +Inf-no-edge adjacency, absence must be installed before edge writes.
+	// This is required even when MetricClosure=true; otherwise zero-weight edges
+	// and absent edges would both start as 0 and become indistinguishable.
+	if buildPolicy.noEdge == adjacencyNoEdgeInf {
+		if err = initAdjacencyNoEdgeInf(mat); err != nil {
+			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
+		}
 	}
 
 	// --- Stage 3: Populate adjacency entries (deterministic) ---
@@ -269,8 +637,9 @@ func BuildDenseAdjacency(
 		//     rejecting NaN and ±Inf via ErrInvalidWeight;
 		//   - otherwise we write defaultWeight (binary adjacency).
 		// NOTE:
-		//   - zero-weight edges are allowed; the earlier degradation logic
-		//     can switch us to binary if all weights are effectively zero.
+		//   - zero-weight edges are preserved when buildPolicy selected +Inf no-edge encoding.
+		//   - in auto all-zero mode, useWeight=false intentionally writes binary defaultWeight.
+		//   - NaN/±Inf edge weights are rejected before Dense.Set so callers receive ErrInvalidWeight.
 		if useWeight {
 			w = float64(e.Weight)
 			// Reject NaN/±Inf *before* writing into the matrix; this keeps all
@@ -298,21 +667,36 @@ func BuildDenseAdjacency(
 
 	// --- Stage 4: Optional metric closure (APSP) ---
 	if opts.metricClose {
-		// Distances are initialized as:
-		//   - dist[i,i] = 0
-		//   - dist[i,j] = +Inf for i!=j
-		// and then direct edges overwrite/relax these entries.
+		// Convert adjacency encoding into distance-matrix encoding:
 		//
-		// NOTE: This requires a Dense instance that allows +Inf, and an init path
-		// that does not apply NaN/Inf validation.
-		if err = InitDistancesInPlace(mat); err != nil {
-			return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
+		//   - If adjacency already uses +Inf as no-edge, only the diagonal needs
+		//     distance normalization. Off-diagonal zero-weight edges must remain 0.
+		//
+		//   - If adjacency uses 0 as no-edge, InitDistancesInPlace performs the
+		//     classic conversion: off-diagonal 0 -> +Inf, diagonal -> 0 except
+		//     finite negative self-loop witnesses.
+		//
+		// FloydWarshall then validates distance semantics, performs APSP relaxation,
+		// and detects negative cycles through the canonical public contract.
+		if buildPolicy.noEdge == adjacencyNoEdgeInf {
+			if err = normalizeInfNoEdgeDistanceDiagonal(mat); err != nil {
+				return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
+			}
+		} else {
+			if err = InitDistancesInPlace(mat); err != nil {
+				return nil, nil, fmt.Errorf("BuildDenseAdjacency: %w", err)
+			}
 		}
-		// Floyd–Warshall computes APSP deterministically.
-		floydWarshallInPlace(mat)
+
+		if err = FloydWarshall(mat); err != nil {
+			return nil, nil, fmt.Errorf("BuildDenseAdjacency: metric closure: %w", err)
+		}
 	} else {
-		// Pure adjacency: keep loops only when allowed; otherwise force a clean zero diagonal.
-		if !opts.allowLoops {
+		// Pure adjacency:
+		//   - In 0-as-no-edge encoding, a clean no-loop diagonal is 0.
+		//   - In +Inf-as-no-edge encoding, a missing loop must remain +Inf because
+		//     finite 0 is a real loop edge.
+		if !opts.allowLoops && buildPolicy.noEdge == adjacencyNoEdgeZero {
 			for i = 0; i < V; i++ {
 				if err = mat.Set(i, i, 0.0); err != nil {
 					return nil, nil, fmt.Errorf("BuildDenseAdjacency: Set(%d,%d,0): %w", i, i, err)
@@ -393,6 +777,7 @@ func BuildDenseIncidence(
 		// Return explicit empty metadata.
 		return make(map[string]int), make([]*core.Edge, 0), mat, nil
 	}
+
 	V := len(vertices)
 	// Build a stable vertex→row index map in the provided order; check duplicates defensively.
 	idx := make(map[string]int, V)
@@ -483,10 +868,10 @@ func BuildDenseIncidence(
 
 		if directed {
 			// Directed incidence: su!=sv (directed loops already skipped).
-			if err = mat.Set(su, j, -1.0); err != nil { // mark source with −1.
+			if err = mat.Set(su, j, srcMark); err != nil { // mark source with −1.
 				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,-1): %w", su, j, err)
 			}
-			if err = mat.Set(sv, j, +1.0); err != nil { // mark target with +1.
+			if err = mat.Set(sv, j, dstMark); err != nil { // mark target with +1.
 				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", sv, j, err)
 			}
 			continue
@@ -495,16 +880,16 @@ func BuildDenseIncidence(
 		// Undirected incidence:
 		if su == sv {
 			// Self-loop contributes +2 in the single incident row.
-			if err = mat.Set(su, j, 2.0); err != nil {
+			if err = mat.Set(su, j, loopUndirectedMark); err != nil {
 				return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+2): %w", su, j, err)
 			}
 			continue
 		}
 		// Non-loop undirected: +1 at each endpoint.
-		if err = mat.Set(su, j, 1.0); err != nil {
+		if err = mat.Set(su, j, undirectedMark); err != nil {
 			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", su, j, err)
 		}
-		if err = mat.Set(sv, j, 1.0); err != nil {
+		if err = mat.Set(sv, j, undirectedMark); err != nil {
 			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: Set(%d,%d,+1): %w", sv, j, err)
 		}
 	}

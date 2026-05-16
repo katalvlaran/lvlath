@@ -1,59 +1,74 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 //.go:build test
 
 package matrix
 
-// Test-Bridge (White-Box) for Private Kernels and Options Snapshot
+// Test-Bridge (White-Box) for Private Kernels and Options Snapshot.
 //
 // Purpose:
-//   - Expose UNEXPORTED ew* micro-kernels and internal options snapshot to matrix_test ONLY.
-//   - Enable white-box verification of fast-path (*Dense) vs generic fallback, without widening the prod API.
+//   - Expose selected unexported kernels, helpers, and internal Options state to tests.
+//   - Enable white-box verification of Dense fast-paths, generic fallbacks,
+//     option finalization, zero-shape law, and numeric policy without widening
+//     the production API.
 //
 // Build Policy:
-//   - Compiles ONLY under `-tags test` via `//go:build test` and `// +build test` directives.
-//   - File is in package matrix, so it can access private symbols, but it's invisible in production builds.
+//   - Compiles only when tests are run with `-tags test`.
+//   - This file is intentionally test-only and must never become part of the
+//     production build.
 //
 // Provided Surface:
-//   - Ew*_*_TestOnly(...) wrappers: thin pass-through to private ew* kernels.
-//   - OptionsSnapshot + NewMatrixOptionsSnapshot_TestOnly / GatherOptionsSnapshot_TestOnly:
-//     stable, read-only view of internal Options for tests without using package matrix (non-internal) tests.
+//   - Ew*_*_TestOnly wrappers: thin pass-through to private ew* kernels.
+//   - OptionsSnapshot: stable read-only view of internal Options.
+//   - Selected helper exports for focused package-level tests.
 //
 // Behavior & Determinism:
-//   - No allocations beyond what the wrapped functions do.
-//   - Deterministic wrappers; no side effects.
+//   - Wrappers do not add logic, allocation, mutation, or alternative policy.
+//   - All behavior remains owned by the wrapped production functions.
 //
 // Risks & Maintenance:
-//   - Keep OptionsSnapshot in sync with internal Options fields. If Options changes,
-//     update snapshotOf(...) accordingly (tests will catch drift).
+//   - Keep OptionsSnapshot in sync with Options.
+//   - If Options gains a field that affects behavior, snapshotOf must expose it
+//     unless there is a deliberate reason not to test it.
 //
 // AI-Hints:
-//   - Prefer keeping ALL test-only bridges co-located here to avoid clutter across files.
+//   - Keep all test-only bridges co-located here.
+//   - Do not add production-only conveniences to this file.
+//   - Do not hide errors in snapshot constructors; tests must see option failures.
 //   - If a private helper changes signature, mirror the change here once, not across many tests.
 
 var (
 	// ExportedDenseFill exposes Dense.Fill for white-box tests.
+	//
+	// Important:
+	//   - Fill is policy-respecting. It does NOT bypass Dense numeric validation.
+	//   - For dirty NaN/Inf fixtures, allocate Dense with validation disabled.
 	ExportedDenseFill = (*Dense).Fill
-	// ExportedNewDenseWithPolicy exposes newDenseWithPolicy for white-box tests.
+
+	// ExportedNewDenseWithPolicy exposes newDenseWithPolicy for tests that need
+	// exact Dense numeric-policy construction.
 	ExportedNewDenseWithPolicy = newDenseWithPolicy
 
-	ExportedValidateTol    = validateTol
-	ExportedValidateBounds = validateBounds
-)
+	// ExportedValidateTol exposes validateTol for boundary tests.
+	ExportedValidateTol = validateTol
 
-// Panic message exports to avoid "magic strings" in tests.
-const (
-	PanicEpsilonInvalid_TestOnly       = panicEpsilonInvalid
-	PanicEdgeThresholdInvalid_TestOnly = panicEdgeThresholdInvalid
+	// ExportedValidateBounds exposes validateBounds for Clip/sanitizer tests.
+	ExportedValidateBounds = validateBounds
+
+	// ExportedRowNormScale exposes the shared row-normalization scale policy.
+	// It is useful for P5 tests that assert zero-norm and non-finite norm behavior.
+	ExportedRowNormScale = rowNormScale
 )
 
 // --- ew* micro-kernel bridges -------------------------------------------------
 
 // EwBroadcastSubCols_TestOnly forwards to the private ewBroadcastSubCols kernel.
-// Implementation:
-//   - Stage 1: Call the private function directly; return its outputs verbatim.
 //
 // Behavior highlights:
-//   - No production API change; test-only surface.
+//   - No policy change.
+//   - No production API change.
+//   - Useful for comparing Dense fast-path against generic fallback.
 func EwBroadcastSubCols_TestOnly(X Matrix, colMeans []float64) (Matrix, error) {
 	return ewBroadcastSubCols(X, colMeans)
 }
@@ -91,54 +106,88 @@ func EwAllClose_TestOnly(a, b Matrix, rtol, atol float64) (bool, error) {
 // --- options snapshot bridge --------------------------------------------------
 
 // OptionsSnapshot is a stable, test-facing copy of internal Options fields.
+//
 // Purpose:
-//   - Allow matrix_test to assert defaults and "last writer wins" semantics
-//     without accessing unexported fields directly.
+//   - Allow external tests to assert defaults, finalization, and last-writer-wins
+//     semantics without accessing unexported Options fields directly.
+//
+// Maintenance law:
+//   - If an Options field influences runtime behavior, expose it here unless
+//     there is a deliberate reason not to white-box test it.
 //
 // Determinism:
 //   - Pure struct copy; no side effects.
 type OptionsSnapshot struct {
+	// Numeric policy.
 	Eps               float64
 	ValidateNaNInf    bool
 	AllowInfDistances bool
 
+	// Graph/matrix build policy.
 	Directed    bool
 	AllowMulti  bool
 	AllowLoops  bool
 	Weighted    bool
 	MetricClose bool
 
-	EdgeThreshold float64
-	KeepWeights   bool
-	BinaryWeights bool
+	// Zero-weight preservation policy.
+	PreserveZeroWeights bool
+
+	// Export policy.
+	EdgeThreshold    float64
+	EdgeThresholdSet bool
+	KeepWeights      bool
+	BinaryWeights    bool
 }
 
-// NewMatrixOptionsSnapshot_TestOnly builds Options via public Option funcs and returns a snapshot.
-// Implementation:
-//   - Stage 1: o := NewMatrixOptions(opts...)
-//   - Stage 2: snapshotOf(o)
-func NewMatrixOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
-	o := NewMatrixOptions(opts...)
-
-	return snapshotOf(o)
-}
-
-// GatherOptionsSnapshot_TestOnly returns a snapshot after internal derivation.
-// Implementation:
-//   - Stage 1: o := gatherOptions(opts...) // internal constructor
-//   - Stage 2: snapshotOf(o)
+// NewMatrixOptionsSnapshot_TestOnly builds Options through the public resolver
+// and returns a snapshot.
 //
-// Notes:
-//   - Keep this wrapper in sync if the internal derivation pipeline changes.
-func GatherOptionsSnapshot_TestOnly(opts ...Option) OptionsSnapshot {
-	o := gatherOptions(opts...)
+// Behavior highlights:
+//   - Uses NewMatrixOptions, not manual field construction.
+//   - Returns errors explicitly so tests can assert invalid-option behavior.
+//
+// AI-Hints:
+//   - Do not collapse this back to a panic or zero snapshot on error.
+func NewMatrixOptionsSnapshot_TestOnly(opts ...Option) (OptionsSnapshot, error) {
+	o, err := NewMatrixOptions(opts...)
+	if err != nil {
+		return OptionsSnapshot{}, err
+	}
 
-	return snapshotOf(o)
+	return snapshotOf(o), nil
 }
 
-// snapshotOf copies internal fields to a public struct. Keep in sync with Options layout.
+// GatherOptionsSnapshot_TestOnly returns a snapshot after internal option derivation.
+//
+// Purpose:
+//   - Allows tests to verify internal gatherOptions/finalizeOptions behavior directly.
+//   - This is useful for defaults and derived invariants such as:
+//     MetricClosure => AllowInfDistances;
+//     BinaryWeights => !KeepWeights;
+//     !Weighted     => !PreserveZeroWeights.
+//
+// AI-Hints:
+//   - Keep this wrapper thin.
+//   - Do not swallow errors.
+func GatherOptionsSnapshot_TestOnly(opts ...Option) (OptionsSnapshot, error) {
+	o, err := gatherOptions(opts...)
+	if err != nil {
+		return OptionsSnapshot{}, err
+	}
+
+	return snapshotOf(o), nil
+}
+
+// snapshotOf copies internal Options fields to a public test-facing struct.
+//
 // Behavior highlights:
-//   - No allocations besides the snapshot value itself.
+//   - No allocation beyond returned value.
+//   - No finalization; caller must pass already-finalized Options when needed.
+//
+// AI-Hints:
+//   - Keep in sync with Options.
+//   - Missing behavior-bearing fields here should be treated as test coverage debt.
 func snapshotOf(o Options) OptionsSnapshot {
 	return OptionsSnapshot{
 		Eps:               o.eps,
@@ -151,8 +200,11 @@ func snapshotOf(o Options) OptionsSnapshot {
 		Weighted:    o.weighted,
 		MetricClose: o.metricClose,
 
-		EdgeThreshold: o.edgeThreshold,
-		KeepWeights:   o.keepWeights,
-		BinaryWeights: o.binaryWeights,
+		PreserveZeroWeights: o.preserveZeroWeights,
+
+		EdgeThreshold:    o.edgeThreshold,
+		EdgeThresholdSet: o.edgeThresholdSet,
+		KeepWeights:      o.keepWeights,
+		BinaryWeights:    o.binaryWeights,
 	}
 }

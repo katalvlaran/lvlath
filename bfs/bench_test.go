@@ -39,7 +39,7 @@ func BenchmarkBFS_Chain(b *testing.B) {
 		ids[i] = "v" + strconv.Itoa(i)
 	}
 
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	for i := 0; i < N; i++ {
 		_, err := g.AddEdge(ids[i], ids[i+1], benchWeightZero)
 		if err != nil {
@@ -77,7 +77,7 @@ func BenchmarkBFS_BinaryTree(b *testing.B) {
 	nodeCount := (1 << depth) - 1
 	edgeCount := nodeCount - 1
 
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// Build edges: parent -> children. Vertices are created implicitly by AddEdge.
 	for i := 1; i <= (nodeCount-1)/2; i++ {
@@ -119,7 +119,7 @@ func BenchmarkBFS_Grid(b *testing.B) {
 	V := M * M
 	E := 2 * M * (M - 1)
 
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// Precompute IDs to avoid repeated formatting logic noise in edge insertion.
 	ids := make([][]string, M)
@@ -186,7 +186,7 @@ func BenchmarkBFS_RandomSparse(b *testing.B) {
 		ids[i] = "n" + strconv.Itoa(i)
 	}
 
-	g := core.NewGraph(core.WithDirected(false))
+	g, _ := core.NewGraph(core.WithDirected(false))
 
 	// Stage 1: Deterministic connected backbone (V-1 edges).
 	for i := 0; i < V-1; i++ {
@@ -263,7 +263,7 @@ func BenchmarkBFS_HookOverhead(b *testing.B) {
 		ids[i] = "v" + strconv.Itoa(i)
 	}
 
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	for i := 0; i < N; i++ {
 		_, err := g.AddEdge(ids[i], ids[i+1], benchWeightZero)
 		if err != nil {

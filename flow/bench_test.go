@@ -15,7 +15,7 @@ import (
 // Edge weights are uniform in [1, maxWeight].
 func buildRandomGraph(V int, p float64, maxWeight float64, seed int64) *core.Graph {
 	r := rand.New(rand.NewSource(seed)) // deterministic seed for reproducibility
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Add all vertices
 	for i := 0; i < V; i++ {
 		_ = g.AddVertex(strconv.Itoa(i))

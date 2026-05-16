@@ -113,7 +113,7 @@ func ExampleDijkstra_logisticsRouting() {
 		weightTwo   = 2.0
 	)
 
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 	// build example graph
 	// !! Repeat: We DELIBERATELY ignore the error, since this is a test example and the data is predetermined!!
 	_, _ = graph.AddEdge(warehouseCentral, "hub:north", weightFour)
@@ -215,7 +215,7 @@ func ExampleDijkstra_failoverNetwork() {
 		weightTen   = 10.0
 	)
 
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// build example graph
 	// !! Repeat: We DELIBERATELY ignore the error, since this is a test example and the data is predetermined!!
 	_, _ = graph.AddEdge(ingressID, "core:a", weightTwo)
@@ -322,7 +322,7 @@ func ExampleDijkstra_serviceRadiusCutoff() {
 		weightNine  = 9.0
 	)
 
-	graph := core.NewGraph(core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithWeighted())
 	// build example graph
 	// !! Repeat: We DELIBERATELY ignore the error, since this is a test example and the data is predetermined!!
 	_, _ = graph.AddEdge(depotCentral, "zone:n1", weightTwo)
@@ -425,7 +425,7 @@ func ExampleDijkstra_mixedTransitGraph() {
 		weightFive  = 5.0
 	)
 
-	graph := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 	// build example graph
 	// !! Repeat: We DELIBERATELY ignore the error, since this is a test example and the data is predetermined!!
 	_, _ = graph.AddEdge(stationCentral, "ave:1", weightTwo, core.WithEdgeDirected(true))
@@ -513,7 +513,7 @@ func ExampleDijkstra_equalCostDeterminism() {
 		weightThree = 3.0
 	)
 
-	graph := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	graph, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// build example graph
 	// !! Repeat: We DELIBERATELY ignore the error, since this is a test example and the data is predetermined!!
 	_, _ = graph.AddEdge(campusGate, "corridor:alpha", weightTwo)

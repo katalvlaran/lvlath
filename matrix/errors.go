@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix: sentinel error set (unified, consistent).
 // This file defines ONLY package-level sentinel errors used across the matrix
 // package. All algorithms MUST return these sentinels and tests MUST check them
@@ -33,6 +35,18 @@ import "errors"
 //   - Avoid "smart" errors.Is coupling between independent sentinels (it becomes brittle fast).
 
 var (
+	// ErrNilOption reports a nil Option passed to matrix option assembly.
+	//
+	// Contract:
+	// - gatherOptions(nil) MUST return ErrNilOption.
+	// - NewMatrixOptions(nil) MUST return ErrNilOption.
+	// - Any public matrix facade that accepts opts ...Option MUST preserve this sentinel.
+	//
+	// Notes:
+	// - Nil options are invalid public inputs, not no-ops.
+	// - This sentinel exists because a nil function value would otherwise panic on call.
+	ErrNilOption = errors.New("matrix: nil option")
+
 	// ErrInvalidDimensions indicates invalid dimension parameters.
 	// Negative sizes are always invalid. Some builders may additionally enforce
 	// "non-empty" rules as part of their own contract; if they do, they should
@@ -93,6 +107,20 @@ var (
 
 	// ErrInvalidWeight - edge weight is NaN or ±Inf at ingestion stage.
 	ErrInvalidWeight = errors.New("matrix: invalid edge weight")
+
+	// ErrNegativeCycle reports that a shortest-path computation detected a negative cycle.
+	//
+	// Contract:
+	//   - FloydWarshall returns ErrNegativeCycle when the final distance diagonal contains
+	//     a negative value below the configured tolerance.
+	//   - ValidateDistanceMatrix returns ErrNegativeCycle when the input diagonal already
+	//     proves a negative self-cycle.
+	//
+	// Notes:
+	//   - Negative finite off-diagonal distances are valid Floyd–Warshall inputs.
+	//   - A negative diagonal is not merely bad shape; mathematically it represents a
+	//   negative cycle witness.
+	ErrNegativeCycle = errors.New("matrix: negative cycle")
 )
 
 // BACKWARD-COMPATIBILITY ALIASES (kept to avoid breaking current callers).

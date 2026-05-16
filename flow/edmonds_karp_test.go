@@ -23,7 +23,7 @@ type EdmondsKarpSuite struct {
 // TestSingleEdge verifies that a single edge yields maxFlow == capacity
 // and that the residual graph has no forward edge and a reverse edge of equal weight.
 func (s *EdmondsKarpSuite) TestSingleEdge() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("S", "T", 5)
 
 	opts := flow.DefaultOptions()
@@ -36,7 +36,7 @@ func (s *EdmondsKarpSuite) TestSingleEdge() {
 
 // TestMultiPath sums capacities along disjoint routes.
 func (s *EdmondsKarpSuite) TestMultiPath() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Path1: S→A (3) → A→T (3)
 	_, _ = g.AddEdge("S", "A", 3)
 	_, _ = g.AddEdge("A", "T", 3)
@@ -53,7 +53,7 @@ func (s *EdmondsKarpSuite) TestMultiPath() {
 
 // TestMultiEdgeAggregation verifies that parallel edges are summed before flow.
 func (s *EdmondsKarpSuite) TestMultiEdgeAggregation() {
-	g := core.NewGraph(
+	g, _ := core.NewGraph(
 		core.WithDirected(true),
 		core.WithWeighted(),
 		core.WithMultiEdges(),
@@ -70,7 +70,7 @@ func (s *EdmondsKarpSuite) TestMultiEdgeAggregation() {
 
 // TestZeroCapacity ensures that zero-capacity edges produce zero flow.
 func (s *EdmondsKarpSuite) TestZeroCapacity() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("U", "V", 0)
 
 	opts := flow.DefaultOptions()
@@ -81,7 +81,7 @@ func (s *EdmondsKarpSuite) TestZeroCapacity() {
 
 // TestEpsilonEdgeCase verifies that edges with weight ≤ Epsilon are ignored.
 func (s *EdmondsKarpSuite) TestEpsilonEdgeCase() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("U", "V", 1)
 
 	opts := flow.DefaultOptions()
@@ -94,7 +94,7 @@ func (s *EdmondsKarpSuite) TestEpsilonEdgeCase() {
 // TestContextCancellationDuringBFS ensures that a canceled context aborts BFS promptly.
 func (s *EdmondsKarpSuite) TestContextCancellationDuringBFS() {
 	// Build a long chain to force a longer BFS
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	prev := "V0"
 	_ = g.AddVertex(prev)
 	const N = 10000
@@ -122,7 +122,7 @@ func (s *EdmondsKarpSuite) TestContextCancellationDuringBFS() {
 // TestResidualIntegrity validates that for each original edge u→v,
 // initialCap == forwardResCap + backwardResCap after flow completes.
 func (s *EdmondsKarpSuite) TestResidualIntegrity() {
-	g := core.NewGraph(
+	g, _ := core.NewGraph(
 		core.WithDirected(true),
 		core.WithWeighted(),
 		core.WithMultiEdges(),
@@ -147,7 +147,7 @@ func (s *EdmondsKarpSuite) TestResidualIntegrity() {
 
 // TestSourceSinkNotFound covers missing source or sink error cases.
 func (s *EdmondsKarpSuite) TestSourceSinkNotFound() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_ = g.AddVertex("A")
 
 	opts := flow.DefaultOptions()

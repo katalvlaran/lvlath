@@ -21,7 +21,7 @@ type DinicSuite struct {
 
 // TestSingleEdge verifies that a single edge yields max flow equal to its capacity.
 func (s *DinicSuite) TestSingleEdge() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("A", "B", 7)
 
 	opts := flow.DefaultOptions()
@@ -34,7 +34,7 @@ func (s *DinicSuite) TestSingleEdge() {
 
 // TestMultiPath verifies max flow on two disjoint paths.
 func (s *DinicSuite) TestMultiPath() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	// Path1: A→B (5)
 	_, _ = g.AddEdge("A", "B", 5)
 	// Path2: A→C (4) → C→B (3)
@@ -49,7 +49,7 @@ func (s *DinicSuite) TestMultiPath() {
 
 // TestMultiEdgeAggregation checks that parallel edges are summed.
 func (s *DinicSuite) TestMultiEdgeAggregation() {
-	g := core.NewGraph(
+	g, _ := core.NewGraph(
 		core.WithDirected(true),
 		core.WithWeighted(),
 		core.WithMultiEdges(),
@@ -65,7 +65,7 @@ func (s *DinicSuite) TestMultiEdgeAggregation() {
 
 // TestZeroCapacity ensures that zero-capacity edges yield zero flow.
 func (s *DinicSuite) TestZeroCapacity() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("X", "Y", 0)
 
 	opts := flow.DefaultOptions()
@@ -76,7 +76,7 @@ func (s *DinicSuite) TestZeroCapacity() {
 
 // TestEpsilonEdgeCase verifies that capacities ≤ Epsilon are ignored.
 func (s *DinicSuite) TestEpsilonEdgeCase() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("U", "V", 1)
 
 	opts := flow.DefaultOptions()
@@ -91,7 +91,7 @@ func (s *DinicSuite) TestEpsilonEdgeCase() {
 func (s *DinicSuite) TestLevelRebuildIntervalMoreThanOne() {
 	// Graph requiring multiple augmentations:
 	// S→A(2), S→B(1), A→C(1), B→C(1), C→T(2)
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_, _ = g.AddEdge("S", "A", 2)
 	_, _ = g.AddEdge("S", "B", 1)
 	_, _ = g.AddEdge("A", "C", 1)
@@ -112,7 +112,7 @@ func (s *DinicSuite) TestLevelRebuildIntervalMoreThanOne() {
 
 // TestContextCancellationDuringBFS ensures cancellation aborts during BFS.
 func (s *DinicSuite) TestContextCancellationDuringBFS() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	prev := "V0"
 	_ = g.AddVertex(prev)
 	const N = 10000
@@ -139,7 +139,7 @@ func (s *DinicSuite) TestContextCancellationDuringBFS() {
 // TestContextCancellationDuringDFS ensures cancellation aborts during DFS pushes.
 func (s *DinicSuite) TestContextCancellationDuringDFS() {
 	// Build a "wide" bipartite graph S→{A1..A1000}→{B1..B1000}→T
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_ = g.AddVertex("S")
 	_ = g.AddVertex("T")
 	for i := 1; i <= 1000; i++ {
@@ -166,7 +166,7 @@ func (s *DinicSuite) TestContextCancellationDuringDFS() {
 
 // TestResidualIntegrity validates the residual invariant on a small graph.
 func (s *DinicSuite) TestResidualIntegrity() {
-	g := core.NewGraph(
+	g, _ := core.NewGraph(
 		core.WithDirected(true),
 		core.WithWeighted(),
 		core.WithMultiEdges(),
@@ -188,7 +188,7 @@ func (s *DinicSuite) TestResidualIntegrity() {
 
 // TestSourceSinkNotFound covers missing source or sink error cases.
 func (s *DinicSuite) TestSourceSinkNotFound() {
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 	_ = g.AddVertex("A")
 
 	opts := flow.DefaultOptions()

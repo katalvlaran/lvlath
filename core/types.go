@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package core defines deterministic, thread-safe in-memory graphs and the
 // foundational types (Graph/Vertex/Edge) used across lvlath.
@@ -19,83 +20,19 @@
 package core
 
 import (
-	"errors"
 	"sync"
-)
-
-var (
-	// ErrEmptyVertexID signals that the provided vertex identifier is empty.
-	//
-	// Contract:
-	//   - Any API that accepts a vertex ID MUST reject "" with this sentinel.
-	ErrEmptyVertexID = errors.New("core: vertex ID is empty")
-
-	// ErrVertexNotFound indicates that a referenced vertex does not exist.
-	//
-	// Contract:
-	//   - Returned by query/mutation APIs that require a pre-existing vertex.
-	ErrVertexNotFound = errors.New("core: vertex not found")
-
-	// ErrEdgeNotFound indicates that a referenced edge (by Edge.ID) was not found.
-	//
-	// Contract:
-	//   - Returned by edge-removal or lookup routines.
-	ErrEdgeNotFound = errors.New("core: edge not found")
-
-	// ErrBadWeight reports a non-zero weight on an unweighted graph.
-	//
-	// Contract:
-	//   - On graphs without WithWeighted(), only weight == 0 is allowed.
-	ErrBadWeight = errors.New("core: bad weight for unweighted graph")
-
-	// ErrLoopNotAllowed reports a self-loop attempt when loops are disabled.
-	//
-	// Contract:
-	//   - WithLoops() must be set to allow edges (v -> v).
-	ErrLoopNotAllowed = errors.New("core: self-loop not allowed")
-
-	// ErrEmptyEdgeID signals that an explicit edge ID was required but empty.
-	//
-	// Contract:
-	//   - AddEdge(..., WithID("")) MUST return ErrEmptyEdgeID.
-	//   - SetEdgeID(old,"") MUST return ErrEmptyEdgeID.
-	//
-	// Notes:
-	//   - This sentinel is about edge identifiers (Edge.ID), not vertex IDs.
-	ErrEmptyEdgeID = errors.New("core: empty edge ID")
-
-	// ErrEdgeIDConflict signals that an explicit edge ID collides with an existing edge.
-	//
-	// Contract:
-	//   - AddEdge(..., WithID(id)) MUST return ErrEdgeIDConflict if id is already present.
-	//   - SetEdgeID(old,id) MUST return ErrEdgeIDConflict if id is already present.
-	//
-	// Determinism:
-	//   - Collision checks are pure map membership checks; no iteration order dependence.
-	ErrEdgeIDConflict = errors.New("core: edge with that ID allready exist")
-
-	// ErrMultiEdgeNotAllowed reports a parallel edge attempt when multi-edges are disabled.
-	//
-	// Contract:
-	//   - WithMultiEdges() must be set to allow (u,v) duplication (or directional duplicates).
-	ErrMultiEdgeNotAllowed = errors.New("core: multi-edges not allowed")
-
-	// ErrMixedEdgesNotAllowed reports a per-edge directedness override on a non-mixed graph.
-	//
-	// Contract:
-	//   - WithMixedEdges() (or NewMixedGraph) must be set before any WithEdgeDirected(...) override.
-	ErrMixedEdgesNotAllowed = errors.New("core: mixed-mode per-edge overrides not allowed")
 )
 
 // Vertex is the canonical node record used by Graph; the unique key is Vertex.ID.
 // Metadata is an opaque, caller-managed payload that the core does not interpret.
 //
 // Memory Policy (Aliasing & Ownership):
-//   - Metadata is a REFERENCE TYPE (map pointer).
-//   - Graph operations (Clone, Views) perform a SHALLOW COPY of this pointer.
-//   - Result: The source graph and its clones/views SHARE the same underlying Metadata maps.
-//   - Modification of Metadata contents in a clone WILL affect the original graph.
-//   - The caller is responsible for deep-copying Metadata if total isolation is required.
+// - Graph query methods may return *Vertex aliases to catalog records.
+// - Vertex.ID MUST be treated as immutable once the vertex is published in a Graph.
+// - Metadata is a REFERENCE TYPE (map pointer).
+// - Clone and view operations perform a SHALLOW COPY of this pointer.
+// - Result: the source graph and its clones/views SHARE the same underlying Metadata maps.
+// - The caller is responsible for deep-copying Metadata if total isolation is required.
 //
 // Implementation:
 //   - Stage 1: Graph stores vertices in a map keyed by Vertex.ID.
@@ -131,8 +68,9 @@ type Vertex struct {
 	// ID uniquely identifies a vertex within a single Graph instance.
 	ID string
 
-	// Metadata holds arbitrary user data.
-	// WARNING: Shared mutable state. Clones share this exact pointer.
+	// Metadata holds arbitrary caller-managed payload.
+	// Clone/View operations shallow-copy this map pointer.
+	// core does not synchronize metadata contents.
 	Metadata map[string]interface{}
 }
 
@@ -143,6 +81,12 @@ type Vertex struct {
 //   - Stage 1: AddEdge constructs a baseline Edge with graph defaults.
 //   - Stage 2: AddEdge applies EdgeOptions sequentially (first error aborts).
 //   - Stage 3: Edge is registered in the edge catalog and adjacency is updated.
+//
+// Ownership / Mutation Law:
+//   - Graph query methods may return *Edge aliases to catalog records.
+//   - Once published in a Graph, Edge.ID, Edge.From, Edge.To, Edge.Weight, and
+//     Edge.Directed MUST be treated as immutable by callers.
+//   - If detached mutable ownership is required, callers must allocate their own copy.
 //
 // Behavior highlights:
 //   - ID is unique within a graph for the graph lifetime.
@@ -173,40 +117,50 @@ type Vertex struct {
 //   - Treat returned *Edge pointers from getters as read-only to avoid data races.
 type Edge struct {
 	// ID is a unique string identifier for the edge (auto-generated by default, or provided via WithID).
+	// Once published in a Graph, it MUST be treated as immutable.
 	ID string
 
 	// From is the source vertex ID (for undirected edges this is one endpoint).
+	// Once published in a Graph, it MUST be treated as immutable.
 	From string
 
 	// To is the destination vertex ID (for undirected edges this is the other endpoint).
+	// Once published in a Graph, it MUST be treated as immutable.
 	To string
 
 	// Weight is the edge cost/capacity; must be 0 unless the graph is WithWeighted().
+	// Once published in a Graph, it MUST be treated as immutable.
 	Weight float64
 
 	// Directed = true means the edge is asymmetric (From -> To only).
 	// Directed = false means the edge is symmetric (From <-> To, adjacency mirrored).
+	// Once published in a Graph, it MUST be treated as immutable.
 	Directed bool
 }
 
 // GraphOption mutates only a newly constructed Graph inside NewGraph.
 //
 // Implementation:
-//   - Stage 1: NewGraph allocates empty catalogs.
-//   - Stage 2: Options are applied deterministically in call order.
+//   - Stage 1: NewGraph validates the option list shape and rejects nil option values.
+//   - Stage 2: NewGraph allocates empty catalogs.
+//   - Stage 3: Options are applied deterministically in call order.
+//   - Stage 4: The configured graph is published only if every option succeeds.
 //
 // Behavior highlights:
 //   - Options are construction-time only.
-//   - Invalid option arguments (if any) panic immediately (programmer error).
+//   - Options MUST NOT panic as part of the public contract.
+//   - A nil GraphOption is rejected with ErrNilGraphOption before invocation.
+//   - Option implementations may mutate only the graph being constructed.
 //
 // Inputs:
 //   - g: the graph instance being constructed.
 //
 // Returns:
-//   - N/A.
+//   - error: nil on success; otherwise a stable sentinel error.
 //
 // Errors:
-//   - N/A (NewGraph does not return errors; invalid option arguments must panic).
+//   - Nil option values are rejected by NewGraph/NewMixedGraph with ErrNilGraphOption.
+//   - Option implementations may return stable sentinels for invalid configuration.
 //
 // Determinism:
 //   - Deterministic application order (left-to-right).
@@ -216,10 +170,12 @@ type Edge struct {
 //
 // Notes:
 //   - Core avoids hidden global state; behavior changes must be explicit via options.
+//   - On constructor error, no partially configured graph is published to the caller.
 //
 // AI-Hints:
 //   - Prefer explicit options over implicit defaults when writing reproducible tests.
-type GraphOption func(g *Graph)
+//   - Return sentinels; do not panic or mutate external state from a GraphOption.
+type GraphOption func(g *Graph) error
 
 // WithDirected sets the default directedness for all future edges created in this graph.
 // Per-edge overrides are only allowed in mixed mode (WithMixedEdges + WithEdgeDirected).
@@ -252,7 +208,10 @@ type GraphOption func(g *Graph)
 //   - Use WithMixedEdges() if your workload needs both directed and undirected edges in one graph.
 //   - Sets only the default; per-edge override requires WithMixedEdges().
 func WithDirected(defaultDirected bool) GraphOption {
-	return func(g *Graph) { g.directed = defaultDirected }
+	return func(g *Graph) error {
+		g.directed = defaultDirected
+		return nil
+	}
 }
 
 // WithWeighted enables non-zero edge weights in this graph.
@@ -279,7 +238,10 @@ func WithDirected(defaultDirected bool) GraphOption {
 //   - Keep graphs unweighted if you only need topology; it simplifies inputs and tests.
 //   - Without this, AddEdge(weight!=0) returns ErrBadWeight.
 func WithWeighted() GraphOption {
-	return func(g *Graph) { g.weighted = true }
+	return func(g *Graph) error {
+		g.weighted = true
+		return nil
+	}
 }
 
 // WithMultiEdges permits parallel edges between the same endpoints.
@@ -306,7 +268,10 @@ func WithWeighted() GraphOption {
 //   - Enable multi-edges for multigraph models (e.g., multiple relations between entities).
 //   - Without this, a second AddEdge(from,to,...) returns ErrMultiEdgeNotAllowed.
 func WithMultiEdges() GraphOption {
-	return func(g *Graph) { g.allowMulti = true }
+	return func(g *Graph) error {
+		g.allowMulti = true
+		return nil
+	}
 }
 
 // WithLoops permits self-loops (edges from a vertex to itself).
@@ -333,7 +298,10 @@ func WithMultiEdges() GraphOption {
 //   - Keep loops disabled unless your math model explicitly includes self transitions.
 //   - Without this, AddEdge(v,v,...) returns ErrLoopNotAllowed.
 func WithLoops() GraphOption {
-	return func(g *Graph) { g.allowLoops = true }
+	return func(g *Graph) error {
+		g.allowLoops = true
+		return nil
+	}
 }
 
 // WithMixedEdges enables per-edge directedness overrides (mixed mode).
@@ -360,17 +328,22 @@ func WithLoops() GraphOption {
 // AI-Hints:
 //   - Mixed mode is a capability flag; keep it off if all edges share the same orientation.
 func WithMixedEdges() GraphOption {
-	return func(g *Graph) { g.allowMixed = true }
+	return func(g *Graph) error {
+		g.allowMixed = true
+		return nil
+	}
 }
 
 // EdgeOption configures a single edge during AddEdge.
 //
 // Implementation:
-//   - Stage 1: AddEdge builds a baseline Edge (defaults + endpoints + weight).
-//   - Stage 2: AddEdge applies EdgeOptions sequentially; the first error aborts the operation.
+//   - Stage 1: AddEdge performs stateless validation, including nil EdgeOption rejection.
+//   - Stage 2: AddEdge builds a baseline Edge (defaults + endpoints + weight).
+//   - Stage 3: AddEdge applies EdgeOptions sequentially; the first error aborts edge publication.
 //
 // Behavior highlights:
 //   - Options MUST NOT panic as part of the public contract.
+//   - A nil EdgeOption is rejected with ErrNilEdgeOption before invocation.
 //   - Options MUST NOT mutate global graph state as a side effect.
 //   - Options should be O(1) and deterministic.
 //
@@ -379,10 +352,12 @@ func WithMixedEdges() GraphOption {
 //   - e: the edge being configured (options may mutate only this edge).
 //
 // Returns:
-//   - error: nil on success; otherwise a sentinel error (ErrMixedEdgesNotAllowed, ErrEmptyEdgeID, ErrEdgeIDConflict, ...).
+//   - error: nil on success; otherwise a sentinel error
+//     (ErrMixedEdgesNotAllowed, ErrEmptyEdgeID, ErrEdgeIDConflict, ...).
 //
 // Errors:
-//   - Must return only stable sentinels (checked via errors.Is).
+//   - Nil option values are rejected by AddEdge with ErrNilEdgeOption before invocation.
+//   - Non-nil options must return only stable sentinels (checked via errors.Is).
 //
 // Determinism:
 //   - Deterministic given deterministic inputs; option order is call-order stable.
@@ -391,7 +366,8 @@ func WithMixedEdges() GraphOption {
 //   - Time O(1) per option, Space O(1).
 //
 // Notes:
-//   - AddEdge applies options under the edge/adjacency write lock; options must not take additional locks.
+//   - AddEdge applies non-nil options under the edge/adjacency write lock;
+//     options must not take additional locks.
 //
 // AI-Hints:
 //   - Keep options “local”: modify only *e and validate against graph capability flags.
@@ -600,31 +576,41 @@ type GraphStats struct {
 // NewGraph constructs an empty graph and applies GraphOption values deterministically.
 //
 // Implementation:
-//   - Stage 1: Allocate empty vertex/edge catalogs and adjacency map.
-//   - Stage 2: Apply options in call order (left-to-right).
+//   - Stage 1: Validate the option list shape and reject nil GraphOption values.
+//   - Stage 2: Allocate empty vertex/edge catalogs and adjacency map.
+//   - Stage 3: Apply options in call order (left-to-right).
+//   - Stage 4: Publish the fully configured graph on success only.
 //
 // Behavior highlights:
 //   - Construction-time options only; subsequent behavior is controlled by method contracts.
 //   - nextEdgeID starts at 0; the first auto-generated edge becomes "e1".
+//   - Constructor validation is part of the public contract; no panic-based option handling.
 //
 // Inputs:
 //   - opts: zero or more GraphOption values applied in call order.
 //
 // Returns:
-//   - *Graph: configured empty graph.
+//   - *Graph: configured empty graph on success.
+//   - error: nil on success; otherwise a stable sentinel error.
 //
 // Errors:
-//   - None (invalid option arguments must panic inside the option).
+//   - ErrNilGraphOption: if opts contains a nil GraphOption value.
+//   - Any stable sentinel returned by a provided GraphOption.
 //
 // Determinism:
-//   - Deterministic option application order.
+//   - Deterministic option validation order and deterministic option application order.
 //
 // Complexity:
 //   - Time O(len(opts)), Space O(1) excluding map growth.
 //
+// Notes:
+//   - Nil GraphOption validation happens before graph allocation and publication.
+//   - On error, no partially configured graph is returned to the caller.
+//
 // AI-Hints:
 //   - Keep option sets explicit to make tests reproducible.
-func NewGraph(opts ...GraphOption) *Graph {
+//   - Check the returned error with errors.Is; do not rely on panic recovery.
+func NewGraph(opts ...GraphOption) (*Graph, error) {
 	// Allocate a new Graph with empty maps; sizes grow amortized O(1).
 	g := &Graph{
 		vertices:      make(map[string]*Vertex),
@@ -632,15 +618,19 @@ func NewGraph(opts ...GraphOption) *Graph {
 		adjacencyList: make(map[string]map[string]map[string]struct{}),
 	}
 
-	// Apply user-provided options deterministically (left-to-right).
 	var opt GraphOption
 	for _, opt = range opts {
-		opt(g)
+		// nil validating
+		if opt == nil {
+			return nil, ErrNilGraphOption
+		}
+		// options setter
+		if err := opt(g); err != nil {
+			return nil, err
+		}
 	}
 
-	// Return the configured, empty graph. All mutations happen via methods
-	// that enforce invariants, determinism, and sentinel errors.
-	return g
+	return g, nil
 }
 
 // Nilable provides an explicit, reflect-free mechanism to treat typed-nil receivers

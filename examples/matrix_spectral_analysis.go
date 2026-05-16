@@ -1,109 +1,256 @@
-// Package main demonstrates a simple spectral analysis (power iteration)
-// on an adjacency matrix of a graph using lvlath/matrix.
-//
-// Playground: https://go.dev/play/p/rRmJmeI9Vpa
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package main demonstrates spectral graph analysis with lvlath/matrix.
 //
 // Scenario:
 //
-//	In network science, the principal eigenvalue (and eigenvector) of a
-//	graph’s adjacency matrix reveals key structural properties: connectivity,
-//	centrality, and can seed spectral clustering.  Here we build a small
-//	undirected graph, convert it to an adjacency matrix, and use power
-//	iteration to approximate its largest eigenvalue/vector.
+//	We model a small infrastructure network where two dense service zones are
+//	connected through a narrow bridge and a storage tail. This is exactly the kind
+//	of topology where local degree alone is not enough: a node may have a modest
+//	number of direct links but still dominate global connectivity because many
+//	paths must pass through it.
 //
-// Graph: a 6-node “barbell” graph—two triangles connected by a single bridge:
+//	The example builds the graph, converts it into an adjacency matrix, then uses
+//	matrix operations to answer practical engineering questions:
 //
-//	  0
-//	 / \
-//	1───2---3───4
-//	         \ /
-//	          5
+//	  - Which services have the largest local adjacency mass?
+//	  - Which services are emphasized by the principal spectral mode?
+//	  - Does the Jacobi eigen result satisfy A*v ≈ λ*v?
+//	  - What is the shortest failover distance from the web tier to backup storage?
 //
-//	Triangle 0–1–2 and triangle 3–4–5 joined by edge 2–3.
+// Graph:
 //
-// Use case:
+//	 ┌─────auth──────┐
+//	 │       │       │
+//	 │       │       │
+//	edge─────┼──────api──────┐
+//	 │       │       │       │
+//	 │       │       │       │
+//	 └──────web──────┘ ┌───cache
+//	         │         │     │
+//	         ├─────────┘     │
+//	         │               │
+//	         └──────┐ ┌──────┘
+//	  db───────────bridge
+//	   │
+//	backup
 //
-//	Estimate graph connectivity and identify “central” nodes via eigenvector.
+// Dense service cluster:
+//
+//	edge, auth, api, web, cache
+//
+// Critical connector:
+//
+//	bridge
+//
+// Storage tail:
+//
+//	db, backup
+//
+// Why this matters:
+//
+//	The principal eigenvalue/eigenvector of an adjacency operator is a compact
+//	spectral fingerprint of graph structure. In operations, observability,
+//	routing, and resilience analysis, it is useful as a centrality signal and as
+//	a seed for clustering or anomaly detection.
 //
 // Complexity:
-//   - Building matrix: O(V + E)
-//   - Each power-iteration step: O(V²) for dense matrix
-//   - Total: O(I·V²), I = #iterations (here 20).
+//   - Graph-to-adjacency build: O(V + E) plus dense storage O(V²).
+//   - Symmetrization: O(V²).
+//   - EigenSym: O(maxIter · V³).
+//   - Power iteration: O(steps · V²).
+//   - Metric closure: O(V³).
 package main
 
-//
-//import (
-//	"fmt"
-//	"log"
-//	"math"
-//
-//	"github.com/katalvlaran/lvlath/core"
-//	"github.com/katalvlaran/lvlath/matrix"
-//)
-//
-//func main9() {
-//	// 1) Build the barbell graph
-//	g := core.NewGraph(false, false) // undirected, unweighted
-//	// Left triangle 0–1–2
-//	g.AddEdge("0", "1", 1)
-//	g.AddEdge("1", "2", 1)
-//	g.AddEdge("2", "0", 1)
-//	// Right triangle 3–4–5
-//	g.AddEdge("3", "4", 1)
-//	g.AddEdge("4", "5", 1)
-//	g.AddEdge("5", "3", 1)
-//	// Bridge between the two triangles
-//	g.AddEdge("2", "3", 1)
-//
-//	// 2) Convert to adjacency matrix
-//	am := matrix.NewAdjacencyMatrix(g)
-//	n := len(am.Index)
-//
-//	// 3) Power iteration to approximate principal eigenvalue/vector
-//	// Initialize vector v with 1s
-//	v := make([]float64, n)
-//	for i := range v {
-//		v[i] = 1.0
-//	}
-//
-//	var lambda float64
-//	// Repeat: w = A · v; lambda = ||w||; v = w / lambda
-//	for iter := 0; iter < 20; iter++ {
-//		// w = A * v
-//		w := make([]float64, n)
-//		for _, uIdx := range am.Index {
-//			// sum over neighbors: for dense, iterate all columns
-//			for _, vIdx := range am.Index {
-//				weight := am.Data[uIdx][vIdx]
-//				if weight != 0 {
-//					w[uIdx] += float64(weight) * v[vIdx]
-//				}
-//			}
-//			// (no need to use uID here, index mapping suffices)
-//		}
-//		// Compute norm of w
-//		norm := 0.0
-//		for _, wi := range w {
-//			norm += wi * wi
-//		}
-//		norm = math.Sqrt(norm)
-//		if norm == 0 {
-//			log.Fatal("Power iteration diverged to zero vector")
-//		}
-//		// Normalize to get next v, record eigenvalue estimate
-//		for i := range v {
-//			v[i] = w[i] / norm
-//		}
-//		lambda = norm
-//	}
-//
-//	// 4) Display results
-//	fmt.Printf("Approximate principal eigenvalue λ ≈ %.5f\n", lambda)
-//	fmt.Println("Corresponding eigenvector (node: value):")
-//	// Print in node order "0".."5"
-//	for node := 0; node < 6; node++ {
-//		id := fmt.Sprint(node)
-//		idx := am.Index[id]
-//		fmt.Printf("  Node %s: %.4f\n", id, v[idx])
-//	}
-//}
+import (
+	"fmt"
+	"log"
+	"math"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/matrix"
+)
+
+const (
+	spectralTol     = 1e-10
+	spectralMaxIter = 200
+	powerSteps      = 24
+)
+
+func mainMatrixSpectralAnalysis() {
+	// NewGraph creates the source topology. This graph is undirected because
+	// infrastructure links are treated as bidirectional reachability channels,
+	// and weighted because the matrix layer should preserve numeric edge costs.
+	g, err := core.NewGraph(core.WithDirected(false), core.WithWeighted())
+	if err != nil {
+		log.Fatalf("new graph: %v", err)
+	}
+
+	// This is a deterministic example with static data and compatible graph
+	// capabilities. Ignoring AddEdge errors here keeps the scenario readable.
+	// Do not repeat this in production code: real systems must check every
+	// returned error from graph mutation.
+	_, _ = g.AddEdge("edge", "auth", 1)
+	_, _ = g.AddEdge("edge", "api", 1)
+	_, _ = g.AddEdge("edge", "web", 1)
+	_, _ = g.AddEdge("auth", "api", 1)
+	_, _ = g.AddEdge("auth", "web", 1)
+	_, _ = g.AddEdge("api", "web", 1)
+	_, _ = g.AddEdge("api", "cache", 1)
+	_, _ = g.AddEdge("web", "cache", 1)
+	_, _ = g.AddEdge("web", "bridge", 1)
+	_, _ = g.AddEdge("cache", "bridge", 1)
+	_, _ = g.AddEdge("bridge", "db", 1)
+	_, _ = g.AddEdge("db", "backup", 1)
+
+	// NewMatrixOptions freezes the matrix interpretation of the graph:
+	// undirected cells are mirrored, and weights are copied into adjacency.
+	opts, err := matrix.NewMatrixOptions(
+		matrix.WithUndirected(),
+		matrix.WithWeighted(),
+	)
+	if err != nil {
+		log.Fatalf("matrix options: %v", err)
+	}
+
+	// NewAdjacencyMatrix maps service IDs to deterministic matrix coordinates
+	// and materializes the graph as a dense adjacency operator.
+	am, err := matrix.NewAdjacencyMatrix(g, opts)
+	if err != nil {
+		log.Fatalf("adjacency: %v", err)
+	}
+
+	// DegreeVector summarizes local adjacency mass. In this unweighted graph it
+	// behaves as ordinary service degree; with weights it becomes weighted row mass.
+	degrees, err := am.DegreeVector()
+	if err != nil {
+		log.Fatalf("degree vector: %v", err)
+	}
+
+	// Symmetrize enforces the operator required by EigenSym. The graph is already
+	// undirected, but this explicit repair step documents the spectral precondition:
+	// symmetric input for Jacobi eigen-decomposition.
+	symA, err := matrix.Symmetrize(am.Mat)
+	if err != nil {
+		log.Fatalf("symmetrize: %v", err)
+	}
+
+	// EigenSym computes the deterministic symmetric eigen-decomposition. The first
+	// eigenpair is used here as the principal spectral connectivity signal.
+	eigenvalues, eigenvectors, err := matrix.EigenSym(symA, spectralTol, spectralMaxIter)
+	if err != nil {
+		log.Fatalf("eigen: %v", err)
+	}
+
+	// Power iteration is intentionally implemented inline to show how the public
+	// MatVecMul facade can be used to build higher-level iterative methods without
+	// reaching into Dense internals.
+	n := symA.Rows()
+	vPower := make([]float64, n)
+	for i := range vPower {
+		vPower[i] = 1 / math.Sqrt(float64(n))
+	}
+
+	lambdaPower := 0.0
+	for iter := 0; iter < powerSteps; iter++ {
+		// MatVecMul computes w = A*v using the package kernel rather than manual
+		// indexing. This keeps shape validation and dense fast-path behavior inside
+		// the matrix package.
+		w, err := matrix.MatVecMul(symA, vPower)
+		if err != nil {
+			log.Fatalf("power iteration MatVecMul: %v", err)
+		}
+
+		normSquared := 0.0
+		for i := range w {
+			normSquared += w[i] * w[i]
+		}
+		norm := math.Sqrt(normSquared)
+		if norm == 0 {
+			log.Fatal("power iteration: zero vector")
+		}
+
+		for i := range vPower {
+			vPower[i] = w[i] / norm
+		}
+
+		// A second MatVecMul evaluates the Rayleigh quotient λ ≈ vᵀAv after
+		// normalization. This gives a stable scalar estimate of the dominant mode.
+		AvPower, err := matrix.MatVecMul(symA, vPower)
+		if err != nil {
+			log.Fatalf("power iteration Rayleigh MatVecMul: %v", err)
+		}
+
+		lambdaPower = 0
+		for i := range vPower {
+			lambdaPower += vPower[i] * AvPower[i]
+		}
+	}
+
+	// BuildMetricClosure turns graph adjacency into all-pairs shortest distances.
+	// The function forces distance semantics internally: +Inf for unreachable pairs,
+	// zero diagonal, and Floyd-Warshall closure.
+	closure, err := matrix.BuildMetricClosure(g, opts)
+	if err != nil {
+		log.Fatalf("metric closure: %v", err)
+	}
+
+	fmt.Printf("vertices=%d\n", len(am.VertexIndex))
+	fmt.Printf("principalEigenvalue=%.4f\n", eigenvalues[0])
+	fmt.Printf("powerEigenvalue=%.4f\n", lambdaPower)
+
+	nodeOrder := []string{"edge", "auth", "api", "web", "cache", "bridge", "db", "backup"}
+
+	fmt.Println("degree:")
+	for _, id := range nodeOrder {
+		idx := am.VertexIndex[id]
+		fmt.Printf("  %-7s %.4f\n", id, degrees[idx])
+	}
+
+	fmt.Println("powerCentrality:")
+	for _, id := range nodeOrder {
+		idx := am.VertexIndex[id]
+		fmt.Printf("  %-7s %.4f\n", id, vPower[idx])
+	}
+
+	web := am.VertexIndex["web"]
+	backup := am.VertexIndex["backup"]
+
+	// At reads a distance from the metric-closure matrix without panics. The
+	// value is the shortest failover length from web to backup.
+	distWebBackup, err := closure.Mat.At(web, backup)
+	if err != nil {
+		log.Fatalf("distance web->backup: %v", err)
+	}
+	fmt.Printf("distance(web,backup)=%.0f\n", distWebBackup)
+
+	// Eigenvectors are returned as matrix columns. Extract the leading vector and
+	// verify the defining equation A*v ≈ λ*v using MatVecMul and a deterministic
+	// scalar tolerance.
+	leading := make([]float64, n)
+	for row := range leading {
+		v, err := eigenvectors.At(row, 0)
+		if err != nil {
+			log.Fatalf("leading eigenvector row %d: %v", row, err)
+		}
+		leading[row] = v
+	}
+
+	// MatVecMul computes the left side A*v.
+	Av, err := matrix.MatVecMul(symA, leading)
+	if err != nil {
+		log.Fatalf("A*v: %v", err)
+	}
+
+	// The right side λ*v is evaluated explicitly so the residual check is visible.
+	okEigenResidual := true
+	for i := range leading {
+		want := eigenvalues[0] * leading[i]
+		if math.Abs(Av[i]-want) > 1e-8 {
+			okEigenResidual = false
+			break
+		}
+	}
+	fmt.Printf("okEigenResidual=%v\n", okEigenResidual)
+}

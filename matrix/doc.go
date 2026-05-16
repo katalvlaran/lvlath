@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix provides deterministic, allocation-aware linear algebra
 // and graph-by-matrix utilities used across lvlath.

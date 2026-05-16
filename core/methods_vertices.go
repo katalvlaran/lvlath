@@ -281,7 +281,7 @@ func (g *Graph) VertexCount() int {
 	return len(g.vertices)
 }
 
-// VerticesMap returns a shallow copy of the vertex catalog (ID -> *Vertex).
+// VerticesMap returns a fresh map copy of the vertex catalog (ID -> *Vertex).
 //
 // Implementation:
 //   - Stage 1: Acquire muVert read lock.
@@ -289,11 +289,15 @@ func (g *Graph) VertexCount() int {
 //   - Stage 3: Copy ID -> *Vertex entries into the new map.
 //
 // Behavior highlights:
-//   - Callers can retain the returned map without holding graph locks.
-//   - Vertex pointers refer to live objects; treat them as read-only by convention.
+//   - The returned map container is detached from the graph and may be retained,
+//     re-keyed, or discarded by the caller without holding graph locks.
+//   - The contained *Vertex values alias catalog records.
+//   - Vertex.ID MUST be treated as immutable once the vertex is published in a Graph.
+//   - Vertex.Metadata remains caller-managed payload; core neither deep-copies nor
+//     synchronizes metadata contents.
 //
 // Returns:
-//   - map[string]*Vertex: shallow copy of the catalog.
+//   - map[string]*Vertex: fresh map container whose values alias catalog vertices.
 //
 // Errors:
 //   - None (pure query).
@@ -306,9 +310,11 @@ func (g *Graph) VertexCount() int {
 //
 // Notes:
 //   - Use Vertices() when you need deterministic ordering.
+//   - Retaining a returned *Vertex does not pin graph membership or extend graph locks.
 //
 // AI-Hints:
-//   - Prefer VerticesMap() for membership checks that need a stable snapshot without sorting.
+//   - Prefer VerticesMap() for detached catalog membership snapshots without sorting.
+//   - Treat Vertex.ID as immutable; if you need mutable detached state, allocate your own copies.
 func (g *Graph) VerticesMap() map[string]*Vertex {
 	// AI-HINT: Returns a shallow copy (ID → *Vertex); safe to retain by callers.
 	g.muVert.RLock()
@@ -324,14 +330,25 @@ func (g *Graph) VerticesMap() map[string]*Vertex {
 	return out
 }
 
-// InternalVertices returns the live internal vertices map.
+// InternalVertices returns a compatibility copy of the vertex catalog.
 //
 // Deprecated:
-//   - This exposes internal storage without synchronization guarantees and enables mutation
-//     that bypasses graph invariants. It remains for legacy tests only.
+//   - Historical versions exposed the live internal vertices map directly.
+//   - That behavior bypassed synchronization and allowed catalog-membership mutation
+//     outside graph methods.
+//   - The method is retained only as a compatibility alias and now delegates to
+//     VerticesMap().
+//
+// Behavior highlights:
+//   - The returned map container is detached from the graph.
+//   - The contained *Vertex values still alias catalog records.
+//
+// Notes:
+//   - Prefer VerticesMap() in new code.
+//   - This method is intentionally no longer an internal-storage escape hatch.
 //
 // AI-Hints:
-//   - Prefer Vertices(), VerticesMap(), or higher-level views instead of mutating internals.
+//   - Do not write code that depends on InternalVertices mutating graph membership.
 func (g *Graph) InternalVertices() map[string]*Vertex {
 	// AI-HINT: Deprecated live map; do not mutate in user code. Prefer Vertices()/VerticesMap().
 	return g.vertices

@@ -32,7 +32,10 @@ import "sort"
 //
 // Behavior highlights:
 //   - Deterministic ordering by Edge.ID ascending.
-//   - Returns pointers to live catalog edges (read-only by convention).
+//   - The returned slice container is detached and safe to retain, re-slice, or reorder locally.
+//   - The slice elements alias live catalog edges.
+//   - Edge.ID, Edge.From, Edge.To, Edge.Weight, and Edge.Directed MUST be treated
+//     as immutable once an edge is published in a graph.
 //   - Safe against concurrent vertex removal due to consistent lock ordering.
 //
 // Inputs:
@@ -53,8 +56,9 @@ import "sort"
 //   - Time O(d log d), Space O(d), where d is the number of incident edges collected.
 //
 // Notes:
-//   - This method does not copy Edge objects; treat returned *Edge as immutable.
-//   - Map key order is irrelevant because final ordering is enforced by sorting.
+//   - This is a zero-copy inspection surface for expert callers.
+//   - Retaining a returned *Edge does not pin graph membership or extend graph locks.
+//   - If detached mutable edge state is required, copy the Edge value externally.
 //
 // AI-Hints:
 //   - Use Neighbors(id) for deterministic iteration in algorithms.

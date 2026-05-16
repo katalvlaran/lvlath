@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 // Package core_test verifies core.Graph method-level contracts.
 //
 // Purpose:
@@ -51,7 +52,7 @@ import (
 //   - Prefer verifying no-op via count deltas rather than internal map inspection.
 func TestGraph_AddRemoveVertex(t *testing.T) {
 	// Stage 1: Create a default graph (undirected, unweighted, no loops, no multi-edges).
-	g := core.NewGraph()
+	g := MustNewGraph(t)
 
 	// Stage 2: Validate empty ID rejection on AddVertex.
 	{
@@ -142,7 +143,7 @@ func TestGraph_AddRemoveVertex(t *testing.T) {
 func TestGraph_AddEdgeConstraints(t *testing.T) {
 	// Stage 1: Unweighted graph rejects non-zero weight.
 	// Create unweighted default graph.
-	g := core.NewGraph()
+	g := MustNewGraph(t)
 	// Attempt to add a weighted edge on an unweighted graph.
 	_, err := g.AddEdge(VertexA, VertexB, Weight5)
 	// Enforce sentinel error contract.
@@ -150,7 +151,7 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 
 	// Stage 2: Weighted graph accepts non-zero weight and creates the edge.
 	// Create weighted graph.
-	g = core.NewGraph(core.WithWeighted())
+	g, _ = core.NewGraph(core.WithWeighted())
 	// Add weighted edge.
 	_, err = g.AddEdge(VertexA, VertexB, Weight7)
 	// Must succeed.
@@ -160,7 +161,7 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 
 	// Stage 3: Default graph disallows self-loops.
 	// Create default graph (loops disabled).
-	g = core.NewGraph()
+	g = MustNewGraph(t)
 	// Attempt to add self-loop.
 	_, err = g.AddEdge(VertexX, VertexX, Weight0)
 	// Enforce sentinel error contract.
@@ -168,7 +169,7 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 
 	// Stage 4: Loop-enabled graph accepts self-loops.
 	// Create loop-enabled graph.
-	g = core.NewGraph(core.WithLoops())
+	g, _ = core.NewGraph(core.WithLoops())
 	// Add self-loop.
 	loopID, err := g.AddEdge(VertexX, VertexX, Weight0)
 	// Must succeed.
@@ -180,7 +181,7 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 
 	// Stage 5: Multi-edge disallowed by default (second edge with same endpoints must error).
 	// Create default graph (multi-edges disabled).
-	g = core.NewGraph()
+	g = MustNewGraph(t)
 	// Add first edge (must succeed).
 	_, err = g.AddEdge(VertexA, VertexB, Weight0)
 	MustErrorNil(t, err, "first AddEdge(A,B,0) on default graph")
@@ -190,7 +191,7 @@ func TestGraph_AddEdgeConstraints(t *testing.T) {
 
 	// Stage 6: Multi-edge enabled graph allows parallel edges with distinct IDs.
 	// Create graph with multi-edges, weights, and loops enabled to maximize surface.
-	g = core.NewGraph(core.WithMultiEdges(), core.WithWeighted(), core.WithLoops())
+	g, _ = core.NewGraph(core.WithMultiEdges(), core.WithWeighted(), core.WithLoops())
 	// Add first edge.
 	e1, err := g.AddEdge(VertexA, VertexB, Weight1)
 	MustErrorNil(t, err, "first AddEdge(A,B,1) on multigraph")
@@ -233,7 +234,7 @@ func TestGraph_MixedEdgesDirectedOverride(t *testing.T) {
 	// Stage 1: Non-mixed graph rejects per-edge override.
 	{
 		// Create a default (non-mixed) graph.
-		g := core.NewGraph()
+		g := MustNewGraph(t)
 		// Attempt to override per-edge directedness without mixed mode.
 		_, err := g.AddEdge(VertexX, VertexY, Weight0, core.WithEdgeDirected(true))
 		// Enforce sentinel gate contract.
@@ -243,7 +244,7 @@ func TestGraph_MixedEdgesDirectedOverride(t *testing.T) {
 	// Stage 2: Mixed graph accepts per-edge override and sets Edge.Directed=true.
 	{
 		// Create a mixed graph (per-edge directedness overrides allowed).
-		g := core.NewMixedGraph()
+		g, _ := core.NewMixedGraph()
 		// Add an edge overriding directedness to true.
 		eid, err := g.AddEdge(VertexX, VertexY, Weight0, core.WithEdgeDirected(true))
 		MustErrorNil(t, err, "AddEdge(X,Y,0,WithEdgeDirected(true)) on mixed graph")
@@ -287,7 +288,7 @@ func TestGraph_MixedEdgesDirectedOverride(t *testing.T) {
 //   - Prefer verifying cleanup via HasEdge(from,to) and HasEdge(to,from) in undirected graphs.
 func TestGraph_RemoveEdge(t *testing.T) {
 	// Stage 1: Create weighted graph and add two edges.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 
 	// Add edge A-B to later remove.
 	eidAB, err := g.AddEdge(VertexA, VertexB, Weight1)
@@ -343,7 +344,7 @@ func TestGraph_RemoveEdge(t *testing.T) {
 //   - Treat Stats() as best-effort for metrics; avoid correctness-critical dependence under concurrent mutation.
 func TestGraph_StatsSnapshot(t *testing.T) {
 	// Stage 1: Create a weighted mixed graph with an explicit undirected default.
-	g := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMixedEdges())
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMixedEdges())
 
 	// Stage 2: Add vertices explicitly so VertexCount is deterministic.
 	MustErrorNil(t, g.AddVertex(VertexA), "AddVertex(A) setup for Stats()")
@@ -408,7 +409,7 @@ func TestGraph_StatsSnapshot(t *testing.T) {
 //   - Use Clear() to reuse configured graphs without reallocating options repeatedly.
 func TestGraph_ClearPreservesFlagsAndResetsState(t *testing.T) {
 	// Stage 1: Create a configured graph and add an edge to advance the internal ID counter.
-	g := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 
 	// Add one edge to ensure the graph is non-empty before Clear().
 	_, err := g.AddEdge(VertexA, VertexB, Weight5)
@@ -467,7 +468,7 @@ func TestGraph_ClearPreservesFlagsAndResetsState(t *testing.T) {
 //   - To validate determinism, always check sortedness of returned IDs rather than relying on insertion order.
 func TestGraph_Queries(t *testing.T) {
 	// Stage 1: Use a weighted, loop-enabled graph.
-	g := core.NewGraph(core.WithWeighted(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithLoops())
 
 	// Stage 2: Add one undirected edge V1–V2 and one self-loop V1–V1.
 	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1)")
@@ -535,7 +536,7 @@ func TestGraph_Queries(t *testing.T) {
 //   - Prefer pointer inequality to prove deep-copy while keeping the “Edge is read-only” contract intact.
 func TestGraph_CloneEmptyAndClone(t *testing.T) {
 	// Stage 1: Build a graph with multi-edges, weights, and loops.
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges(), core.WithLoops())
 
 	// Add two parallel edges so clone has non-trivial inventory.
 	eid1, err := g.AddEdge(VertexA, VertexB, Weight1)
@@ -597,7 +598,7 @@ func TestGraph_LoopsAndDirection(t *testing.T) {
 	// Stage 1: Undirected loop-enabled graph.
 	{
 		// Create undirected graph with loops enabled.
-		g := core.NewGraph(core.WithLoops())
+		g, _ := core.NewGraph(core.WithLoops())
 
 		// Add self-loop on X.
 		eid, err := g.AddEdge(VertexX, VertexX, Weight0)
@@ -617,7 +618,7 @@ func TestGraph_LoopsAndDirection(t *testing.T) {
 	// Stage 2: Directed loop-enabled graph.
 	{
 		// Create directed graph with loops enabled.
-		g := core.NewGraph(core.WithLoops(), core.WithDirected(true))
+		g, _ := core.NewGraph(core.WithLoops(), core.WithDirected(true))
 
 		// Add self-loop on Y.
 		eid, err := g.AddEdge(VertexY, VertexY, Weight0)
@@ -667,7 +668,7 @@ func TestGraph_LoopsAndDirection(t *testing.T) {
 //   - Prefer validating edge attributes via GetEdge(id) instead of scanning Edges().
 func TestGraph_MultiEdges(t *testing.T) {
 	// Stage 1: Enable multi-edges and weights.
-	g := core.NewGraph(core.WithMultiEdges(), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithMultiEdges(), core.WithWeighted())
 
 	// Stage 2: Add parallel edges A-B with different weights.
 	e1, err := g.AddEdge(VertexA, VertexB, Weight1)
@@ -719,7 +720,7 @@ func TestGraph_MultiEdges(t *testing.T) {
 //   - Keep HasEdge safe even when vertices are not created (avoid forced AddVertex in callers).
 func TestGraph_HasEdgeUnknownVertices(t *testing.T) {
 	// Stage 1: Querying an empty graph with unknown vertices must be safe and return false.
-	g := core.NewGraph()
+	g := MustNewGraph(t)
 	// Stage 2: Validate predicate result.
 	MustEqualBool(t, g.HasEdge(VertexU, VertexV), false, "HasEdge(U,V) on unknown vertices must be false")
 }
@@ -757,7 +758,7 @@ func TestGraph_HasEdgeUnknownVertices(t *testing.T) {
 //   - When debugging view/subgraph behaviors, always add a new edge after construction to probe ID collision risk.
 func TestGraph_UnweightedViewCarriesNextEdgeID(t *testing.T) {
 	// Stage 1: Build a weighted source graph and add edges to advance edge-ID counter.
-	src := core.NewGraph(core.WithWeighted())
+	src, _ := core.NewGraph(core.WithWeighted())
 
 	// Add first weighted edge and retain its ID.
 	eid1, err := src.AddEdge(VertexA, VertexB, Weight1)
@@ -822,7 +823,7 @@ func TestGraph_UnweightedViewCarriesNextEdgeID(t *testing.T) {
 //   - Use UnweightedView when you need BFS/DFS-like behavior on a weighted input.
 func TestGraph_UnweightedViewFunctionalSnapshot(t *testing.T) {
 	// Stage 1: Build weighted directed source graph.
-	src := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	src, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	// Add two edges with non-zero weights.
 	id1, err := src.AddEdge(VertexA, VertexB, Weight1)
@@ -891,7 +892,7 @@ func TestGraph_UnweightedViewFunctionalSnapshot(t *testing.T) {
 //   - When changing subgraph policies, keep the “collision probe” pattern: build → add edge → re-read kept edge.
 func TestGraph_InducedSubgraphCarriesNextEdgeID(t *testing.T) {
 	// Stage 1: Create a weighted source graph with two edges.
-	src := core.NewGraph(core.WithWeighted())
+	src, _ := core.NewGraph(core.WithWeighted())
 
 	// Add edge A-B and retain its ID (it must be included in keep={A,B}).
 	eidAB, err := src.AddEdge(VertexA, VertexB, Weight1)
@@ -955,7 +956,7 @@ func TestGraph_InducedSubgraphCarriesNextEdgeID(t *testing.T) {
 //   - Prefer InducedSubgraph when you need an isolated working set of vertices for an algorithm stage.
 func TestGraph_InducedSubgraphFunctionalCorrectness(t *testing.T) {
 	// Stage 1: Build a weighted graph with a triangle A-B-C.
-	src := core.NewGraph(core.WithWeighted())
+	src, _ := core.NewGraph(core.WithWeighted())
 
 	_, err := src.AddEdge(VertexA, VertexB, Weight1)
 	MustErrorNil(t, err, "src.AddEdge(A,B,1)")
@@ -1014,7 +1015,7 @@ func TestGraph_InducedSubgraphFunctionalCorrectness(t *testing.T) {
 //   - If you change edge-ID representation, keep ordering deterministic (lexicographic over IDs is simplest).
 func TestGraph_EdgesAreSorted(t *testing.T) {
 	// Stage 1: Create a multigraph and add multiple edges so sorting is observable.
-	g := core.NewGraph(core.WithMultiEdges(), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithMultiEdges(), core.WithWeighted())
 
 	// Add three parallel edges.
 	_, err := g.AddEdge(VertexA, VertexB, Weight1)
@@ -1066,7 +1067,7 @@ func TestGraph_EdgesAreSorted(t *testing.T) {
 // AI-Hints:
 //   - Use WithID to create stable external references (golden tests, trace correlation, interop).
 func TestGraph_AddEdge_WithID_OK(t *testing.T) {
-	g := core.NewGraph()
+	g := MustNewGraph(t)
 	eid, err := g.AddEdge(VertexA, VertexB, Weight0, core.WithID("customID123"))
 	MustErrorNil(t, err, "AddEdge(A,B,0,WithID) should succeed with unique ID")
 	MustEqualString(t, eid, "customID123", "returned edge ID should match provided ID")

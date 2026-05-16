@@ -115,7 +115,7 @@ func ExampleGraph_CascadingFailures() {
 		districtB = []string{"B1", "B2", "B3", "B4"}
 	)
 
-	g := core.NewGraph(core.WithWeighted(), core.WithDirected(false))
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithDirected(false))
 
 	// Construct two dense districts (Cliques)
 	for i := 0; i < clusterSize; i++ {
@@ -296,7 +296,7 @@ func ExampleGraph_BetweennessCentrality() {
 
 	// Stage 1: Infrastructure Construction
 	// We initialize a non-directed graph representing physical transport corridors.
-	g := core.NewGraph(core.WithDirected(false))
+	g, _ := core.NewGraph(core.WithDirected(false))
 
 	// Pre-allocate slices to avoid repeated allocations in loops.
 	vertsA := make([]string, clusterSize)
@@ -426,7 +426,7 @@ func ExampleGraph_BetweennessCentrality() {
 func ExampleGraph_NeuralEvolution() {
 	// ---- PHASE 1: Initial Cognitive Seed (Sparse Substrate) ----
 	// Initialize an undirected, weighted graph representing the base neural cluster.
-	g := core.NewGraph(core.WithDirected(false), core.WithWeighted())
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted())
 
 	// Primary synaptic pathways (Initial Knowledge)
 	// AddEdge returns (ID, error). We use "_" as we track them by topology later.

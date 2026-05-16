@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package: matrix
 //
 // Purpose:
@@ -18,6 +20,7 @@
 package matrix
 
 import (
+	"fmt"
 	"math"
 
 	"github.com/katalvlaran/lvlath/core"
@@ -26,6 +29,15 @@ import (
 // zeroTol is a tiny tolerance used only internally for guards where appropriate.
 // We keep it explicit to avoid "magic numbers" inline.
 const zeroTol = 0.0
+
+// distanceMatrixAllowsInfByDefault fixes the distance/APSP convention:
+//
+//   - ordinary Dense matrices reject +Inf by default;
+//   - distance matrices allow +Inf as the "no path" sentinel by default.
+//
+// Callers may still pass WithDisallowInfDistances() to require a complete finite
+// distance matrix.
+const distanceMatrixAllowsInfByDefault = true
 
 // isNonFinite REPORTS whether v is NaN or ±Inf.
 //
@@ -65,7 +77,20 @@ func isNaNOrNegInf(v float64) bool {
 	return math.IsNaN(v) || math.IsInf(v, -1)
 }
 
-// isNaNOrPosInf REPORTS whether v is NaN or +Inf (allows -Inf as "no path").
+// isNaNOrPosInf REPORTS whether v is NaN or +Inf.
+//
+// Implementation:
+//   - Stage 1: math.IsNaN(v).
+//   - Stage 2: math.IsInf(v, +1).
+//
+// Behavior highlights:
+//   - Used by adjacency-style scans that intentionally skip NaN/+Inf as
+//     non-contributing values.
+//   - This helper does NOT declare -Inf valid. Callers that cannot tolerate -Inf
+//     must reject it explicitly or use isNonFinite.
+//
+// AI-Hints:
+//   - Do not document -Inf as a no-path sentinel in matrix; distance no-path is +Inf.
 func isNaNOrPosInf(v float64) bool {
 	return math.IsNaN(v) || math.IsInf(v, 1)
 }
@@ -190,6 +215,66 @@ func ValidateNotNil(m Matrix) error {
 	// if the implementation provides core.Nilable, trust its IsNil().
 	if n, ok := m.(core.Nilable); ok && n.IsNil() {
 		return ErrNilMatrix
+	}
+
+	return nil
+}
+
+// IsZeroShape reports whether m has an empty element domain.
+//
+// What:
+//   - Returns true for 0×0, 0×N, and N×0 shapes.
+//
+// Why:
+//   - Element-wise scans over such matrices are deterministic no-ops.
+//   - Statistics may return correctly-sized metadata without touching elements.
+//
+// Inputs:
+//   - m: matrix already known to be non-nil.
+//
+// Returns:
+//   - bool: true when Rows()==0 or Cols()==0.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Call ValidateNotNil before this helper at public boundaries.
+//   - Do not confuse zero-shape with nil.
+func IsZeroShape(m Matrix) bool {
+	if m == nil {
+		return false
+	}
+
+	return m.Rows() == 0 || m.Cols() == 0
+}
+
+// ValidateNonEmptyShape ensures that m has at least one row and one column.
+//
+// What:
+//   - Rejects nil and zero-sized shapes.
+//
+// Why:
+//   - Some algorithms require at least one actual element, even though the package
+//     generally accepts zero-sized matrices structurally.
+//
+// Errors:
+//   - ErrNilMatrix from ValidateNotNil.
+//   - ErrInvalidDimensions when Rows()==0 or Cols()==0.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not use this in element-wise kernels that can operate as no-ops.
+//   - Use it only when the mathematics requires a non-empty element domain.
+func ValidateNonEmptyShape(m Matrix) error {
+	if err := ValidateNotNil(m); err != nil {
+		return err
+	}
+
+	if IsZeroShape(m) {
+		return ErrInvalidDimensions
 	}
 
 	return nil
@@ -687,6 +772,135 @@ func ValidateAllFinite(m Matrix) error {
 			}
 			if isNonFinite(v) {
 				return ErrNaNInf
+			}
+		}
+	}
+
+	return nil
+}
+
+// ValidateDistanceMatrix VALIDATES the semantic numeric contract of a distance/APSP matrix.
+//
+// What:
+//   - Checks that m is a square distance matrix suitable for Floyd–Warshall-style
+//     shortest-path processing.
+//
+// Why:
+//   - Ordinary Dense matrices normally reject infinities.
+//   - Distance matrices intentionally use +Inf as "no path".
+//   - This validator centralizes that domain exception without weakening NaN/-Inf safety.
+//
+// Implementation:
+//   - Stage 1: assemble options with distance semantics:
+//     +Inf is allowed by default, while caller-provided options may override it.
+//   - Stage 2: validate non-nil square shape through existing validators.
+//   - Stage 3: normalize tolerance through validateTol.
+//   - Stage 4: scan entries in row-major order.
+//   - Stage 5: reject NaN and -Inf everywhere.
+//   - Stage 6: allow +Inf only off-diagonal and only when allowInfDistances is true.
+//   - Stage 7: classify diagonal:
+//     negative below tolerance => ErrNegativeCycle;
+//     positive/non-zero above tolerance => ErrBadShape.
+//
+// Behavior highlights:
+//   - Off-diagonal finite negative distances are allowed.
+//   - +Inf off-diagonal means "no path".
+//   - +Inf diagonal is invalid.
+//   - The validator does not require triangle inequality; Floyd–Warshall produces closure.
+//
+// Inputs:
+//   - m: matrix to validate.
+//   - opts: optional policy. WithEpsilon and WithDisallowInfDistances are meaningful.
+//
+// Returns:
+//   - nil when m satisfies the distance-matrix input contract.
+//   - sentinel-preserving error otherwise.
+//
+// Errors:
+//   - ErrNilMatrix: nil or typed-nil matrix.
+//   - ErrNonSquare: non-square matrix, via ValidateSquareNonNil.
+//   - ErrInvalidDimensions: negative shape from a malformed Matrix implementation.
+//   - ErrNaNInf: NaN, -Inf, or disallowed +Inf.
+//   - ErrBadShape: invalid non-negative diagonal.
+//   - ErrNegativeCycle: negative diagonal below tolerance.
+//
+// Determinism:
+//   - Row-major scan order; first failing cell is reported deterministically.
+//
+// Complexity:
+//   - Time O(n²), Space O(1).
+//
+// Notes:
+//   - WithNoValidateNaNInf does not disable this semantic validator.
+//   - This function validates distance-domain meaning, not Dense write policy.
+//
+// AI-Hints:
+//   - Do not replace this with ValidateSquareNonNil in FloydWarshall.
+//   - Do not treat +Inf as valid on the diagonal.
+//   - Do not reject finite negative off-diagonal distances; Floyd–Warshall supports them.
+func ValidateDistanceMatrix(m Matrix, opts ...Option) error {
+	// Distance matrices use +Inf as "no path" by default.
+	//
+	// We intentionally do this locally rather than introducing another option
+	// assembly helper. The public option system remains the single source of
+	// truth; this validator only prepends the distance-domain default.
+	distanceOpts := make([]Option, 0, len(opts)+1)
+	if distanceMatrixAllowsInfByDefault {
+		distanceOpts = append(distanceOpts, WithAllowInfDistances())
+	}
+	distanceOpts = append(distanceOpts, opts...)
+
+	cfg, err := gatherOptions(distanceOpts...)
+	if err != nil {
+		return err
+	}
+
+	if err = ValidateSquareNonNil(m); err != nil {
+		return err
+	}
+
+	rows := m.Rows()
+	cols := m.Cols()
+	if rows < 0 || cols < 0 {
+		return ErrInvalidDimensions
+	}
+
+	tol, err := validateTol(cfg.eps)
+	if err != nil {
+		return err
+	}
+
+	var i, j int
+	var v float64
+
+	for i = 0; i < rows; i++ {
+		for j = 0; j < cols; j++ {
+			v, err = m.At(i, j)
+			if err != nil {
+				return fmt.Errorf("ValidateDistanceMatrix: At(%d,%d): %w", i, j, err)
+			}
+
+			if isNaNOrNegInf(v) {
+				return fmt.Errorf("ValidateDistanceMatrix: invalid distance[%d,%d]=%v: %w", i, j, v, ErrNaNInf)
+			}
+
+			if math.IsInf(v, 1) {
+				if i == j {
+					return fmt.Errorf("ValidateDistanceMatrix: +Inf diagonal[%d,%d]: %w", i, j, ErrBadShape)
+				}
+				if !cfg.allowInfDistances {
+					return fmt.Errorf("ValidateDistanceMatrix: disallowed +Inf distance[%d,%d]: %w", i, j, ErrNaNInf)
+				}
+				continue
+			}
+
+			if i == j {
+				if v < -tol {
+					return fmt.Errorf("ValidateDistanceMatrix: negative diagonal[%d,%d]=%v: %w", i, j, v, ErrNegativeCycle)
+				}
+				if math.Abs(v) > tol {
+					return fmt.Errorf("ValidateDistanceMatrix: non-zero diagonal[%d,%d]=%v: %w", i, j, v, ErrBadShape)
+				}
 			}
 		}
 	}

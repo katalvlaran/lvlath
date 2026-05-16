@@ -1,14 +1,18 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 //
 // File: api.go
 // Role: Thin, deterministic public facade exposing constructors and read-only getters.
 // Policy:
 //   - No algorithms or hidden state here.
-//   - Concurrency model and invariants are defined in types.go/doc.go.
-//   - Every exported function documents complexity and locking strategy.
+//   - Concurrency model and invariants are defined in doc.go and types.go.
+//   - Detached container/value surfaces and zero-copy alias accessors are both
+//   intentional parts of the public contract; callers must choose explicitly
+//   based on their ownership needs.
+//
 // AI-HINT (file):
 //   - Use NewMixedGraph(...) before passing WithEdgeDirected(...) to AddEdge.
-//   - Stats() is O(V+E) snapshot; rely on it for quick admissions/diagnostics.
+//   - Stats() is an O(V+E) summary surface for quick admissions/diagnostics.
 
 package core
 
@@ -23,7 +27,7 @@ package core
 //
 // Implementation:
 //   - Stage 1: Prepend WithMixedEdges() to the caller-provided options.
-//   - Stage 2: Delegate to NewGraph(...) to allocate and apply options deterministically.
+//   - Stage 2: Delegate to NewGraph(...) to validate and apply options deterministically.
 //
 // Behavior highlights:
 //   - Enables WithEdgeDirected(...) on AddEdge; without mixed-mode this is rejected.
@@ -34,9 +38,11 @@ package core
 //
 // Returns:
 //   - *Graph: a fresh configured instance with allowMixed enabled.
+//   - error: nil on success; otherwise a stable sentinel error.
 //
 // Errors:
-//   - None (construction is infallible by contract; option argument validation is internal).
+//   - ErrNilGraphOption: if opts contains a nil GraphOption value.
+//   - Any stable sentinel returned by a provided GraphOption via NewGraph.
 //
 // Determinism:
 //   - Options are applied left-to-right, with WithMixedEdges() always first.
@@ -49,7 +55,7 @@ package core
 //
 // AI-Hints:
 //   - Use NewMixedGraph(...) instead of remembering to prepend WithMixedEdges() manually.
-func NewMixedGraph(opts ...GraphOption) *Graph {
+func NewMixedGraph(opts ...GraphOption) (*Graph, error) {
 	// AI-HINT: Prefer this constructor if you plan per-edge directed overrides.
 	//          Without mixed mode, AddEdge(..., WithEdgeDirected(...)) returns ErrMixedEdgesNotAllowed.
 

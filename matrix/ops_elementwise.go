@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package: matrix
 //
 // Purpose:
@@ -14,6 +16,12 @@
 //   - Fixed loop orders (i→j or flat 0..n-1).
 //   - Dense fast-path operates on a single flat buffer (row-major).
 //   - No hidden allocations beyond the output Dense; O(r*c) time and space.
+//
+// Zero-shape law:
+//   - Element-wise kernels accept 0×0, 0×N, and N×0 matrices.
+//   - Output shape always matches input shape.
+//   - Empty element domains are deterministic no-ops.
+//   - Broadcast vector lengths are still validated against the corresponding dimension.
 //
 // AI-Hints:
 //   - Prefer passing *Dense to unlock the flat-slice fast path.
@@ -117,6 +125,11 @@ func ewBroadcastSubCols(X Matrix, colMeans []float64) (Matrix, error) {
 	if len(colMeans) != c {
 		return nil, matrixErrorf(opBroadcastSubCols, ErrDimensionMismatch)
 	}
+	// Zero-shape law:
+	//   - 0×N requires len(colMeans)==N and returns a new 0×N Dense.
+	//   - N×0 requires len(colMeans)==0 and returns a new N×0 Dense.
+	//   - No element reads occur for either case.
+
 	// Allocate result dense (O(1) alloc + O(r*c) zeroing by runtime).
 	out, err := NewDense(r, c)
 	if err != nil {
@@ -197,6 +210,11 @@ func ewBroadcastSubRows(X Matrix, rowMeans []float64) (Matrix, error) {
 	if len(rowMeans) != r {
 		return nil, matrixErrorf(opBroadcastSubRows, ErrDimensionMismatch)
 	}
+	// Zero-shape law:
+	//   - 0×N requires len(rowMeans)==0 and returns a new 0×N Dense.
+	//   - N×0 requires len(rowMeans)==N and returns a new N×0 Dense.
+	//   - No element reads occur for either case.
+
 	// Allocate result dense.
 	out, err := NewDense(r, c)
 	if err != nil {
@@ -251,6 +269,11 @@ func ewScaleCols(X Matrix, scale []float64) (Matrix, error) {
 	if len(scale) != c {
 		return nil, matrixErrorf(opScaleCols, ErrDimensionMismatch)
 	}
+	// Zero-shape law:
+	//   - 0×N requires len(colMeans)==N and returns a new 0×N Dense.
+	//   - N×0 requires len(colMeans)==0 and returns a new N×0 Dense.
+	//   - No element reads occur for either case.
+
 	// Allocate result dense.
 	out, err := NewDense(r, c)
 	if err != nil {
@@ -302,6 +325,11 @@ func ewScaleRows(X Matrix, scale []float64) (Matrix, error) {
 	if len(scale) != r {
 		return nil, matrixErrorf(opScaleRows, ErrDimensionMismatch)
 	}
+	// Zero-shape law:
+	//   - 0×N requires len(rowMeans)==0 and returns a new 0×N Dense.
+	//   - N×0 requires len(rowMeans)==N and returns a new N×0 Dense.
+	//   - No element reads occur for either case.
+
 	// Allocate result dense.
 	out, err := NewDense(r, c)
 	if err != nil {
@@ -569,8 +597,9 @@ func ewAllClose(a, b Matrix, rtol, atol float64) (bool, error) {
 
 	// Read shape once (O(1)).
 	r, c := a.Rows(), a.Cols()
-	// Zero-size matrices of identical shape are trivially close.
-	if r == 0 || c == 0 {
+	// Zero-shape law:
+	// Identical empty element domains are vacuously close.
+	if IsZeroShape(a) {
 		return true, nil
 	}
 	// Dense fast-path: operate over flat slices when both are *Dense.

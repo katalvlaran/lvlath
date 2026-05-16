@@ -329,7 +329,7 @@ Demonstrates single-source traversal, `WithFilterNeighbor` to simulate a quarant
 
 ```go
 func ExampleDFS_infrastructureInspection() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("gateway", "auth", 0)
 	_, _ = graph.AddEdge("gateway", "billing", 0)
@@ -371,7 +371,7 @@ Demonstrates `DFSForest` picking up disconnected islands and managing multiple r
 
 ```go
 func ExampleDFS_fullTraversalInventorySweep() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 	// 3 Isolated islands: zone-a, zone-m, zone-z
 	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-api", 0)
 	_, _ = graph.AddEdge("zone-m:0-gw", "zone-m:1-batch", 0)
@@ -401,7 +401,7 @@ Simulates a bounded incident impact analysis.
 
 ```go
 func ExampleDFS_depthLimitedBlastRadius() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = graph.AddEdge("incident", "api", 0)
 	_, _ = graph.AddEdge("api", "auth", 0)
 	_, _ = graph.AddEdge("auth", "db", 0) // Depth 3
@@ -422,7 +422,7 @@ Validates deterministic topological sort execution plans for DAGs.
 
 ```go
 func ExampleTopologicalSort_releasePipeline() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = graph.AddEdge("01-spec-freeze", "02-schema-lock", 0)
 	_, _ = graph.AddEdge("02-schema-lock", "03-codegen", 0)
 	_, _ = graph.AddEdge("03-codegen", "04-unit-tests", 0)
@@ -443,7 +443,7 @@ Demonstrates `DetectCycles` retrieving canonical closed-loop representations.
 
 ```go
 func ExampleDetectCycles_escalationLoopWitness() {
-	graph := core.NewGraph(core.WithDirected(true))
+	graph, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = graph.AddEdge("triage", "security", 0)
 	_, _ = graph.AddEdge("security", "approvals", 0)
 	_, _ = graph.AddEdge("approvals", "triage", 0) // Loop back

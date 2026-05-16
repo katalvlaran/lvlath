@@ -63,24 +63,28 @@ func UnweightedView(g *Graph) *Graph {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	// Build a graph with same directedness/mode but unweighted.
-	opts := []GraphOption{WithDirected(g.Directed())}
-	if g.Multigraph() {
-		opts = append(opts, WithMultiEdges())
+	// Build the detached destination graph directly.
+	//
+	// UnweightedView derives graph policy from an already valid source graph.
+	// It intentionally disables graph-level weighting while preserving the rest of
+	// the capability flags, and it must not introduce a constructor error path.
+	view := &Graph{
+		vertices:      make(map[string]*Vertex, len(g.vertices)),
+		edges:         make(map[string]*Edge, len(g.edges)),
+		adjacencyList: make(map[string]map[string]map[string]struct{}, len(g.adjacencyList)),
+		directed:      g.directed,
+		weighted:      false,
+		allowMulti:    g.allowMulti,
+		allowLoops:    g.allowLoops,
+		allowMixed:    g.allowMixed,
+		nextEdgeID:    g.nextEdgeID,
 	}
-	if g.Looped() {
-		opts = append(opts, WithLoops())
-	}
-	if g.MixedEdges() {
-		opts = append(opts, WithMixedEdges())
-	}
-	out := NewGraph(opts...)
 
 	// Copy vertices
 	// ALIASING: Metadata is shared.
 	for id, v := range g.vertices {
-		out.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
-		out.adjacencyList[id] = make(map[string]map[string]struct{})
+		view.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
+		view.adjacencyList[id] = make(map[string]map[string]struct{})
 	}
 
 	// Snapshot the edge ID counter under the same lock as the edge catalog snapshot.
@@ -91,20 +95,20 @@ func UnweightedView(g *Graph) *Graph {
 	for eid, e = range g.edges {
 		// Force weight to zero regardless of the source weight; directedness and IDs are preserved.
 		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: viewEdgeWeightZero, Directed: e.Directed}
-		out.edges[eid] = ne
-		ensureAdjacency(out, ne.From, ne.To)
-		out.adjacencyList[ne.From][ne.To][eid] = struct{}{}
+		view.edges[eid] = ne
+		ensureAdjacency(view, ne.From, ne.To)
+		view.adjacencyList[ne.From][ne.To][eid] = struct{}{}
 
 		if !ne.Directed && ne.From != ne.To {
-			ensureAdjacency(out, ne.To, ne.From)
-			out.adjacencyList[ne.To][ne.From][eid] = struct{}{}
+			ensureAdjacency(view, ne.To, ne.From)
+			view.adjacencyList[ne.To][ne.From][eid] = struct{}{}
 		}
 	}
 
 	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
-	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)
+	atomic.StoreUint64(&view.nextEdgeID, srcNextEdgeID)
 
-	return out
+	return view
 }
 
 // InducedSubgraph creates a non-mutating induced subgraph containing only vertices selected by keep.
@@ -151,27 +155,28 @@ func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	// Reuse the same configuration as g (including weighted flag).
-	opts := []GraphOption{WithDirected(g.Directed())}
-	if g.Weighted() {
-		opts = append(opts, WithWeighted())
+	// Build the detached destination graph directly.
+	//
+	// InducedSubgraph derives graph policy from an already valid source graph and
+	// filters topology locally. This method must remain infallible and must not
+	// route through constructor-level public option validation.
+	sub := &Graph{
+		vertices:      make(map[string]*Vertex, len(g.vertices)),
+		edges:         make(map[string]*Edge),
+		adjacencyList: make(map[string]map[string]map[string]struct{}, len(g.vertices)),
+		directed:      g.directed,
+		weighted:      g.weighted,
+		allowMulti:    g.allowMulti,
+		allowLoops:    g.allowLoops,
+		allowMixed:    g.allowMixed,
+		nextEdgeID:    g.nextEdgeID,
 	}
-	if g.Multigraph() {
-		opts = append(opts, WithMultiEdges())
-	}
-	if g.Looped() {
-		opts = append(opts, WithLoops())
-	}
-	if g.MixedEdges() {
-		opts = append(opts, WithMixedEdges())
-	}
-	out := NewGraph(opts...)
 
 	// Copy kept vertices
 	for id, v := range g.vertices {
 		if keep[id] {
-			out.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
-			out.adjacencyList[id] = make(map[string]map[string]struct{})
+			sub.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
+			sub.adjacencyList[id] = make(map[string]map[string]struct{})
 		}
 	}
 
@@ -188,20 +193,20 @@ func InducedSubgraph(g *Graph, keep map[string]bool) *Graph {
 		}
 
 		ne = &Edge{ID: eid, From: e.From, To: e.To, Weight: e.Weight, Directed: e.Directed}
-		out.edges[eid] = ne
-		ensureAdjacency(out, ne.From, ne.To)
-		out.adjacencyList[ne.From][ne.To][eid] = struct{}{}
+		sub.edges[eid] = ne
+		ensureAdjacency(sub, ne.From, ne.To)
+		sub.adjacencyList[ne.From][ne.To][eid] = struct{}{}
 
 		if !ne.Directed && ne.From != ne.To {
-			if _, ok = out.adjacencyList[ne.To][ne.From]; !ok {
-				out.adjacencyList[ne.To][ne.From] = make(map[string]struct{})
+			if _, ok = sub.adjacencyList[ne.To][ne.From]; !ok {
+				sub.adjacencyList[ne.To][ne.From] = make(map[string]struct{})
 			}
-			out.adjacencyList[ne.To][ne.From][eid] = struct{}{}
+			sub.adjacencyList[ne.To][ne.From][eid] = struct{}{}
 		}
 	}
 
 	// Carry over the edge ID counter so future AddEdge() calls cannot collide with copied IDs.
-	atomic.StoreUint64(&out.nextEdgeID, srcNextEdgeID)
+	atomic.StoreUint64(&sub.nextEdgeID, srcNextEdgeID)
 
-	return out
+	return sub
 }

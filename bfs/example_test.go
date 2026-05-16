@@ -58,7 +58,7 @@ import (
 // AI-Hints:
 //   - If you need a different tie-break, enforce it at the graph layer (neighbor ordering / IDs).
 func ExampleBFS_IncidentRunbook() {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// Mesh edges (>= 12):
 	// pager -> api-gw -> auth -> user -> db
@@ -151,7 +151,7 @@ func ExampleBFS_IncidentRunbook() {
 // AI-Hints:
 //   - Prefer bfs.MaxDepthUnlimited for unlimited traversal; avoid magic -1.
 func ExampleBFS_BlastRadius() {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// Dependency fan-out from "auth" (>= 12 edges).
 	edges := [][2]string{
@@ -226,7 +226,7 @@ func ExampleBFS_BlastRadius() {
 // AI-Hints:
 //   - Use filters for policy simulation without mutating the graph.
 func ExampleBFS_PolicyFirewall() {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// IDs embed environment: prod:* and stg:*.
 	// Build >= 14 edges, including cross-env edges that must be blocked.
@@ -313,7 +313,7 @@ func ExampleBFS_PolicyFirewall() {
 // AI-Hints:
 //   - Never use WithTimeout in examples; cancel based on graph events instead.
 func ExampleBFS_CancellationPartial() {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	edges := [][2]string{
 		{"root", "a"},
@@ -397,7 +397,7 @@ func ExampleBFS_CancellationPartial() {
 //   - Components ≠ SCC; it is weak connectivity.
 //   - Under FullTraversal, Visited != reachable-from-StartID; PathTo enforces correctness.
 func ExampleComponents_DiscoveryAndForest() {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	// Component #1: A -> B -> C -> D
 	// Component #2: M -> N, and M -> O

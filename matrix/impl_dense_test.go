@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 // Package matrix_test contains unit tests for the Dense implementation
 // of the Matrix interface in the matrix package.
@@ -6,6 +7,7 @@ package matrix_test
 
 import (
 	"errors"
+	"fmt"
 	"math"
 	"strings"
 	"testing"
@@ -70,6 +72,38 @@ func TestNewDenseDefaultZero(t *testing.T) {
 			t.Fatalf("0x0: got (%d,%d), err=%v", m.Rows(), m.Cols(), err)
 		}
 	})
+}
+
+func TestNewDense_ZeroShapesAreValid(t *testing.T) {
+	t.Parallel()
+
+	cases := []struct {
+		rows int
+		cols int
+	}{
+		{0, 0},
+		{0, 3},
+		{3, 0},
+	}
+
+	for _, tc := range cases {
+		tc := tc
+		t.Run(fmt.Sprintf("%dx%d", tc.rows, tc.cols), func(t *testing.T) {
+			t.Parallel()
+
+			m, err := matrix.NewDense(tc.rows, tc.cols)
+			if err != nil {
+				t.Fatalf("NewDense(%d,%d): %v", tc.rows, tc.cols, err)
+			}
+			if m.Rows() != tc.rows || m.Cols() != tc.cols {
+				t.Fatalf("shape: got %dx%d, want %dx%d",
+					m.Rows(), m.Cols(), tc.rows, tc.cols)
+			}
+			if _, err = m.At(0, 0); !errors.Is(err, matrix.ErrOutOfRange) {
+				t.Fatalf("At(0,0): got %v, want ErrOutOfRange", err)
+			}
+		})
+	}
 }
 
 // TestRowsColsShape verifies that Rows/Cols/Shape return correct dimensions.

@@ -1,4 +1,5 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
 
 package matrix_test
 
@@ -519,6 +520,27 @@ func TestAllClose_Errors(t *testing.T) {
 	}
 	if _, err := matrix.AllClose(a, a, 1e-6, math.Inf(-1)); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("AllClose atol Inf: want ErrNaNInf, got %v", err)
+	}
+}
+
+func TestAllClose_ZeroShapeVacuouslyTrue(t *testing.T) {
+	t.Parallel()
+
+	a, err := matrix.NewDense(0, 3)
+	if err != nil {
+		t.Fatalf("NewDense a: %v", err)
+	}
+	b, err := matrix.NewDense(0, 3)
+	if err != nil {
+		t.Fatalf("NewDense b: %v", err)
+	}
+
+	ok, err := matrix.AllClose(a, b, 1e-9, 1e-9)
+	if err != nil {
+		t.Fatalf("AllClose: %v", err)
+	}
+	if !ok {
+		t.Fatal("zero-shape matrices with identical shape must be close")
 	}
 }
 

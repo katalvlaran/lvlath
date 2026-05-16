@@ -19,7 +19,7 @@ func TestTopologicalSort_NilGraph(t *testing.T) {
 }
 
 func TestTopologicalSort_UndirectedGraphUsesSentinel(t *testing.T) {
-	g := core.NewGraph()
+	g, _ := core.NewGraph()
 
 	order, err := dfs.TopologicalSort(g)
 
@@ -28,7 +28,7 @@ func TestTopologicalSort_UndirectedGraphUsesSentinel(t *testing.T) {
 }
 
 func TestTopologicalSortContext_NilContext(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	order, err := dfs.TopologicalSortContext(nil, g)
 
@@ -37,7 +37,7 @@ func TestTopologicalSortContext_NilContext(t *testing.T) {
 }
 
 func TestTopologicalSort_EmptyGraph(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	order, err := dfs.TopologicalSort(g)
 	mustNoError(t, err)
@@ -46,7 +46,7 @@ func TestTopologicalSort_EmptyGraph(t *testing.T) {
 }
 
 func TestTopologicalSort_NoEdgesDeterministicOrder(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	mustNoError(t, g.AddVertex("A"))
 	mustNoError(t, g.AddVertex("B"))
 	mustNoError(t, g.AddVertex("C"))
@@ -59,7 +59,7 @@ func TestTopologicalSort_NoEdgesDeterministicOrder(t *testing.T) {
 }
 
 func TestTopologicalSort_SimpleChain(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
@@ -70,7 +70,7 @@ func TestTopologicalSort_SimpleChain(t *testing.T) {
 }
 
 func TestTopologicalSort_BranchingDAGDeterministicOrder(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("A", "C", 0)
 
@@ -82,7 +82,7 @@ func TestTopologicalSort_BranchingDAGDeterministicOrder(t *testing.T) {
 }
 
 func TestTopologicalSort_DisconnectedGraphRespectsDependencies(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("X", "Y", 0)
 	_, _ = g.AddEdge("A", "B", 0)
 
@@ -97,7 +97,7 @@ func TestTopologicalSort_DisconnectedGraphRespectsDependencies(t *testing.T) {
 }
 
 func TestTopologicalSort_Cycle(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 	_, _ = g.AddEdge("C", "A", 0)
@@ -109,7 +109,7 @@ func TestTopologicalSort_Cycle(t *testing.T) {
 }
 
 func TestTopologicalSort_LargeLinearChain(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	vertices := []string{"A", "B", "C", "D", "E", "F", "G", "H", "I", "J", "K", "L"}
 
 	for index := 0; index < len(vertices)-1; index++ {
@@ -124,7 +124,7 @@ func TestTopologicalSort_LargeLinearChain(t *testing.T) {
 }
 
 func TestTopologicalSort_DisconnectedLargeRespectsDependencies(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	chainOne := []string{"1", "2", "3", "4", "5"}
 	for index := 0; index < len(chainOne)-1; index++ {
@@ -156,7 +156,7 @@ func TestTopologicalSort_DisconnectedLargeRespectsDependencies(t *testing.T) {
 }
 
 func TestTopologicalSort_ComplexDAGRespectsDependencies(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 
 	vertices := []string{
 		"V1", "V2", "V3", "V4", "V5", "V6",
@@ -193,7 +193,7 @@ func TestTopologicalSort_ComplexDAGRespectsDependencies(t *testing.T) {
 }
 
 func TestTopologicalSort_ContextCanceled(t *testing.T) {
-	g := core.NewGraph(core.WithDirected(true))
+	g, _ := core.NewGraph(core.WithDirected(true))
 	_, _ = g.AddEdge("A", "B", 0)
 	_, _ = g.AddEdge("B", "C", 0)
 
@@ -207,7 +207,7 @@ func TestTopologicalSort_ContextCanceled(t *testing.T) {
 }
 
 func TestTopologicalSort_MixedGraphIgnoresUndirectedEdges(t *testing.T) {
-	g := core.NewMixedGraph(core.WithDirected(true))
+	g, _ := core.NewMixedGraph(core.WithDirected(true))
 
 	_, _ = g.AddEdge("A", "B", 0, core.WithEdgeDirected(true))
 	_, _ = g.AddEdge("B", "D", 0, core.WithEdgeDirected(true))

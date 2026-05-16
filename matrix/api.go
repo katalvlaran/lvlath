@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package matrix - public API facades.
 //
 // Purpose:
@@ -116,18 +118,28 @@ func NewIdentity(n int, opts ...Option) (*Dense, error) {
 	}
 	// Set the diagonal deterministically in a single loop.
 	for i := 0; i < n; i++ { // fixed i order guarantees reproducibility
-		_ = I.Set(i, i, 1.0) // Set is bounds-safe; error is not expected after shape validation
+		if err = I.Set(i, i, 1.0); err != nil { // Set is bounds-safe; error is not expected after shape validation
+			return nil, matrixErrorf(opNewIdentity, err)
+		}
 	}
 
 	// Return the identity matrix.
 	return I, nil
 }
 
-// CloneMatrix returns a structural clone of m (same type if m is *Dense).
-// Thin wrapper over Matrix.Clone for API discoverability.
-// Complexity: O(r*c) copy for dense; implementation-defined otherwise.
+// CloneMatrix returns a structural clone of m.
+//
+// Behavior highlights:
+//   - nil input returns nil to keep this convenience helper panic-free.
+//   - Use ValidateNotNil in callers that need nil to be an error.
+//
+// Complexity:
+//   - O(r*c) for dense implementations.
 func CloneMatrix(m Matrix) Matrix {
-	// Delegate to polymorphic clone on the concrete implementation.
+	if m == nil {
+		return nil
+	}
+
 	return m.Clone()
 }
 
@@ -228,28 +240,79 @@ func QRDecompose(m Matrix) (Matrix, Matrix, error) { return QR(m) }
 // AI-Hints: For *Dense, the fast path uses a single in-slice triple loop.
 func APSPInPlace(m Matrix) error { return FloydWarshall(m) }
 
-// MetricClosure mutates am.Mat to all-pairs shortest-path distances (APSP).
-// Contract: am != nil; square; +Inf denotes "no path" off-diagonal; diagonal 0.
-// Deterministic: delegates to FloydWarshall on the underlying matrix.
+// MetricClosure mutates am.Mat into all-pairs shortest-path distances.
+//
+// Contract:
+//   - am must be a valid adjacency wrapper.
+//   - If am is already marked as metric-closure, the function is idempotent and
+//     only re-validates/runs FloydWarshall on the distance matrix.
+//   - Otherwise the stored adjacency encoding is converted to distance encoding:
+//     0-as-no-edge   => InitDistancesInPlace;
+//     +Inf-as-no-edge => normalize only the diagonal, preserving zero-weight edges.
+//
+// Behavior highlights:
+//   - Preserves P3 zero-weight-edge semantics.
+//   - Marks am.opts.metricClose=true after successful conversion.
+//   - ToGraph must refuse the result.
+//
+// Complexity:
+//   - O(n²) conversion + O(n³) Floyd–Warshall.
+//
+// AI-Hints:
+//   - Do not call FloydWarshall directly on raw 0/weight adjacency.
+//   - Do not use InitDistancesInPlace for +Inf-no-edge weighted adjacency; it would
+//     erase real zero-weight off-diagonal edges.
 func MetricClosure(am *AdjacencyMatrix) error {
-	// Guard nil pointer early with the package sentinel via centralized validation.
 	if err := ValidateGraphAdjacency(am); err != nil {
-		return matrixErrorf(opMetricClosure, err) // wrap with context
+		return matrixErrorf(opMetricClosure, err)
 	}
 
-	// Delegate to APSP kernel on the underlying matrix.
-	return FloydWarshall(am.Mat) // O(n^3), in-place
+	d, ok := am.Mat.(*Dense)
+	if !ok {
+		return matrixErrorf(opMetricClosure, ErrMatrixNotImplemented)
+	}
+
+	// If the wrapper is already a distance matrix, FloydWarshall is idempotent
+	// for valid APSP distances and still performs validation.
+	if !am.opts.metricClose {
+		if am.adjacencyUsesInfNoEdge() {
+			if err := normalizeInfNoEdgeDistanceDiagonal(d); err != nil {
+				return matrixErrorf(opMetricClosure, err)
+			}
+		} else {
+			if err := InitDistancesInPlace(d); err != nil {
+				return matrixErrorf(opMetricClosure, err)
+			}
+		}
+	}
+
+	if err := FloydWarshall(d); err != nil {
+		return matrixErrorf(opMetricClosure, err)
+	}
+
+	am.opts.metricClose = true
+	am.opts.allowInfDistances = true
+
+	return nil
 }
 
-// BuildMetricClosure constructs adjacency from g and then converts it to metric-closure
-// (Floyd–Warshall in-place). It marks the returned adjacency as metricClose=true
-// so ToGraph() refuses exporting distances as edges.
+// BuildMetricClosure constructs a metric-closure adjacency wrapper from g.
+//
+// Implementation:
+//   - Stage 1: force metric-closure distance policy in Options.
+//   - Stage 2: delegate to NewAdjacencyMatrix, whose builder performs adjacency
+//     construction, distance initialization, Floyd–Warshall, and negative-cycle detection.
+//   - Stage 3: persist policy flags on the wrapper for downstream ToGraph refusal.
+//
 // Notes:
 //   - Empty graphs are supported: the result is a valid 0×0 distance matrix.
+//   - Floyd–Warshall must run exactly once here; NewAdjacencyMatrix already does it
+//     because opts.metricClose=true.
 //
 // AI-Hints:
 //   - Use for TSP/DTW pipelines where you want pairwise shortest-path distances immediately.
 //   - Keep in mind the diagonal=0 and +Inf for unreachable pairs policy.
+//   - Do not call FloydWarshall again after NewAdjacencyMatrix in this function.
 func BuildMetricClosure(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 	// Stage 1: enforce distance-policy regardless of caller opts.
 	// This guarantees:
@@ -264,12 +327,7 @@ func BuildMetricClosure(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 		return nil, err
 	}
 
-	// Stage 3: run APSP in place on the underlying matrix.
-	if err = FloydWarshall(am.Mat); err != nil {
-		return nil, err
-	}
-
-	// Stage 4: persist policy flags on the wrapper for correct downstream behavior (ToGraph refusal).
+	// Stage 3: persist policy flags on the wrapper for correct downstream behavior (ToGraph refusal).
 	am.opts.metricClose = true
 	am.opts.allowInfDistances = true
 
@@ -314,7 +372,8 @@ func DegreeVector(am *AdjacencyMatrix) ([]float64, error) {
 // AI-Hints: Useful in spectral methods (PCA, Laplacians) to repair asymmetry drift.
 func Symmetrize(m Matrix) (Matrix, error) {
 	// Validate early to avoid nil-deref when reading sizes in downstream kernels
-	if err := ValidateNotNil(m); err != nil {
+	// Symmetrization is defined for square matrices only: (A + Aᵀ)/2 has the same shape as A iff A is square.
+	if err := ValidateSquare(m); err != nil {
 		return nil, matrixErrorf(opSymmetrize, err)
 	}
 	// Transpose first; kernel validates non-nil input.
@@ -388,17 +447,20 @@ func ColSums(m Matrix) ([]float64, error) {
 
 // ---------- Sanitization & numeric compare (thin wrappers → ew*) ----------
 
-// Clip returns a copy of m with elements clamped into [lo, hi] (both finite).
+// Clip returns a copy of m with elements clamped into [lo, hi].
 //
-//	out[i,j] = min(max(A[i,j], lo), hi).
+//	out[i,j] = min(max(A[i,j], lo), hi)
 //
-// Supports lo<=hi; both can be ±Inf. Deterministic. O(r*c).
+// Policy:
+//   - lo and hi must be finite.
+//   - If lo > hi, bounds are swapped by the kernel.
+//   - NaN/±Inf bounds are rejected.
+//
 // Time: O(r*c). Space: O(r*c). Deterministic.
 //
-// Policy: If lo > hi, bounds are swapped (normalized). NaN/Inf bounds are rejected.
 // AI-Hints:
-//   - helps enforce constraints (e.g., probabilities ∈ [0,1]) before normalization.
-//   - protects simulation pipelines (GBM/Monte-Carlo) from outliers.
+//   - Use ReplaceInfNaN before Clip when input data itself may contain non-finite values.
+//   - Use Clip to enforce constraints such as probabilities in [0,1].
 func Clip(m Matrix, lo, hi float64) (Matrix, error) {
 	// Delegate to the private element-wise kernel (centralizes the loop).
 	return ewClipRange(m, lo, hi) // errors are already wrapped with "Clip" tag inside
@@ -454,28 +516,58 @@ func CenterColumns(X Matrix) (Matrix, []float64, error) { return centerColumns(X
 // AI-Hints: useful for DTW/row shifts; for stochastic models, NormalizeRows* is better.
 func CenterRows(X Matrix) (Matrix, []float64, error) { return centerRows(X) }
 
-// NormalizeRowsL1 returns Y where each row i is scaled to L1-norm = 1 (if possible).
-// Degenerate rows (norm==0) remain zero. Also returns the norms per row.
-// Implementation: compute per-row L1 norms (fast-path for Dense), build scale factors 1/norm (or 0),
-// then ewScaleRows to produce Y.
-// Determinism: fixed i→j passes. O(r*c).
+// NormalizeRowsL1 returns Y where each row i is scaled to L1-norm 1 when possible.
+//
+// Degenerate rows:
+//   - If a row has exact L1 norm 0, it is left unchanged.
+//   - The returned norm for that row is 0.
+//
+// Zero-shape law:
+//   - 0×N and N×0 inputs are valid no-op transforms.
+//   - Returned norms length is Rows(X).
+//
+// Implementation:
+//   - compute per-row L1 norms;
+//   - convert norms to scale factors through the canonical rowNormScale policy;
+//   - apply ewScaleRows.
+//
 // Time: O(r*c). Space: O(r*c). Deterministic.
 //
 // AI-Hints: produce row-stochastic matrices for Markov chains.
 func NormalizeRowsL1(X Matrix) (Matrix, []float64, error) { return normalizeRowsL1(X) }
 
-// NormalizeRowsL2 scales each row to have L2-norm == 1 when possible; returns Y and per-row norms.
-// Degenerate rows (norm==0) remain zero rows by design.
-// Implementation: compute per-row L2 norms via √(Σ v^2); then ewScaleRows with 1/norm (or 0).
+// NormalizeRowsL2 returns Y where each row i is scaled to L2-norm 1 when possible.
+//
+// Degenerate rows:
+//   - If a row has exact L2 norm 0, it is left unchanged.
+//   - The returned norm for that row is 0.
+//
+// Zero-shape law:
+//   - 0×N and N×0 inputs are valid no-op transforms.
+//   - Returned norms length is Rows(X).
+//
+// Numeric safety:
+//   - Non-finite computed norms are rejected as ErrNaNInf instead of being treated
+//     as degenerate rows.
+//
 // Time: O(r*c). Space: O(r*c). Deterministic.
 //
 // AI-Hints: common for cosine similarity / spectral features.
 func NormalizeRowsL2(X Matrix) (Matrix, []float64, error) { return normalizeRowsL2(X) }
 
-// Covariance computes sample covariance of columns: Cov = (Xcᵀ Xc)/(n-1).
+// Covariance computes sample covariance of columns:
+//
+//	Cov = (Xcᵀ Xc)/(r-1)
+//
+// Zero-feature law:
+//   - If Cols(X)==0, returns a valid 0×0 covariance and empty means.
+//
+// Sample-size law:
+//   - If Cols(X)>0, Rows(X) must be >=2.
+//
 // Returns Cov and column means.
-// Determinism: compositions only; all loops fixed. O(r*c + c^2*min(r,c)).
-// Time: O(r*c + c^2) (via one Transpose + one Mul + one Scale). Space: O(r*c + c^2).
+//
+// Time: O(r*c + r*c²). Space: O(r*c + c²).
 //
 // Notes:
 //   - Requires r >= 2 to avoid division by zero; else ErrDimensionMismatch.
@@ -484,9 +576,18 @@ func Covariance(X Matrix) (Matrix, []float64, error) { return covariance(X) }
 
 // Correlation computes Pearson correlation of columns via z-scoring:
 //
-//	Z = (X - mean) / std,  std^2 = Σ (Xc)^2 / (n-1),  degenerate std==0 ⇒ column zeroed.
-//	Corr = (Zᵀ Z)/(n-1).
+//	Z = (X - mean) / std
+//	Corr = (Zᵀ Z)/(r-1)
 //
-// Returns Corr, means, stds.
-// Time: O(r*c + c^2). Space: O(r*c + c^2).
+// Zero-feature law:
+//   - If Cols(X)==0, returns valid 0×0 correlation and empty means/stds.
+//
+// Sample-size law:
+//   - If Cols(X)>0, Rows(X) must be >=2.
+//
+// Degenerate columns:
+//   - std==0 columns are mapped to zero columns in Z, producing zero correlation
+//     rows/columns for those features.
+//
+// Time: O(r*c + r*c²). Space: O(r*c + c²).
 func Correlation(X Matrix) (Matrix, []float64, []float64, error) { return correlation(X) }

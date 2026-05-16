@@ -57,36 +57,36 @@ func (g *Graph) CloneEmpty() *Graph {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	// 1. Copy configuration
-	opts := []GraphOption{WithDirected(g.directed)}
-	if g.weighted {
-		opts = append(opts, WithWeighted())
+	// Build the detached destination graph directly.
+	//
+	// CloneEmpty inherits graph policy from an already valid graph instance.
+	// It keeps the method infallible and avoids routing through constructor-level
+	// public option validation, which is not the contract of this API.
+	empty := &Graph{
+		vertices:      make(map[string]*Vertex, len(g.vertices)),
+		edges:         make(map[string]*Edge),
+		adjacencyList: make(map[string]map[string]map[string]struct{}, len(g.vertices)),
+		directed:      g.directed,
+		weighted:      g.weighted,
+		allowMulti:    g.allowMulti,
+		allowLoops:    g.allowLoops,
+		allowMixed:    g.allowMixed,
+		nextEdgeID:    g.nextEdgeID,
 	}
-	if g.allowMulti {
-		opts = append(opts, WithMultiEdges())
-	}
-	if g.allowLoops {
-		opts = append(opts, WithLoops())
-	}
-	if g.allowMixed {
-		opts = append(opts, WithMixedEdges())
-	}
-
-	clone := NewGraph(opts...)
 
 	// 2. Carry over nextEdgeID
-	atomic.StoreUint64(&clone.nextEdgeID, atomic.LoadUint64(&g.nextEdgeID))
+	atomic.StoreUint64(&empty.nextEdgeID, atomic.LoadUint64(&g.nextEdgeID))
 
 	// 3. Copy vertices (Shallow Copy of Metadata)
 	// ALIASING WARNING: Metadata map is shared between source and clone.
 	var id string
 	var v *Vertex
 	for id, v = range g.vertices {
-		clone.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
-		clone.adjacencyList[id] = make(map[string]map[string]struct{})
+		empty.vertices[id] = &Vertex{ID: v.ID, Metadata: v.Metadata}
+		empty.adjacencyList[id] = make(map[string]map[string]struct{})
 	}
 
-	return clone
+	return empty
 }
 
 // Clone returns a deep topology copy of the Graph: configuration, vertices, edges, and adjacency.
@@ -134,21 +134,22 @@ func (g *Graph) Clone() *Graph {
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	// 1. Setup new graph with same config
-	opts := []GraphOption{WithDirected(g.directed)}
-	if g.weighted {
-		opts = append(opts, WithWeighted())
+	// Build the detached destination graph directly.
+	//
+	// This method derives graph policy from an already valid in-memory graph, so it
+	// must remain an infallible clone operation and must not introduce constructor
+	// option parsing or an artificial error path.
+	clone := &Graph{
+		vertices:      make(map[string]*Vertex, len(g.vertices)),
+		edges:         make(map[string]*Edge, len(g.edges)),
+		adjacencyList: make(map[string]map[string]map[string]struct{}, len(g.adjacencyList)),
+		directed:      g.directed,
+		weighted:      g.weighted,
+		allowMulti:    g.allowMulti,
+		allowLoops:    g.allowLoops,
+		allowMixed:    g.allowMixed,
+		nextEdgeID:    g.nextEdgeID,
 	}
-	if g.allowMulti {
-		opts = append(opts, WithMultiEdges())
-	}
-	if g.allowLoops {
-		opts = append(opts, WithLoops())
-	}
-	if g.allowMixed {
-		opts = append(opts, WithMixedEdges())
-	}
-	clone := NewGraph(opts...)
 
 	// 2. Copy Vertices
 	// ALIASING WARNING: Metadata is shared.

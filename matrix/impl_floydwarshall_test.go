@@ -1,6 +1,7 @@
 package matrix_test
 
 import (
+	"errors"
 	"math"
 	"testing"
 
@@ -250,8 +251,9 @@ func TestFloydWarshall_Unreachable_Properties_And_Idempotent(t *testing.T) {
 }
 
 // Negative cycle sanity: if a negative cycle exists and is reachable from i,
-// Floyd–Warshall yields d[i,i] < 0. We check that the diagonals of the nodes from the cycle
-// become negative, while those of the isolated node remain zero.
+// Floyd-Warshall must classify the matrix as invalid by returning ErrNegativeCycle.
+// The matrix is mutated in-place before classification, so the negative diagonal
+// can still be inspected as a diagnostic witness.
 func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
 	t.Parallel()
 
@@ -267,23 +269,30 @@ func TestFloydWarshall_NegativeCycle_DiagonalNegative(t *testing.T) {
 	MustSet(t, G, 1, 2, -1)
 	MustSet(t, G, 2, 0, -1)
 
-	if err = matrix.FloydWarshall(G); err != nil {
-		t.Fatalf("matrix.FloydWarshall(G): %v", err)
+	err = matrix.FloydWarshall(G)
+	if !errors.Is(err, matrix.ErrNegativeCycle) {
+		t.Fatalf("FloydWarshall negative cycle: got %v, want ErrNegativeCycle", err)
 	}
 
-	// Nodes 0..2 are in negative cycle: diagonals < 0
-	var d float64
+	// Nodes 0..2 are in the negative cycle: diagonals should be negative
+	// after the in-place relaxation phase.
 	for i = 0; i < 3; i++ {
-		d, _ = G.At(i, i)
-		if d >= 0.0 {
+		d, atErr := G.At(i, i)
+		if atErr != nil {
+			t.Fatalf("At(%d,%d): %v", i, i, atErr)
+		}
+		if d >= 0 {
 			t.Fatalf("expected negative diagonal at node %d due to negative cycle; got %v", i, d)
 		}
 	}
 
-	// Node 3 is isolated: diagonal should remain 0
-	d, _ = G.At(3, 3)
-	if d != 0.0 {
-		t.Fatalf("isolated node must keep zero on the diagonal [3,3]=%v; want %v", d, 0.0)
+	// Node 3 is isolated and should keep zero diagonal.
+	d, atErr := G.At(3, 3)
+	if atErr != nil {
+		t.Fatalf("At(3,3): %v", atErr)
+	}
+	if d != 0 {
+		t.Fatalf("isolated node must keep zero diagonal [3,3]=%v; want 0", d)
 	}
 }
 
@@ -330,5 +339,72 @@ func TestInitDistancesInPlace_NegativeSelfLoopPreservesDiagonal(t *testing.T) {
 	}
 	if !math.IsInf(got01, 1) {
 		t.Fatalf("m[0,1]=%v; want +Inf (no-path sentinel must remain +Inf)", got01)
+	}
+}
+
+func TestFloydWarshall_ClosesPositiveInfNoPathDistance(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(3, 3, matrix.WithAllowInfDistances())
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	values := [][]float64{
+		{0, 2, math.Inf(+1)},
+		{math.Inf(+1), 0, 3},
+		{math.Inf(+1), math.Inf(+1), 0},
+	}
+
+	for i := range values {
+		for j := range values[i] {
+			if err = d.Set(i, j, values[i][j]); err != nil {
+				t.Fatalf("Set(%d,%d): %v", i, j, err)
+			}
+		}
+	}
+
+	if err = matrix.FloydWarshall(d); err != nil {
+		t.Fatalf("FloydWarshall: %v", err)
+	}
+
+	got, err := d.At(0, 2)
+	if err != nil {
+		t.Fatalf("At(0,2): %v", err)
+	}
+	if got != 5 {
+		t.Fatalf("distance[0,2]: got %v, want 5", got)
+	}
+}
+
+func TestFloydWarshall_RejectsNaNDespiteDisabledDenseValidation(t *testing.T) {
+	t.Parallel()
+
+	d, err := matrix.NewPreparedDense(
+		2,
+		2,
+		matrix.WithNoValidateNaNInf(),
+		matrix.WithAllowInfDistances(),
+	)
+	if err != nil {
+		t.Fatalf("NewPreparedDense: %v", err)
+	}
+
+	if err = d.Set(0, 0, 0); err != nil {
+		t.Fatalf("Set(0,0): %v", err)
+	}
+	if err = d.Set(0, 1, math.NaN()); err != nil {
+		t.Fatalf("Set(0,1,NaN): %v", err)
+	}
+	if err = d.Set(1, 0, 1); err != nil {
+		t.Fatalf("Set(1,0): %v", err)
+	}
+	if err = d.Set(1, 1, 0); err != nil {
+		t.Fatalf("Set(1,1): %v", err)
+	}
+
+	err = matrix.FloydWarshall(d)
+	if !errors.Is(err, matrix.ErrNaNInf) {
+		t.Fatalf("FloydWarshall(NaN): got %v, want ErrNaNInf", err)
 	}
 }

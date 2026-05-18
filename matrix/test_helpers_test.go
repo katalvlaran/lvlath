@@ -268,51 +268,6 @@ func NewFilledDense(t *testing.T, r, c int, vals []float64) *matrix.Dense {
 	return d
 }
 
-// NewFilledDenseRaw builds r×c *Dense from row-major vals with numeric validation disabled.
-//
-// Purpose:
-//   - Construct dirty numeric fixtures containing NaN/±Inf for sanitizer tests.
-//
-// Implementation:
-//   - Stage 1: Validate len(vals)==r*c.
-//   - Stage 2: Allocate Dense through NewPreparedDense(..., WithNoValidateNaNInf()).
-//   - Stage 3: Fill row-major data through Dense.Fill.
-//
-// Behavior highlights:
-//   - This intentionally disables Dense numeric validation for the fixture.
-//   - The resulting matrix may contain NaN/±Inf.
-//   - Use only for tests that explicitly verify sanitizer/validator behavior.
-//
-// Inputs:
-//   - r,c: shape.
-//   - vals: row-major values; may include NaN/±Inf.
-//
-// Returns:
-//   - *matrix.Dense.
-//
-// Errors:
-//   - Fatal if shape, allocation, option assembly, or Fill fails.
-//
-// AI-Hints:
-//   - Do not use this helper for ordinary algebra tests.
-//   - Prefer NewFilledDense for clean finite fixtures.
-func NewFilledDenseRaw(t *testing.T, r, c int, vals []float64) *matrix.Dense {
-	t.Helper()
-
-	if len(vals) != r*c {
-		t.Fatalf("NewFilledDenseRaw: want %d values, got %d", r*c, len(vals))
-	}
-
-	d, err := matrix.NewPreparedDense(r, c, matrix.WithNoValidateNaNInf())
-	if err != nil {
-		t.Fatalf("NewPreparedDense(%d,%d, WithNoValidateNaNInf): %v", r, c, err)
-	}
-
-	MustFillRowMajor(t, d, vals)
-
-	return d
-}
-
 // MustFillRowMajor fills matrix storage from a row-major slice through Fill.
 //
 // Important:
@@ -536,26 +491,6 @@ func CompareClose(t *testing.T, a, b matrix.Matrix, rtol, atol float64) {
 	}
 }
 
-// CompareSliceExact asserts exact equality of finite slice values.
-//
-// Purpose:
-//   - Useful for means/norms in small deterministic tests.
-//
-// Complexity:
-//   - O(n).
-func CompareSliceExact(t *testing.T, got, want []float64) {
-	t.Helper()
-
-	if len(got) != len(want) {
-		t.Fatalf("slice length: got %d, want %d", len(got), len(want))
-	}
-	for i := range got {
-		if got[i] != want[i] {
-			t.Fatalf("slice[%d]=%v; want %v", i, got[i], want[i])
-		}
-	}
-}
-
 // sliceClose ASSERTS |a[i]-b[i]| ≤ atol + rtol*|b[i]| element-wise.
 // Implementation:
 //   - Stage 1: Length check.
@@ -645,28 +580,6 @@ func AlmostEqualSlice(got, want []float64, delta float64) bool {
 	return true
 }
 
-// MustDims asserts matrix shape exactly.
-//
-// Purpose:
-//   - Keep zero-shape tests readable.
-//   - Avoid repeating Rows/Cols boilerplate.
-//
-// Errors:
-//   - Fatal test failure on nil matrix or shape mismatch.
-//
-// Complexity:
-//   - O(1).
-func MustDims(t *testing.T, m matrix.Matrix, rows, cols int) {
-	t.Helper()
-
-	if m == nil {
-		t.Fatalf("MustDims: nil matrix; want %dx%d", rows, cols)
-	}
-	if m.Rows() != rows || m.Cols() != cols {
-		t.Fatalf("shape: got %dx%d, want %dx%d", m.Rows(), m.Cols(), rows, cols)
-	}
-}
-
 // AssertErrorIs WRAPS errors.Is with consistent failure text.
 // Implementation:
 //   - Stage 1: if !errors.Is(err, target) → t.Fatalf.
@@ -699,97 +612,6 @@ func AssertErrorIs(t *testing.T, err, target error) {
 	if !errors.Is(err, target) {
 		t.Fatalf("want %v; got %v", target, err)
 	}
-}
-
-// ExpectPanic ASSERTS that fn() panics (any value).
-// Implementation:
-//   - Stage 1: defer recover().
-//   - Stage 2: t.Fatalf if recover()==nil.
-//
-// Behavior highlights:
-//   - Clear intent when guarding parameter panics.
-//
-// Inputs:
-//   - fn: closure expected to panic.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal test failure if no panic.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - O(1).
-//
-// Notes:
-//   - For typed panics, extend with predicate if/when needed.
-//
-// AI-Hints:
-//   - Use in options guards (WithEpsilon, WithEdgeThreshold).
-func ExpectPanic(t *testing.T, fn func()) {
-	t.Helper()
-	defer func() {
-		if recover() == nil {
-			t.Fatalf("expected panic, got nil")
-		}
-	}()
-	fn()
-}
-
-// ExpectPanicMessage asserts that fn panics with an exact string payload.
-// Implementation:
-//   - Stage 1: Defer recover() and assert panic occurred.
-//   - Stage 2: Assert recovered value is a string.
-//   - Stage 3: Assert recovered string equals want exactly.
-//
-// Behavior highlights:
-//   - Strong contract: exact match (no substrings) to keep panic messages stable.
-//
-// Inputs:
-//   - want: expected panic message (exact string).
-//   - fn: function expected to panic.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal test failure if:
-//   - no panic occurs,
-//   - panic payload is not a string,
-//   - message mismatch occurs.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - Use for option constructors that intentionally panic on programmer error.
-//
-// AI-Hints:
-//   - Prefer stable panic constants (no fmt.Sprintf) to keep this test reliable.
-func ExpectPanicMessage(t *testing.T, want string, fn func()) {
-	t.Helper()
-
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatalf("expected panic %q, got none", want)
-		}
-		got, ok := r.(string)
-		if !ok {
-			t.Fatalf("expected panic string %q, got %T (%v)", want, r, r)
-		}
-		if got != want {
-			t.Fatalf("panic mismatch: got %q, want %q", got, want)
-		}
-	}()
-
-	fn()
 }
 
 // InDelta reports whether got and want differ by at most delta.
@@ -827,101 +649,6 @@ func InDelta(t *testing.T, got, want, delta float64) bool {
 	// Standard absolute delta check.
 	return math.Abs(got-want) <= delta
 }
-
-// RowL1Norm RETURNS L1 norm of row i (Σ_j |m[i,j]|).
-// Implementation:
-//   - Stage 1: Iterate columns; abs accumulation.
-//
-// Behavior highlights:
-//   - Convenience routine for normalization tests.
-//
-// Inputs:
-//   - m: Matrix; i: row index.
-//
-// Returns:
-//   - float64 L1 norm.
-//
-// Errors:
-//   - Ignores At errors (safe in Dense tests). Convert to MustAt if needed.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(c), Space O(1).
-//
-// Notes:
-//   - For exported helper semantics you can use MustAt to be strict.
-//
-// AI-Hints:
-//   - Combine with NormalizeRowsL1 invariants.
-func RowL1Norm(t *testing.T, m matrix.Matrix, i int) float64 {
-	var j int
-	var s, v float64
-	for j = 0; j < m.Cols(); j++ {
-		v = MustAt(t, m, i, j)
-		if v < 0 {
-			v = -v
-		}
-		s += v
-	}
-
-	return s
-}
-
-// RowL2Norm RETURNS L2 norm of row i (sqrt(Σ_j m[i,j]^2)).
-// Implementation:
-//   - Stage 1: Iterate columns; sum of squares → sqrt.
-//
-// Behavior highlights:
-//   - Convenience routine for L2 normalization tests.
-//
-// Inputs:
-//   - m: Matrix; i: row index.
-//
-// Returns:
-//   - float64 L2 norm.
-//
-// Errors:
-//   - Ignores At errors; acceptable for local Dense tests.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(c), Space O(1).
-//
-// Notes:
-//   - Keep consistent with NormalizeRowsL2 expectations.
-//
-// AI-Hints:
-//   - Combine with InDelta for quick ≈1 checks.
-func RowL2Norm(t *testing.T, m matrix.Matrix, i int) float64 {
-	var j int
-	var s, v float64
-	for j = 0; j < m.Cols(); j++ {
-		v = MustAt(t, m, i, j)
-		s += v * v
-	}
-
-	return math.Sqrt(s)
-}
-
-/* !! Preparations of needed matrix checkers and helpers for the future, (self)TEST ONLY !!
-
-// IsSymmetricWithin checks |A[i,j]-A[j,i]| <= atol + rtol*|A[j,i]|
-func IsSymmetricWithin(t *testing.T, A matrix.Matrix, rtol, atol float64)
-
-// PSDProbe checks vᵀAv >= -eps for a few random v (cheap PSD sanity).
-func PSDProbe(t *testing.T, A matrix.Matrix, trials int, seed int64, eps float64)
-
-// Shape assertions
-func MustDims(t *testing.T, m matrix.Matrix, r, c int)
-
-// CompareWithMask compares only positions where mask[i*c+j] == true.
-func CompareWithMask(t *testing.T, want [][]float64, got matrix.Matrix, mask []bool)
-
-*/
 
 // ---------- bench helpers () ----------
 

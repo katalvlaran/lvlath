@@ -1,173 +1,337 @@
-// Package main - Ukraine Transportation Network example.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package main demonstrates lvlath/core graph construction over a predefined
+// Ukraine transportation dataset.
 //
-// Context & Motivation:
+// Scenario:
 //
-//	Before the recent conflicts, Ukraine’s road, rail, and air networks formed a
-//	critical backbone for commerce, travel, and cultural exchange.
-//	showcasing lvlath/core’s support for weighted, multi-edge, mixed-mode graphs.
-//	We keep 100% of the API calls intact - so the sample still compiles against lvlath/core,
-//	but we add granular commentary that answers five practical questions:
-//	  (1)  How are the graphs parameterised? - Flags such as WithWeighted, WithMixedEdges are now stated explicitly and commented.
-//	  (2)  Which networks flow into the final multi‑graph? - Road, Rail, Air.
-//	  (3)  What does each printed statistic illustrate? - We sign‑post every fmt.Printf with a short reason‑why.
-//	  (4)  What is the asymptotic cost? - Big‑O per operation in situ.
-//	  (5)  How would you extend it? - A final TODO block shows follow‑ups.
+//	A platform team wants one deterministic in-memory transportation graph that
 //
-// Graph Variants Built:
-//   - BuildUkraineRoads graph:
-//     92 vertices (cities), identified by English names with underscores.
-//     334 Undirected, weighted edges (distance in km), no loops, no multi-edges.
-//   - BuildFullUkraineGraph - multimodal (weighted, allow multi-edges, mixed directedness) 761 edges graph
+// can support both topology inspection and downstream shortest-path analysis.
 //
-// Demonstrated Operations & Complexity:
-//   - BuildUkraineRoads:     O(E_road) total (AddEdge O(1) amortized)
-//   - BuildFullUkraineGraph: O(E_total), WithMultiEdges, WithMixedEdges
-//   - HasEdge:               O(1)
-//   - EdgeCount/VertexCount: O(1)
-//   - Neighbors(v):          O(d·log d)
-//   - NeighborIDs(v):        O(d·log d)
-//   - CloneEmpty:            O(V)
-//   - FilterEdges + cleanup: O(E + V)
+//	The example builds a road-only graph, then a multimodal graph containing road,
+//	rail, and air links. It demonstrates graph size inspection, deterministic
+//	neighbor listing, empty topology cloning, policy filtering, and then delegates
+//	to the Dijkstra route-analysis scenario.
 //
-// Expected Output (approx):
+// Demonstrates:
+//   - Weighted road graph construction.
+//   - Weighted mixed multi-edge multimodal graph construction.
+//   - Deterministic neighborhood inspection through core.Graph.Neighbors.
+//   - CloneEmpty for preserving the vertex domain without edges.
+//   - FilterEdges for policy-style graph reduction in a copied/demo graph.
+//   - Safe handoff to the Dijkstra shortest-path scenario.
 //
-//		RoadGraph: vertices=92, edges=334
-//	 22 Neighbors of Kyiv(roads only):
-//	   Kaniv(125.4 km) Kremenchuk(297.1 km) Berdychiv(188.4 km) Lutsk(423.5 km) Lviv(537.7 km) Odesa(507.7 km) Poltava(348.8 km) Rivne(347.8 km) Sumy(351.3 km) Uman(219.1 km) Vinnytsia(229.4 km) Zhytomyr(154.2 km) Myrhorod(207.9 km) Nizhyn(129.0 km) Bila_Tserkva(88.3 km) Romny(195.0 km) Boryspil(34.6 km) Brovary(22.7 km) Bucha(27.8 km) Cherkasy(180.3 km) Chernihiv(147.5 km) Chernobyl(108.4 km)
-//	 CloneEmpty: vertices=92, edges=0
-//	 After filtering ≤300 km: edges=284
-//
-//	 FullGraph: vertices=92, edges=557
-//	 All 45 Neighbors of Kyiv in FullGraph:
-//	   Kaniv(125.4 km) Kremenchuk(297.1 km) Berdychiv(188.4 km) Lutsk(423.5 km) Lviv(537.7 km) Odesa(507.7 km) Poltava(348.8 km) Rivne(347.8 km) Sumy(351.3 km) Uman(219.1 km) Vinnytsia(229.4 km) Zhytomyr(154.2 km) Myrhorod(207.9 km) Nizhyn(129.0 km) Bila_Tserkva(88.3 km) Romny(195.0 km) Bucha(27.8 km) Cherkasy(180.3 km) Chernihiv(147.5 km) Chernobyl(158.0 km) Boryspil(34.6 km) Kaniv(125.4 km) Khmelnytskyi(318.9 km) Kropyvnytskyi(286.6 km) Bila_Tserkva(88.3 km) Boryspil(34.6 km) Brovary(22.7 km) Kharkiv(489.0 km) Lviv(569.0 km) Poltava(348.8 km) Rivne(347.8 km) Sumy(351.3 km) Vinnytsia(229.4 km) Zhytomyr(154.2 km) Brovary(22.7 km) Myrhorod(207.9 km) Nizhyn(129.0 km) Bucha(27.8 km) Dnipro(391.0 km) Kharkiv(409.0 km) Lviv(470.0 km) Odesa(441.0 km) Cherkasy(180.3 km) Chernihiv(147.5 km) Chernobyl(108.4 km)
-//	 CloneEmpty: vertices=92, edges=0
-//	 After filtering ≤300 km: edges=464
+// Notes:
+//   - The dataset in ukrainian_map_data.go is deterministic and bundled with
+//     this example package.
+//   - AddEdge errors are intentionally ignored only while loading this trusted
+//     static demo dataset. In production ingestion pipelines, always handle
+//     AddEdge errors explicitly and fail fast with useful context.
 package main
 
 import (
 	"fmt"
-	"log"
 
 	"github.com/katalvlaran/lvlath/core"
 )
 
 const (
-	// CAPITAL is the source city for neighbor listing.
-	CAPITAL = Kyiv // evaluated at link‑time from the dataset file
+	// CAPITAL is the central source city used by both topology and shortest-path examples.
+	CAPITAL = Kyiv
 
-	// MAX_KM sets the demo threshold for edge filtering.
-	MAX_KM = 300.0
+	// edgeAuditLimitKM is the maximum edge length retained by the filtering demonstration.
+	edgeAuditLimitKM = 300.0
+
+	// neighborPreviewLimit bounds terminal output while still proving deterministic ordering.
+	neighborPreviewLimit = 12
 )
 
-// WaySegment describes one weighted link between two cities.
+// WaySegment describes one weighted transportation link between two cities.
+//
+// Implementation:
+//   - Stage 1: Stores endpoint identifiers from the predefined city constants.
+//   - Stage 2: Stores the link length in kilometers.
+//
+// Behavior highlights:
+//   - This is a plain dataset carrier used by RoadNetwork, RailwayNetwork, and AirNetwork.
+//   - Direction is not stored here; graph insertion policy decides whether a segment is directed.
+//
+// Inputs:
+//   - From: source city identifier.
+//   - To: destination city identifier.
+//   - KM: link length in kilometers.
+//
+// Returns:
+//   - N/A.
+//
+// Errors:
+//   - N/A.
+//
+// Determinism:
+//   - Deterministic when dataset slices are iterated in their declared order.
+//
+// Complexity:
+//   - Field access is O(1).
+//
+// Notes:
+//   - Air routes are inserted as directed edges in BuildFullUkraineGraph.
+//   - Road and rail routes are inserted with the graph default, which is undirected.
+//
+// AI-Hints:
+//   - Do not attach graph-mode semantics to this struct; graph construction owns that policy.
 type WaySegment struct {
-	From, To string  // source and destination cityIDs
-	KM       float64 // length in kilometers
+	From string
+	To   string
+	KM   float64
 }
 
-func _main() {
-	// 1. Build undirected, weighted graph
-	roadG := BuildUkraineRoads()
-	fmt.Printf("\nRoadGraph: vertices=%d, edges=%d", roadG.VertexCount(), roadG.EdgeCount())
+// main runs the Ukraine transportation topology scenario and then delegates to
+// the Dijkstra shortest-path scenario.
+//
+// Implementation:
+//   - Stage 1: Build and inspect the road-only graph.
+//   - Stage 2: Demonstrate CloneEmpty and FilterEdges on road topology.
+//   - Stage 3: Build and inspect the multimodal graph.
+//   - Stage 4: Demonstrate CloneEmpty and FilterEdges on multimodal topology.
+//   - Stage 5: Pass a fresh multimodal graph into the Dijkstra scenario.
+//
+// Behavior highlights:
+//   - Keeps graph construction deterministic.
+//   - Uses bounded neighbor previews to keep example output readable.
+//   - Avoids mutating the graph that is passed into the Dijkstra scenario.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - This example uses a trusted static dataset; AddEdge errors are ignored only
+//     inside the dataset-loading builders.
+//   - Neighbor lookup errors are printed and terminate the scenario early.
+//
+// Determinism:
+//   - Stable for the same dataset and core.Graph ordering contract.
+//
+// Complexity:
+//   - Road graph construction is O(|RoadNetwork|).
+//   - Full graph construction is O(|RoadNetwork| + |RailwayNetwork| + |AirNetwork|).
+//   - Neighbors(CAPITAL) is governed by the core.Graph.Neighbors complexity.
+//   - FilterEdges is O(E + cleanup cost) over the graph being filtered.
+//
+// Notes:
+//   - Filtering is shown on demo graph instances; do not filter the graph you
+//     intend to reuse for the Dijkstra scenario unless that mutation is desired.
+//
+// AI-Hints:
+//   - Keep this example focused on core topology operations.
+//   - Route analysis belongs in dijkstra_map_operations.go.
+func main() {
+	fmt.Println("Ukraine transportation topology audit")
+	fmt.Println("-------------------------------------")
 
-	// 1.2. List immediate highway neighbors of Kyiv
-	edges, err := roadG.Neighbors(CAPITAL)
-	fmt.Printf("\n%d Neighbors of %s(roads only):\n", len(edges), CAPITAL)
+	roadGraph := BuildUkraineRoads()
+	fmt.Printf("RoadGraph: vertices=%d edges=%d\n", roadGraph.VertexCount(), roadGraph.EdgeCount())
+
+	roadNeighbors, err := roadGraph.Neighbors(CAPITAL)
 	if err != nil {
-		log.Fatalf("error fetching neighbors of %s: %v", CAPITAL, err)
+		fmt.Printf("error: neighbors(%s): %v\n", CAPITAL, err)
+		return
 	}
-	for _, e := range edges {
-		// For undirected edges we check which end is CAPITAL
-		// undirected neighbors list city and distance
-		other := e.To
-		if other == CAPITAL {
-			other = e.From
+
+	fmt.Printf("Road neighbors of %s: total=%d preview=%d\n", CAPITAL, len(roadNeighbors), minInt(len(roadNeighbors), neighborPreviewLimit))
+	for index, edge := range roadNeighbors {
+		if index >= neighborPreviewLimit {
+			break
 		}
-		fmt.Printf("  %s (%.1f km)\n", other, e.Weight)
-	}
-	// 1.3. CloneEmpty: same vertices, zero edges
-	ce := roadG.CloneEmpty()
-	fmt.Printf("CloneEmpty: vertices=%d, edges=%d\n", ce.VertexCount(), ce.EdgeCount())
-	// Expect edges=0 because CloneEmpty preserves only vertices.
 
-	// 1.4. Filter: keep only segments ≤ MAX_KM
-	roadG.FilterEdges(func(e *core.Edge) bool {
-		return e.Weight <= MAX_KM
-	})
-	fmt.Printf("After filtering ≤%.0f km: edges=%d\n", MAX_KM, roadG.EdgeCount())
-
-	// 2. Multimodal full graph with multi-edges
-	fullG := BuildFullUkraineGraph()
-	fmt.Printf("\nFullGraph: vertices=%d, edges=%d", fullG.VertexCount(), fullG.EdgeCount())
-
-	// 2.2. Neighbors of Kyiv in full graph
-	edges, _ = fullG.Neighbors(CAPITAL)
-	fmt.Printf("\nAll %d Neighbors of %s in FullGraph:\n", len(edges), CAPITAL)
-	for _, e := range edges {
-		// undirected neighbors list city and distance
-		other := e.To
-		if other == CAPITAL {
-			other = e.From
+		otherEndpoint := edge.To
+		if otherEndpoint == CAPITAL {
+			otherEndpoint = edge.From
 		}
-		fmt.Printf("  %s (%.1f km)\n", other, e.Weight)
+
+		fmt.Printf("  %02d. %-20s %.1f km\n", index+1, otherEndpoint, edge.Weight)
 	}
 
-	// 2.3. CloneEmpty demonstration
-	clone := fullG.CloneEmpty()
-	fmt.Printf("CloneEmpty: vertices=%d, edges=%d\n", clone.VertexCount(), clone.EdgeCount())
+	emptyRoadDomain := roadGraph.CloneEmpty()
+	fmt.Printf("Road CloneEmpty: vertices=%d edges=%d\n", emptyRoadDomain.VertexCount(), emptyRoadDomain.EdgeCount())
 
-	// 2.4. Filter out long links > MAX_KM
-	fullG.FilterEdges(func(e *core.Edge) bool {
-		return e.Weight <= MAX_KM
+	roadAuditGraph := BuildUkraineRoads()
+	roadAuditGraph.FilterEdges(func(edge *core.Edge) bool {
+		return edge.Weight <= edgeAuditLimitKM
 	})
-	fmt.Printf("After filtering ≤%.0f km: edges=%d\n", MAX_KM, fullG.EdgeCount())
+	fmt.Printf("RoadGraph after keeping links <= %.0f km: edges=%d\n", edgeAuditLimitKM, roadAuditGraph.EdgeCount())
 
-	// ------------------------------------------------
-	// TODO - Suggested follow‑ups for curious readers
-	// ------------------------------------------------
-	// • Shortest‑path demo (Dijkstra) between any two hubs.
-	// • Connected‑components per transport mode.
-	// • Edge‑betweenness centrality to find critical corridors.
-	// • Visual export (GeoJSON) for GIS tools.
+	fullGraphForAudit := BuildFullUkraineGraph()
+	fmt.Printf("\nFullGraph: vertices=%d edges=%d\n", fullGraphForAudit.VertexCount(), fullGraphForAudit.EdgeCount())
+
+	fullNeighbors, err := fullGraphForAudit.Neighbors(CAPITAL)
+	if err != nil {
+		fmt.Printf("error: neighbors(%s): %v\n", CAPITAL, err)
+		return
+	}
+
+	fmt.Printf("FullGraph neighbors of %s: total=%d preview=%d\n", CAPITAL, len(fullNeighbors), minInt(len(fullNeighbors), neighborPreviewLimit))
+	for index, edge := range fullNeighbors {
+		if index >= neighborPreviewLimit {
+			break
+		}
+
+		otherEndpoint := edge.To
+		if otherEndpoint == CAPITAL {
+			otherEndpoint = edge.From
+		}
+
+		fmt.Printf("  %02d. %-20s %.1f km\n", index+1, otherEndpoint, edge.Weight)
+	}
+
+	emptyFullDomain := fullGraphForAudit.CloneEmpty()
+	fmt.Printf("FullGraph CloneEmpty: vertices=%d edges=%d\n", emptyFullDomain.VertexCount(), emptyFullDomain.EdgeCount())
+
+	fullAuditGraph := BuildFullUkraineGraph()
+	fullAuditGraph.FilterEdges(func(edge *core.Edge) bool {
+		return edge.Weight <= edgeAuditLimitKM
+	})
+	fmt.Printf("FullGraph after keeping links <= %.0f km: edges=%d\n", edgeAuditLimitKM, fullAuditGraph.EdgeCount())
+
+	fmt.Println()
+	runDijkstraMapOperations(BuildFullUkraineGraph())
 }
 
-// BuildUkraineRoads constructs the road network graph.
-// Complexity: O(E).
+// BuildUkraineRoads constructs the road-only Ukraine graph.
+//
+// Implementation:
+//   - Stage 1: Create a weighted graph with the default undirected edge policy.
+//   - Stage 2: Insert every predefined road segment from RoadNetwork.
+//   - Stage 3: Return the constructed graph.
+//
+// Behavior highlights:
+//   - Roads are modeled as undirected weighted links.
+//   - Vertices are created implicitly by AddEdge.
+//   - The trusted static dataset is expected to satisfy the graph policy.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - *core.Graph: weighted road graph.
+//
+// Errors:
+//   - AddEdge errors are intentionally ignored only for this trusted static example dataset.
+//
+// Determinism:
+//   - Deterministic for the same RoadNetwork slice order and core.Graph insertion semantics.
+//
+// Complexity:
+//   - Time O(|RoadNetwork|), excluding graph internal ordering costs.
+//   - Space O(V_road + E_road).
+//
+// Notes:
+//   - Production data loaders must validate every AddEdge error.
+//
+// AI-Hints:
+//   - Do not copy this ignored-error ingestion pattern into untrusted data pipelines.
 func BuildUkraineRoads() *core.Graph {
-	g := core.NewGraph(core.WithWeighted()) // weighted graph
-	// Undirected by default: edges will be mirrored automatically.
-	for _, seg := range RoadNetwork {
-		// AddEdge stores weight as int64 km, auto-adds vertices.
-		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
-			log.Fatalf("AddEdge %s→%s failed: %v", seg.From, seg.To, err)
-		}
+	graph, _ := core.NewGraph(core.WithWeighted())
+
+	for _, segment := range RoadNetwork {
+		_, _ = graph.AddEdge(segment.From, segment.To, segment.KM)
 	}
-	return g
+
+	return graph
 }
 
-// BuildFullUkraineGraph combines roads and rails into a single multimodal network.
-// Enables multi-edges so that a city pair with both road+rail is captured.
-// Complexity: O(|RoadNetwork| + |RailwayNetwork| + |AirNetwork|).
+// BuildFullUkraineGraph constructs the multimodal Ukraine transportation graph.
+//
+// Implementation:
+//   - Stage 1: Create a weighted graph with mixed-edge and multi-edge support.
+//   - Stage 2: Insert road segments as undirected links.
+//   - Stage 3: Insert rail segments as undirected parallel-capable links.
+//   - Stage 4: Insert air segments as directed links.
+//
+// Behavior highlights:
+//   - Multi-edge support preserves distinct transport links between the same city pair.
+//   - Mixed-edge support allows directed air corridors alongside undirected ground links.
+//   - The graph remains a single route-analysis domain for downstream algorithms.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - *core.Graph: weighted multimodal graph.
+//
+// Errors:
+//   - AddEdge errors are intentionally ignored only for this trusted static example dataset.
+//
+// Determinism:
+//   - Deterministic for the same dataset slice order and core.Graph insertion semantics.
+//
+// Complexity:
+//   - Time O(|RoadNetwork| + |RailwayNetwork| + |AirNetwork|), excluding graph internal ordering costs.
+//   - Space O(V_total + E_total).
+//
+// Notes:
+//   - Real ingestion should record the mode as metadata or a parallel domain table
+//     if callers need mode-specific route explanation.
+//
+// AI-Hints:
+//   - WithMixedEdges is required because air links are inserted as directed while
+//     road and rail links remain undirected.
 func BuildFullUkraineGraph() *core.Graph {
-	g := core.NewGraph(core.WithWeighted(), core.WithMixedEdges(), core.WithMultiEdges())
-	var seg WaySegment
-	// add roads as 337 undirected edges
-	for _, seg = range RoadNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
-			log.Fatalf("buildFullGraph roads: %v", err)
-		}
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges(), core.WithMultiEdges())
+
+	for _, segment := range RoadNetwork {
+		_, _ = graph.AddEdge(segment.From, segment.To, segment.KM)
 	}
-	// add rails as 200 parallel edges
-	for _, seg = range RailwayNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, seg.KM); err != nil {
-			log.Fatalf("buildFullGraph rails: %v", err)
-		}
+
+	for _, segment := range RailwayNetwork {
+		_, _ = graph.AddEdge(segment.From, segment.To, segment.KM)
 	}
-	// add air as 37 directed edges
-	for _, seg = range AirNetwork {
-		if _, err := g.AddEdge(seg.From, seg.To, seg.KM, core.WithEdgeDirected(true)); err != nil {
-			log.Fatalf("buildFullGraph rails: %v", err)
-		}
+
+	for _, segment := range AirNetwork {
+		_, _ = graph.AddEdge(segment.From, segment.To, segment.KM, core.WithEdgeDirected(true))
 	}
-	return g
+
+	return graph
+}
+
+// minInt returns the smaller of two integers.
+//
+// Implementation:
+//   - Stage 1: Compare both values directly.
+//   - Stage 2: Return the smaller value.
+//
+// Behavior highlights:
+//   - Used only to keep example output bounded and readable.
+//
+// Inputs:
+//   - left: first integer.
+//   - right: second integer.
+//
+// Returns:
+//   - int: smaller input value.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This helper is intentionally tiny but prevents repeated inline conditional output logic.
+//
+// AI-Hints:
+//   - Keep preview bounds explicit in examples that inspect large deterministic datasets.
+func minInt(left, right int) int {
+	if left < right {
+		return left
+	}
+
+	return right
 }

@@ -7,7 +7,7 @@
 ### 6.1.1. What Is an MST?
 A **Minimum Spanning Tree (MST)** of a connected, undirected, weighted graph **G = (V, E, w)** is a subset of edges
 
-$$\[T \subseteq E\]$$
+$$[T \subseteq E]$$
 
 such that:
 
@@ -15,7 +15,7 @@ such that:
 2. **Tree**: It contains no cycles, and thus has exactly $$(|V| - 1)$$ edges.
 3. **Minimum Weight**: It minimizes the total weight
 
-   $$\[\sum_{e \in T} w(e) \quad\text{is minimal}.\]$$
+   $$\sum_{e \in T} w(e) \quad\text{is minimal}.$$
 
 ### 6.1.2. Why MST?
 - **Network Design**: Lay cables, roads, or pipelines with minimal cost.
@@ -41,14 +41,14 @@ Two canonical greedy patterns:
 
 ## 6.2. Mathematical Formulation
 
-Let $$\(G = (V, E)\)$$ be a graph with weight function $$\(w: E \to \mathbb{R}_{+}\)$$ . A spanning tree `T` satisfies:
+Let $$G = (V, E)$$ be a graph with weight function $$w: E \to \mathbb{R}_{+}$$ . A spanning tree `T` satisfies:
 
-1. $$\(|T| = |V| - 1\)$$ .
+1. $$|T| = |V| - 1$$ .
 2. $$(V, T)$$ is connected.
 
 The MST problem is:
 
-$$\[ \min_{T \subseteq E} \; \sum_{e \in T} w(e) \quad \text{s.t.} \quad T \text{ connects all vertices and } |T| = |V| - 1. \]$$
+$$ \min_{T \subseteq E} \; \sum_{e \in T} w(e) \quad \text{s.t.} \quad T \text{ connects all vertices and } |T| = |V| - 1. $$
 
 ### Key Properties
 
@@ -82,6 +82,7 @@ To build intuition for both Prim’s and Kruskal’s algorithms, consider the fo
 ```
 - **Vertices**:  A, B, C, D, E, F, G, H
 - **Edges (u–v : weight)**:
+
   | Edge  | Weight |  
   |:-----:|:------:|
   |  A–B  |   3    |
@@ -124,7 +125,7 @@ Kruskal’s method builds an MST by **globally** considering edges in ascending 
 
 **Key Features**
 
-- **Global Greedy Selection**: Sorts all `(E)` edges once $$(O(E log E))$$.
+- **Global Greedy Selection**: Sorts all `(E)` edges once $$O(E log E)$$.
 - **Cycle Avoidance**: Uses Union-Find with **path compression** and **union by rank** to test/component merge in $$O(\alpha(V))$$ per operation.
 - **Deterministic**: Stable sort on edges (by ID tie‑breaker) → reproducible MST even when weights tie.
 
@@ -135,7 +136,7 @@ Kruskal’s method builds an MST by **globally** considering edges in ascending 
 
 **Time & Space Complexity**
 
-- **Time**: $$(O(E \times \log E + E \cdot \alpha(V)) \approx O(E \log V))$$.
+- **Time**: $$O(E \times \log E + E \cdot \alpha(V)) \approx O(E \log V)$$.
 - **Space**: $$O(V + E)$$.
 
 ---
@@ -195,7 +196,7 @@ Recall the example graph from **6.3.0** with vertices `{A…H}` and edge weights
 
 #### Highlights & Insights
 
-- **Early Exit**: Stops once $$(|V|-1)$$ edges are chosen.
+- **Early Exit**: Stops once $$|V|-1$$ edges are chosen.
 - **Tie‑Breaking**: Stable sort + edge ID order → predictable when weights tie.
 - **Union-Find Efficiency**: Path compression + union by rank keeps each `Find` ≈ amortized $$O(1)$$.
 
@@ -215,10 +216,10 @@ import (
 
 func main() {
 	// Construct the graph from section 6.3.0
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	for _, e := range []struct {
 		u, v string
-		w    int64
+		w    float64
 	}{
 		{"A", "B", 3}, {"D", "E", 3}, {"A", "C", 4}, {"B", "D", 4},
 		{"C", "E", 4}, {"E", "G", 4}, {"B", "C", 5}, {"B", "E", 5},
@@ -281,9 +282,9 @@ if graph == nil || graph.Directed() || !graph.Weighted() || graph.HasDirectedEdg
 2. **Pre‑Sort Vertices/Edges**: Rely on `core.Graph` methods that return sorted lists for determinism.
 3. **Edge Filtering**: Remove self‑loops and skip edges connecting already‑united components immediately.
 4. **Error Semantics**: Use sentinel errors (`ErrInvalidGraph`, `ErrEmptyRoot`, `ErrDisconnected`) to clearly communicate failure modes.
-5. **Testing**: Cover boundary cases $$(\(|V|=0\)$$, $$\(|V|=1\)$$, disconnected components, multi‑edges, mixed‑mode).
+5. **Testing**: Cover boundary cases $$|V|=0$$, $$|V|=1$$, disconnected components, multi‑edges, mixed‑mode).
 6. **Documentation**: Embed complexity, proof sketches (cut/cycle properties), and usage examples in GoDoc for end‑users.
 
 ---
 
-> Next: [7. Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic →](MAX_FLOW.md)
+> Next: [7. Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic →](FLOW.md)

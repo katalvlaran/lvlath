@@ -8,7 +8,7 @@ Dynamic Time Warping (DTW) is a powerful algorithm for measuring similarity betw
 
 ### What
 DTW computes an **alignment cost** and an **optimal warping path** between two sequences  
-$$\(\mathbf{a} = [a_1, a_2, \dots, a_n]\)$$ and $$\(\mathbf{b} = [b_1, b_2, \dots, b_m]\)$$ ,  
+$$\mathbf{a} = [a_1, a_2, \dots, a_n]$$ and $$\mathbf{b} = [b_1, b_2, \dots, b_m]$$ ,  
 allowing local expansions or contractions in time.
 
 ### Why
@@ -27,9 +27,9 @@ Use DTW when your two sequences:
 ## 8.2 Key Concepts & Mathematical Formulation
 
 ### 8.2.1 Cost Matrix
-Define a matrix $$\(D\in\mathbb{R}^{(n+1)\times(m+1)}\)$$ where
-- $$\(D_{i,j}\)$$ is the minimal cumulative cost to align prefixes $$\(a_{1..i}\)$$ and $$\(b_{1..j}\)$$.
-- We index from 0 with boundary conditions at $$\(i=0\)$$ or $$\(j=0\)$$.
+Define a matrix $$D\in\mathbb{R}^{(n+1)\times(m+1)}$$ where
+- $$D_{i,j}$$ is the minimal cumulative cost to align prefixes $$a_{1..i}$$ and $$b_{1..j}$$.
+- We index from 0 with boundary conditions at $$i=0$$ or $$j=0$$.
 
 ### 8.2.2 Recurrence Relation
 
@@ -41,22 +41,22 @@ Define a matrix $$\(D\in\mathbb{R}^{(n+1)\times(m+1)}\)$$ where
 ```
 
 where
-- $$\(\lvert a_i - b_j\rvert\)$$ is the absolute difference (or any other distance metric from `core/`).
-- $$\(p\ge0\)$$ is the **slope penalty** controlling the cost of insertions/deletions.
+- $$\lvert a_i - b_j\rvert$$ is the absolute difference (or any other distance metric from `core/`).
+- $$p\ge0$$ is the **slope penalty** controlling the cost of insertions/deletions.
 
 ### 8.2.3 Window Constraint (Sakoe-Chiba)
-To enforce locality and reduce computation, only compute $$\(D_{i,j}\)$$ when  
-$$\[ \lvert i - j\rvert \le w, \]$$
-for a user-supplied radius $$\(w\)$$. Outside the band, set $$\(D_{i,j}=+\infty\)$$ .
+To enforce locality and reduce computation, only compute $$D_{i,j}$$ when  
+$$ \lvert i - j\rvert \le w, $$
+for a user-supplied radius $$(w)$$. Outside the band, set $$D_{i,j}=+\infty$$ .
 
 ### 8.2.4 Memory Modes
 - **FullMatrix**  
-  Store the entire $$\((n+1)\times(m+1)\)$$ matrix in `matrix.Dense` for both distance and backtracking (path recovery).  
-  $$\(\displaystyle\mathcal{O}(n\,m)\)$$ time and space.
+  Store the entire $$(n+1)\times(m+1)$$ matrix in `matrix.Dense` for both distance and backtracking (path recovery).  
+  $$\displaystyle\mathcal{O}(n\,m)$$ time and space.
 
 - **TwoRows** (Rolling Array)  
   Keep only two rows in memory (`[]float64`): current and previous. Supports distance only.  
-  $$\(\displaystyle\mathcal{O}(n\,m)\)$$ time, $$\(\mathcal{O}(\min(n,m))\)$$ space.
+  $$\displaystyle\mathcal{O}(n\,m)$$ time, $$\mathcal{O}(\min(n,m))$$ space.
 
 - **NoMemory**  
   Single value update (no backtracking), same time as TwoRows but constant extra memory.
@@ -71,7 +71,7 @@ This section walks through the architecture and step‑by‑step mechanics of th
 
 At its heart, DTW computes the minimal cumulative cost to warp and align two sequences `A = [a_1, ..., a_n]` and `B = [b_1, ..., b_m]`.  Instead of enforcing a one‑to‑one index match, DTW:
 
-1. Builds a **cost matrix** $$\(D\)$$ of size $$\((n+1) \times (m+1)\)$$ , where
+1. Builds a **cost matrix** $$(D)$$ of size $$(n+1) \times (m+1)$$ , where
    
 $$D_{i,j} = \min \begin{cases}
    D_{i-1, j-1} + \lvert a_i - b_j \rvert, & \text{match (diagonal)} \\\
@@ -79,25 +79,25 @@ $$D_{i,j} = \min \begin{cases}
    D_{i, j-1} + p, & \text{deletion  (horizontal)} \\\
 \end{cases}$$
 
-   and $$\(p\)$$ is the **slope penalty** controlling the cost of skips.
+   and $$p$$ is the **slope penalty** controlling the cost of skips.
 
-2. Optionally applies the **Sakoe-Chiba window** $$\(w\)$$ to restrict $$\(|i-j| \le w\)$$, improving locality and reducing computation.
+2. Optionally applies the **Sakoe-Chiba window** $$w$$ to restrict $$|i-j| \le w$$, improving locality and reducing computation.
 
-3. Fills the matrix by dynamic programming in $$\(O(n\,m)\)$$ time and either:
-    - **Stores only two rows** (rolling array) for distance-only $$(\(O(\min(n,m))\)$$ memory).
-    - **Stores full matrix** for path recovery $$(\(O(n\,m)\)$$ memory).
+3. Fills the matrix by dynamic programming in $$O(n\,m)$$ time and either:
+    - **Stores only two rows** (rolling array) for distance-only $$(O(\min(n,m))$$ memory).
+    - **Stores full matrix** for path recovery $$(O(n\,m)$$ memory).
 
-4. (If requested) **Backtracks** from $$\((n,m)\)$$ to $$\((0,0)\)$$, reversing moves that achieve the minimal cost to recover the optimal alignment path.
+4. (If requested) **Backtracks** from $$(n,m)$$ to $$(0,0)$$, reversing moves that achieve the minimal cost to recover the optimal alignment path.
 
 ### 8.3.2 Features
 
-- **Window Constraint** (Sakoe-Chiba): $$\(\lvert i - j \rvert \le w\)$$ accelerates computation and prevents pathological warps.
-- **Slope Penalty**: weight $$\(p\)$$ penalizes excessive insertions/deletions, trading off flexibility vs. smoothness.
+- **Window Constraint** (Sakoe-Chiba): $$\lvert i - j \rvert \le w$$ accelerates computation and prevents pathological warps.
+- **Slope Penalty**: weight $$p$$ penalizes excessive insertions/deletions, trading off flexibility vs. smoothness.
 - **Memory Modes**:
     - **FullMatrix**: recover alignment path.
     - **TwoRows**:
     - **NoMemory**: compute distance only, minimal memory.
-- **Flexible Cost**: any local distance metric (e.g. Euclidean, Manhattan) can replace $$\(\lvert a_i - b_j \rvert\)$$ .
+- **Flexible Cost**: any local distance metric (e.g. Euclidean, Manhattan) can replace $$\lvert a_i - b_j \rvert$$ .
 
 ### 8.3.3 Improvements and Advantages
 
@@ -139,9 +139,9 @@ function DTW(A[1..n], B[1..m], window w, penalty p):
   return distance
 ```
 
-> **Time Complexity**: $$\(O(n \times m)\)$$ - every cell is visited once.
+> **Time Complexity**: $$O(n \times m)$$ - every cell is visited once.
 >
-> **Memory Complexity**: $$\(O(n \times m)\)$$ for full matrix, or $$\(O(\min(n,m))\)$$ for rolling array.
+> **Memory Complexity**: $$O(n \times m)$$ for full matrix, or $$O(\min(n,m))$$ for rolling array.
 
 ### 8.3.5 Highlights
 
@@ -206,10 +206,10 @@ func main() {
    Rolling (TwoRows/NoMemory) modes **cannot** recover a warping path. If you call `DTW(..., ReturnPath=true)` without `MemoryMode=FullMatrix`, you will get `ErrPathNeedsMatrix`.
 
 2. **Inf Cost if Window Too Narrow**  
-   A small window $$\(w\)$$ may exclude any valid alignment, resulting in $$\(D_{n,m}=+\infty\)$$ . Always ensure $$\(w\ge|n-m|\)$$ if full alignment is required.
+   A small window $$w$$ may exclude any valid alignment, resulting in $$D_{n,m}=+\infty$$ . Always ensure $$w\ge|n-m|$$ if full alignment is required.
 
 3. **Improper Penalty Tuning**
-    - A zero penalty $$\(p=0\)$$ allows free skipping but may over-warp (collapse long segments).
+    - A zero penalty $$p=0$$ allows free skipping but may over-warp (collapse long segments).
     - A large penalty discourages skips but may force poor matches along the diagonal.
 
 4. **Unnormalized Data**  
@@ -222,15 +222,15 @@ func main() {
     - Use **TwoRows** for large sequences when only the distance matters.
 
 - **Window Recommendation**
-    - Start with a generous $$\(w=\max(n,m)\)$$ (i.e. no constraint) to verify basic alignment.
-    - Then tighten $$\(w\)$$ to reduce noise and runtime.
+    - Start with a generous $$w=\max(n,m)$$ (i.e. no constraint) to verify basic alignment.
+    - Then tighten $$(w)$$ to reduce noise and runtime.
 
 - **Penalty Strategy**
-    - A small fractional penalty (e.g. $$\(p=0.1\))$$ often balances flexibility and stability.
+    - A small fractional penalty (e.g. $$(p=0.1)$$ often balances flexibility and stability.
     - Experiment with your domain data.
 
 - **Leverage Subpackages**
-    - Use `core.Distance` implementations to swap out $$\(\lvert a_i - b_j\rvert\)$$ for Euclidean, squared, or custom metrics.
+    - Use `core.Distance` implementations to swap out $$\lvert a_i - b_j\rvert$$ for Euclidean, squared, or custom metrics.
     - Use `matrix.Dense` for heavy-duty full-matrix operations and backtracking.
 
 - **Batch & Parallelize**  

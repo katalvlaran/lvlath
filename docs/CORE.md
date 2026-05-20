@@ -430,7 +430,7 @@ func main() {
 
 This section details how to leverage `core` for high-load systems.
 
-### 🛡️ 1. The ID Correlation Pattern
+### ️ 1. The ID Correlation Pattern
 **Use `WithID` for Distributed Tracing.**
 While auto-IDs (`e1`, `e2`) are great for simple tests, distributed systems should enforce their own UUIDs to correlate graph edges with database rows.
 ```go
@@ -439,20 +439,20 @@ g.AddEdge("UserA", "ProductB", 0, core.WithID("uuid-550e-8400..."))
 ```
 *Benefit:* `Clone()` and `Views` preserve these IDs, allowing you to map results back to your DB seamlessly.
 
-### 🚀 2. The View-Propagation Strategy
+### 2. The View-Propagation Strategy
 **Zero-Copy Logic via Views.**
 If you need to run a standard algorithm (like BFS) on a weighted graph, do not manually strip weights. Use `core.UnweightedView(g)`.
 *   **Why?** It acts as an $O(V+E)$ copy, but it guarantees safety.
 *   **Bonus:** The `nextEdgeID` counter is carried over. If you add *new* edges to the View, they will strictly follow the sequence of the original graph (`e100` -> `e101`), preventing collision confusion during debugging.
 
-### ⚠️ 3. The Metadata Ownership Model
+### 3. The Metadata Ownership Model
 **Aliasing Awareness.**
 `Vertex.Metadata` is a `map`. `Clone()` performs a shallow copy of the map pointer.
 *   **The Power:** Extremely fast cloning. Memory efficient.
 *   **The Risk:** Modifying metadata in a clone affects the original.
 *   **The Fix:** If you need transactional isolation on metadata, treat the map inside `Vertex` as **Immutable**. Replace the whole map pointer if you need to update data, rather than mutating keys inside.
 
-### ⚡ 4. Avoiding the $O(E)$ Trap
+### 4. Avoiding the $O(E)$ Trap
 **Degree vs. Neighbors.**
 *   **Don't:** Call `Degree(v)` inside a hot loop (like checking termination conditions in a simulation). It scans all edges.
 *   **Do:** Use `len(Neighbors(v))` if you only care about outgoing connections (in directed graphs). It is $O(d)$.

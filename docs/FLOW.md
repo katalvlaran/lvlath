@@ -183,7 +183,7 @@ import (
 
 func main() {
    // 1. Build graph
-    g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+    g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
     // Complex 8‑vertex example
     g.AddEdge("s", "a", 5)
     g.AddEdge("s", "c", 15)
@@ -307,9 +307,9 @@ import (
 func main() {
      // 1. Build graph
     ctx := context.Background()
-    g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+    g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
     // Build 19-edge network
-    edges := []struct{U,V string;C int64}{
+    edges := []struct{U,V string;C float64}{
         {"S","A",5}, {"S","B",7}, {"S","C",15},
         {"A","D",8}, {"A","E",3}, 
         {"B","E",6}, 
@@ -457,8 +457,8 @@ import (
 
 func main() {
    // 1. Build graph
-   g := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-   edges := []struct {u, v string; c int64}{
+   g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+   edges := []struct {u, v string; c float64}{
       {"S", "A", 5}, {"S", "B", 7}, {"S", "C", 15},
       {"A", "D", 9}, {"A", "E", 3},
       {"B", "E", 2},

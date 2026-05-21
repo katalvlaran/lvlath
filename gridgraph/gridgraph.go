@@ -79,7 +79,7 @@ func (gg *GridGraph) vertexID(x, y int) string {
 // Edges of unit weight (1) connect neighboring cells according to gg.Conn.
 // Complexity: O(W×H×d + E) time, Memory: O(W×H + E).
 func (gg *GridGraph) ToCoreGraph() *core.Graph {
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	// Add all vertices
 	for y := 0; y < gg.Height; y++ {
 		for x := 0; x < gg.Width; x++ {

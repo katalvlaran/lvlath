@@ -81,7 +81,10 @@ func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 	}
 
 	// Build matrix options from graph flags + dispatcher policy; «single source of truth».
-	mopts = matrix.NewMatrixOptions(optsList...)
+	mopts, err := matrix.NewMatrixOptions(optsList...)
+	if err != nil {
+		return TSResult{}, err
+	}
 
 	am, err := matrix.NewAdjacencyMatrix(g, mopts)
 	if err != nil {

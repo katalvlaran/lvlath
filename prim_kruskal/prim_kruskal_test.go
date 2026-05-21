@@ -17,7 +17,7 @@ import (
 // This graph’s MST consists of edges A—B and B—C with total weight 3.
 func buildTriangle() *core.Graph {
 	// Create a new weighted, undirected graph.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	// Add edges: A<->B(1), B<->C(2), A<->C(3).
 	_, _ = g.AddEdge("A", "B", 1)
 	_, _ = g.AddEdge("B", "C", 2)
@@ -32,7 +32,7 @@ func buildTriangle() *core.Graph {
 // The random number generator is seeded deterministically for reproducibility.
 func buildMediumGraph(n, edgesCount int) *core.Graph {
 	// Create a new weighted, undirected graph.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 
 	// 1. Add n vertices named "V0", "V1", ..., "V(n-1)".
 	for i := 0; i < n; i++ {
@@ -76,7 +76,7 @@ func buildMediumGraph(n, edgesCount int) *core.Graph {
 // when the graph has no vertices (empty) or when it’s impossible to form a spanning tree.
 func TestValidation_EmptyOrDisconnected(t *testing.T) {
 	// Create an empty weighted graph (no vertices, no edges).
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 
 	// Prim: with root "A" on an empty graph should return ErrDisconnected and empty MST.
 	edgesP, totalP, errP := prim_kruskal.Prim(g, "A")
@@ -94,7 +94,7 @@ func TestValidation_EmptyOrDisconnected(t *testing.T) {
 // TestValidation_UnweightedOrDirected verifies that both algorithms reject unweighted or directed graphs.
 func TestValidation_UnweightedOrDirected(t *testing.T) {
 	// 1. Unweighted graph: By default NewGraph() is unweighted and undirected.
-	gUnweighted := core.NewGraph()
+	gUnweighted, _ := core.NewGraph()
 
 	// Kruskal on unweighted should error ErrInvalidGraph (requires weighted).
 	_, _, errK1 := prim_kruskal.Kruskal(gUnweighted)
@@ -105,7 +105,7 @@ func TestValidation_UnweightedOrDirected(t *testing.T) {
 	assert.ErrorIs(t, errP1, prim_kruskal.ErrInvalidGraph)
 
 	// 2. Directed but weighted graph: Create graph with both directed and weighted flags.
-	gDirected := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	gDirected, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
 
 	// Kruskal should error ErrInvalidGraph when graph.Directed() == true.
 	_, _, errK2 := prim_kruskal.Kruskal(gDirected)
@@ -179,7 +179,7 @@ func TestKruskal_Triangle(t *testing.T) {
 // - Prim should return an empty MST with no error, provided root matches that vertex.
 func TestSingleVertexGraph(t *testing.T) {
 	// Create a graph with one vertex "X".
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	_ = g.AddVertex("X")
 
 	// Kruskal on single-vertex graph: no error, empty MST, total weight = 0.
@@ -199,7 +199,7 @@ func TestSingleVertexGraph(t *testing.T) {
 // returns ErrDisconnected from both Prim and Kruskal.
 func TestTwoIsolatedVertices(t *testing.T) {
 	// Create a graph with two vertices "A" and "B", but no edge between them.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	_ = g.AddVertex("A")
 	_ = g.AddVertex("B")
 
@@ -216,7 +216,7 @@ func TestTwoIsolatedVertices(t *testing.T) {
 // both Prim and Kruskal pick the lighter edge in the MST.
 func TestParallelEdgesSelection(t *testing.T) {
 	// Create a graph that allows multi-edges and is weighted.
-	g := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMultiEdges())
 
 	// Add two parallel edges between A and B: one with weight 5, one with weight 1.
 	_, err1 := g.AddEdge("A", "B", 5)
@@ -242,7 +242,7 @@ func TestParallelEdgesSelection(t *testing.T) {
 // because MST requires a purely undirected graph.
 func TestMixedEdgesFlagIgnored(t *testing.T) {
 	// Create a graph that allows mixed edges (per-edge directed overrides) and is weighted.
-	g := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
+	g, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 
 	// Add a directed edge override: A->B with weight 1.
 	_, err := g.AddEdge("A", "B", 1, core.WithEdgeDirected(true))

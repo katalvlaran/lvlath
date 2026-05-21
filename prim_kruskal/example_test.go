@@ -12,7 +12,7 @@ import (
 // Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/cWR3GQU2luz)
 func ExampleKruskal_triangle() {
 	// 1. Construct a new weighted, undirected graph.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	// 2. Add edges to form the triangle:
 	_, _ = g.AddEdge("A", "B", 1) // A—B with weight 1
 	_, _ = g.AddEdge("B", "C", 2) // B—C with weight 2
@@ -43,7 +43,7 @@ func ExampleKruskal_triangle() {
 // Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/2P5c7LC2Ac-)
 func ExamplePrim_Pentagon() {
 	// Construct triangle graph: A–B(1), B–C(2), C–D(3), D–E(5), A–E(12)
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	_, _ = g.AddEdge("A", "B", 1)
 	_, _ = g.AddEdge("A", "E", 12)
 	_, _ = g.AddEdge("B", "C", 2)
@@ -77,7 +77,7 @@ func ExamplePrim_Pentagon() {
 // Playground: [![Playground - Kruskal_medium](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/aDggwYQ8H4Q)
 func ExampleKruskal_MediumGraph() {
 	// Medium graph: A–B(4), A–C(1), C–B(2), B–D(3), C–D(5), D–A(4)
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	_, _ = g.AddEdge("A", "B", 4)
 	_, _ = g.AddEdge("A", "C", 1)
 	_, _ = g.AddEdge("C", "B", 2)
@@ -112,7 +112,7 @@ func ExampleKruskal_MediumGraph() {
 // Playground: [![Playground - Prim_large](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/EwPJLIM1y31)
 func ExamplePrim_LargeGraph() {
 	// 1. Construct a new weighted, undirected graph.
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 
 	// 2. Add all vertices one by one.
 	_ = g.AddVertex("A")
@@ -155,7 +155,7 @@ func ExamplePrim_LargeGraph() {
 }
 
 func ExamplePrim_ErrDisconnected() {
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	// Attempt to run Prim with root "A" on an empty graph.
 	_, _, err := prim_kruskal.Prim(g, "A")
 	fmt.Println(err)
@@ -163,7 +163,7 @@ func ExamplePrim_ErrDisconnected() {
 }
 
 func ExampleKruskal_ErrDisconnected() {
-	g := core.NewGraph(core.WithWeighted())
+	g, _ := core.NewGraph(core.WithWeighted())
 	// Attempt to run Kruskal on an empty graph.
 	_, _, err := prim_kruskal.Kruskal(g)
 	fmt.Println(err)

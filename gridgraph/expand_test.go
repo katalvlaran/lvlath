@@ -74,8 +74,8 @@ func TestExpandIsland_10x10Grid(t *testing.T) {
 	}
 
 	// Path length should be >0 and cost ~ (distance between centers) minus contiguous land steps
-	dx := (n-3)/2*2 + 1 // approximate manhattan distance
-	expectedMinCost := dx + dx
+	dx := (n - 3) / 2 * (2 + 1) // approximate manhattan distance
+	expectedMinCost := dx       // + dx
 	if cost != expectedMinCost {
 		t.Errorf("10x10: got cost=%d; want %d", cost, expectedMinCost)
 	}

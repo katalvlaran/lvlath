@@ -92,11 +92,11 @@ A one-page BFS snippet can work in a blog post but still fail in production when
 
 ### What makes lvlath different?
 
-1. **Deterministic graph surface** — stable `Vertices`, `Edges`, and `Neighbors` are the root of reproducible algorithms.
-2. **Explicit options** — directedness, weights, loops, multi-edges, matrix policies, path tracking, thresholds, and memory modes are not hidden defaults.
-3. **Result artifacts** — algorithm outputs are meaningful objects, not temporary implementation debris.
-4. **Mathematical semantics preserved in Go** — `+Inf` means unreachable/absence only under explicit policies; DFS order means finish order; BFS depth means hop distance.
-5. **Documentation split by responsibility** — package `doc.go` explains what is implemented; `docs/{PACKAGE}.md` teaches the math, diagrams, proofs, pitfalls, and examples.
+1. **Deterministic graph surface** - stable `Vertices`, `Edges`, and `Neighbors` are the root of reproducible algorithms.
+2. **Explicit options** - directedness, weights, loops, multi-edges, matrix policies, path tracking, thresholds, and memory modes are not hidden defaults.
+3. **Result artifacts** - algorithm outputs are meaningful objects, not temporary implementation debris.
+4. **Mathematical semantics preserved in Go** - `+Inf` means unreachable/absence only under explicit policies; DFS order means finish order; BFS depth means hop distance.
+5. **Documentation split by responsibility** - package `doc.go` explains what is implemented; `docs/{PACKAGE}.md` teaches the math, diagrams, proofs, pitfalls, and examples.
 
 ---
 
@@ -824,7 +824,7 @@ Use this tutorial as the entry point, then move into package-specific material:
 
 > If you are contributing:
 > 
->   [`lvlath_UES.md`](lvlath_UES.md) -> [`CONTRIBUTING.md`](CONTRIBUTING.md) -> package doc.go -> tests/examples
+>   [`lvlath_UES.md`](lvlath_UES.md) -> [`CONTRIBUTING.md`](../CONTRIBUTING.md) -> package doc.go -> tests/examples
 
 ---
 

@@ -179,7 +179,7 @@ Options implement a last-writer-wins functional assembly. Invalid explicit optio
 ## 4.5. Algorithmic Architecture
 
 ### 4.5.1. DFS Runtime Model (`dfsWalker`)
-The `dfsWalker` maintains the traversal state strictly isolated from the option structs. It parses per-edge semantics using `neighborFromEdge`—this means in mixed-edge graphs, directed edges flow one way, while undirected edges behave bidirectionally, interpreted locally per-edge.
+The `dfsWalker` maintains the traversal state strictly isolated from the option structs. It parses per-edge semantics using `neighborFromEdge`-this means in mixed-edge graphs, directed edges flow one way, while undirected edges behave bidirectionally, interpreted locally per-edge.
 
 ### 4.5.2. Cycle Detector Runtime Model (`cycleDetector`)
 It employs the classic 3-color vertex state:

@@ -2,46 +2,9 @@ package core_test
 
 import (
 	"fmt"
-	"sort"
 	"strings"
 
 	"github.com/katalvlaran/lvlath/core"
-)
-
-// Utility: sortAsc returns a sorted copy of a string slice (IDs).
-func sortAsc(ids []string) []string {
-	out := append([]string(nil), ids...)
-	sort.Strings(out)
-	return out
-}
-
-// Global constants for numeric values and output tags.
-const (
-	// Generic numeric constants (to avoid magic numbers)
-	constZeroFloat = 0.0
-	constOneFloat  = 1.0
-	constHalfFloat = 0.5
-
-	// Eigen computation controls (Jacobi).
-	constEigenTol     = 1e-10
-	constEigenMaxIter = 200
-
-	// Cascading-failure topology size (toy, but contract-heavy).
-	cascadingClusterSize = 3
-
-	// Betweenness topology size (toy, but interpretable by closed-form load).
-	betweennessClusterSize = 4
-
-	// Output tag labels for examples
-	outR               = "R"
-	outBridgeEdge      = "bridgeEdge"
-	outBridgeLoad      = "bridgeLoad"
-	outDeg2_0          = "deg[2][0]"
-	outDeg2_1          = "deg[2][1]"
-	outDeg2_2          = "deg[2][2]"
-	outLambda2_0       = "lambda2[0]"
-	outLambda2_1       = "lambda2[1]"
-	outBridgeEndpoints = "A0-B0"
 )
 
 // ExampleGraph_CascadingFailures demonstrates a cascading failure scenario in a power grid network.
@@ -372,7 +335,7 @@ func ExampleGraph_BetweennessCentrality() {
 // It starts with a sparse, weighted graph (few connections),
 // then adds a new neuron (vertex) with new connections, and finally removes an existing connection.
 // The degree of a particular neuron is tracked through these modifications to illustrate network plasticity.
-// CONTEXT: "Synapse-X" — The Structural Learning Engine
+// CONTEXT: "Synapse-X" - The Structural Learning Engine
 //   - In traditional neural networks, "learning" is merely updating weights in a static matrix.
 //     In Project Synapse-X, we simulate biological neuroplasticity where the graph itself
 //     is a living organism. When associations weaken, synapses are physically destroyed (Pruning)
@@ -484,153 +447,3 @@ func ExampleGraph_NeuralEvolution() {
 	// deg[2][1]=2
 	// deg[2][2]=1
 }
-
-/*
-
-// ExampleGraph_SpectralAnalysis represents the "Singularity Protocol" (Quantum-Grid 2026). This is the most advanced
-// demonstration of the library, merging topological integrity from 'core' with spectral power from 'matrix'.
-// It's Performs spectral analysis on a quantum graph structure (algebraic connectivity via the Laplacian).
-// It computes the second-smallest eigenvalue (λ₂) of the graph Laplacian (known as the Fiedler value) before and after
-// the removal of a vertex. Removing a critical vertex demonstrates the drop in algebraic connectivity.
-// SCENARIO:
-//   - You are overseeing a high-stakes Quantum Entanglement Network. In this realm,
-//     a binary "connected/disconnected" status is a post-mortem; you need PREDICTION.
-//     The Second-Smallest Eigenvalue of the Laplacian (λ₂), also known as the "Fiedler Value"
-//     or "Algebraic Connectivity," acts as the system's heartbeat.
-//
-// CRITICALITY:
-//   - λ₂ > 0: The network is globally connected.
-//   - λ₂ → 0: The system is approaching a "Spectral Gap" collapse (a catastrophic bottleneck).
-//   - λ₂ = 0: The network has partitioned into isolated islands, causing mission failure.
-//
-// MATHEMATICAL ENGINE:
-//  1. Topology: 'core' provides the "Ground Truth" via deterministic vertex ordering.
-//  2. Adjacency (A): Derived from core.AdjacentVertices, ensuring no phantom connections.
-//  3. Degree (D): A diagonal matrix where D[i,i] = core.Degree(v_i).
-//  4. Laplacian (L): L = D - A. This operator encodes the entire diffusion profile of the grid.
-//  5. Solving: matrix.EigenSym extracts the spectrum, where λ₂ quantifies structural robustness.
-//
-// WHY 'CORE' IS MAXIMIZED:
-//   - Determinism: core.Vertices() ensures the matrix indices (i, j) match the physical nodes 1:1.
-//   - Atomic Collapse: core.RemoveVertex(X) instantly prunes all incident edges,
-//     allowing a 'matrix.BuildAdjacency' call to reflect the new reality without noise.
-//
-// Implementation:
-//   - Stage 1: Construct a connected graph (two fully connected subgraphs joined by a single intermediate vertex).
-//   - Stage 2: Build the Laplacian matrix of the graph and compute its eigenvalues (Jacobi eigen-decomposition).
-//   - Stage 3: Remove the intermediate vertex (simulating a "quantum" disconnection) and recompute the Laplacian eigenvalues.
-//   - Stage 4: Compare λ₂ before and after removal to observe the change in connectivity.
-//
-// Behavior highlights:
-//   - The second-smallest eigenvalue λ₂ is > 0 for a connected graph and drops to 0 when the graph becomes disconnected (after removing the vital vertex).
-//   - The example uses the matrix sub-package to construct matrices and compute eigenvalues.
-//
-// Inputs:
-//   - None (graph structure is deterministic).
-//
-// Returns:
-//   - None (prints λ₂ before and after vertex removal).
-//
-// Errors:
-//   - Any unexpected error is printed and the example returns early.
-//
-// Complexity:
-//   - Building the Laplacian: O(V + E). Eigen decomposition (Jacobi): O(n³) for an n×n matrix (n = number of vertices).
-func ExampleGraph_SpectralAnalysis() {
-	// --- PHASE 1: TOPOLOGY CONSTRUCTION ---
-	// We build two robust "cliques" (Districts) connected by a single critical Hub (Vertex X).
-	g := core.NewGraph(core.WithWeighted(), core.WithDirected(false))
-
-	nodes := []string{"A", "B", "C", "D", "E", "F", "X"}
-	for _, n := range nodes {
-		_ = g.AddVertex(n) // Simplified for the example context
-	}
-
-	// District 1 (Dense Cluster)
-	edges := [][2]string{{"A", "B"}, {"B", "C"}, {"C", "A"}}
-	// District 2 (Dense Cluster)
-	edges = append(edges, [][2]string{{"D", "E"}, {"E", "F"}, {"F", "D"}}...)
-	// The Critical "Suez" Bridge
-	edges = append(edges, [][2]string{{"X", "A"}, {"X", "D"}}...)
-
-	for i, e := range edges {
-		_, _ = g.AddEdge(e[0], e[1], float64(i))
-	}
-
-	// --- PHASE 2: THE SPECTRAL ENGINE ---
-	// This closure encapsulates the transformation from Topology to Energy Spectrum.
-	computeFiedlerValue := func(target *core.Graph) (float64, error) {
-		// 2.1: Extract Adjacency with multi-edge prevention policy.
-		var mOpts matrix.Options
-		matrix.WithDisallowMulti()(&mOpts)
-
-		adj, err := matrix.BuildAdjacency(target, mOpts)
-		if err != nil {
-			return 0, err
-		}
-
-		// 2.2: Construct Laplacian L = D - A.
-		// D (Degree Matrix) is diagonal; A is the Adjacency.
-		n, _ := adj.VertexCount()
-		L, _ := matrix.NewZeros(n, n)
-		deg, _ := matrix.DegreeVector(adj)
-
-		for i := 0; i < n; i++ {
-			for j := 0; j < n; j++ {
-				if i == j {
-					// Diagonal: Degree of the vertex
-					_ = L.Set(i, j, deg[i])
-				} else {
-					// Off-diagonal: Negative adjacency
-					val, _ := adj.Mat.At(i, j)
-					_ = L.Set(i, j, -val)
-				}
-			}
-		}
-
-		// 2.3: Solve Eigen-problem using Symmetric Jacobi decomposition.
-		// Precision and stability are key for near-zero eigenvalues.
-		eigenvals, _, err := matrix.EigenSym(L, constEigenTol, constEigenMaxIter)
-		if err != nil {
-			return 0, err
-		}
-
-		sort.Float64s(eigenvals)
-		if len(eigenvals) < 2 {
-			return 0, fmt.Errorf("insufficient nodes for spectral analysis")
-		}
-
-		return eigenvals[1], nil // Return λ₂ (Fiedler Value)
-	}
-
-	// --- PHASE 3: INITIAL OBSERVATION (Stable State) ---
-	fiedlerBefore, err := computeFiedlerValue(g)
-	if err != nil {
-		fmt.Printf("Analysis failed: %v\n", err)
-		return
-	}
-
-	// --- PHASE 4: CATASTROPHIC COLLAPSE (The Event) ---
-	// Simulating the measurement collapse of Qubit X or the destruction of Hub X.
-	// core.RemoveVertex is an O(1) op that cleans up all associated incident edges.
-	_ = g.RemoveVertex("X")
-
-	// --- PHASE 5: POST-COLLAPSE DIAGNOSIS ---
-	fiedlerAfter, err := computeFiedlerValue(g)
-	if err != nil {
-		fmt.Printf("Post-collapse analysis failed: %v\n", err)
-		return
-	}
-
-	// RESULTS:
-	// λ₂[0] > 0 signifies a "brittle but connected" system.
-	// λ₂[1] ≈ 0 signals a complete loss of algebraic connectivity (System Partitioned).
-	fmt.Printf("%s=%.4f\n", outLambda2_0, fiedlerBefore)
-	fmt.Printf("%s=%.4f\n", outLambda2_1, fiedlerAfter)
-
-	// Output:
-	// lambda2[0]=0.2679
-	// lambda2[1]=0.0000
-}
-
-*/

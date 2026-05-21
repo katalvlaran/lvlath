@@ -115,7 +115,7 @@ func main() {
 * **Use Held-Karp** only for n ≤ 20; memory explodes otherwise.
 * **Precompute** full distance matrix for O(1) lookups.
 * **Christofides requires** graph to satisfy the triangle inequality. Otherwise, approximation guarantee breaks.
-* **Edge cases:** identical cities, zero-weight loops—filter or handle gracefully.
+* **Edge cases:** identical cities, zero-weight loops-filter or handle gracefully.
 * **Parallelize** independent DP subsets or matching for performance boost.
 
 ---

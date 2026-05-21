@@ -31,9 +31,9 @@ The standard is simple to state and demanding to satisfy:
 
 Read these first:
 
-1. [`README.md`](README.md) — public project map and package overview.
-2. [`docs/TUTORIAL.md`](docs/TUTORIAL.md) — first guided learning path.
-3. [`docs/lvlath_UES.md`](docs/lvlath_UES.md) — universal engineering standard for lvlath.
+1. [`README.md`](README.md) - public project map and package overview.
+2. [`docs/TUTORIAL.md`](docs/TUTORIAL.md) - first guided learning path.
+3. [`docs/lvlath_UES.md`](docs/lvlath_UES.md) - universal engineering standard for lvlath.
 4. The package-local `{package}/doc.go` for the package you are changing.
 5. The repository-level `docs/{PACKAGE}.md` for the same package.
 

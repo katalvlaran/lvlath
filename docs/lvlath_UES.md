@@ -993,7 +993,7 @@ After any contract or implementation change, an audit is mandatory:
 - do not spawn useless ones.
 
 ===============================================================================
-Appendix A — Quality Passport
+Appendix A - Quality Passport
 ===============================================================================
 
 A lvlath package is considered fully "UES-grade" when it demonstrates ALL of the following:
@@ -1019,7 +1019,7 @@ High-Risk Defect Zones (to be relentlessly hunted down):
 - Adapter-layers that silently drop contract semantics.
 
 ===============================================================================
-Appendix B — Anti-Dogma (What NOT to standardize by force)
+Appendix B - Anti-Dogma (What NOT to standardize by force)
 ===============================================================================
 
 UES demands maximum engineering awareness, not maximum blind formalism.

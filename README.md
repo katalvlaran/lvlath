@@ -45,7 +45,7 @@ It is built for people who need algorithmic tools they can explain in a code rev
 
 **The core promise:**
 
-> Same graph, same options, same algorithm — same result surface, same witness semantics, same failure class.
+> Same graph, same options, same algorithm - same result surface, same witness semantics, same failure class.
 
 `lvlath` is not just “BFS, DFS, Dijkstra, and friends.” It is a small ecosystem where:
 
@@ -261,7 +261,7 @@ lvlath/docs/{PACKAGE}.md
 
 ---
 
-## Quick start A: graph “lvlath” — shapes, components, cycles, matrix view
+## Quick start A: graph “lvlath” - shapes, components, cycles, matrix view
 
 This is the first visual example: a graph is not only “nodes and edges”; it is a controllable topology that can be inspected, transformed, and projected into matrix form.
 
@@ -410,7 +410,7 @@ What this demonstrates:
 
 ---
 
-## Quick start B: Hexagram — one weighted graph, many algorithmic views
+## Quick start B: Hexagram - one weighted graph, many algorithmic views
 
 The classic weighted Hexagram example is the compact demonstration of `lvlath` as a multi-package toolkit: BFS-style shells on an unweighted view, Dijkstra weighted routing, MST backbone extraction, and TSP preparation through a metric matrix.
 
@@ -420,9 +420,9 @@ The classic weighted Hexagram example is the compact demonstration of `lvlath` a
                   (C-H:9)   3/  |7 \4   (D-F:7)
         (B-G:7)         \   /   |   \   /         (E-G:9)
              [B]────3────[C]──5─┼────[D]────3────[E]
-                \       / | \   |  / | \       /
-                6\    7/  | 5\  | /4 |  \6    /7
-                  \   /   |   \ |/   |   \   /
+                \       / | \   |  /  | \       /
+                6\    7/  | 5\  | /4  |  \6    /7
+                  \   /   |   \ |/    |   \   /
                    [F]──3─┼────[G]──5─┼────[H]
                   /   \   |9  / | \   |8  /   \
                 2/    6\  |  /4 |  \6 |  /5    \6
@@ -533,7 +533,7 @@ func main() {
 
 ---
 
-## Quick start C: weighted service network — routing + flow + matrix policy
+## Quick start C: weighted service network - routing + flow + matrix policy
 
 This is the practical infrastructure example: a directed weighted network where edge weights can represent latency/cost for routing, and another capacity graph can represent throughput for flow analysis.
 
@@ -790,4 +790,4 @@ If you want to use `lvlath` in a proprietary environment without AGPL source-dis
 
 ---
 
-**lvlath** — deterministic graph algorithms, dense graph algebra, and engineering-grade contracts for Go developers who want reproducible answers instead of accidental behavior.
+**lvlath** - deterministic graph algorithms, dense graph algebra, and engineering-grade contracts for Go developers who want reproducible answers instead of accidental behavior.

@@ -7,9 +7,9 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// ExampleGraph_CascadingFailures demonstrates a cascading failure scenario in a power grid network.
+// Example_cascadingFailures demonstrates a cascading failure scenario in a power grid network.
 // A highly connected hub node is removed to simulate a substation failure, and the impact on network connectivity is measured.
-// ExampleGraph_CascadingFailures demonstrates cascading-failure analysis in a power grid.
+// Example_cascadingFailures demonstrates cascading-failure analysis in a power grid.
 // CONTEXT:
 //   - You are a Resilience Architect for the 'Aethelgard' energy grid.
 //   - A critical infrastructure node (Hub) is targeted by a cyber-kinetic strike.
@@ -67,7 +67,7 @@ import (
 //
 // Complexity:
 //   - Building and scanning the graph: O(V + E). BFS for components: O(V + E).
-func ExampleGraph_CascadingFailures() {
+func Example_cascadingFailures() {
 	// ---- Stage 1: Infrastructure Synthesis ----
 	const clusterSize = 4
 	var (
@@ -189,7 +189,7 @@ func ExampleGraph_CascadingFailures() {
 	// STATUS: CRITICAL. System fragmentation imminent. Initiating bypass protocols.
 }
 
-// ExampleGraph_BetweennessCentrality demonstrates the identification of a "critical artery"
+// Example_betweennessCentrality demonstrates the identification of a "critical artery"
 // in a global logistics network using Betweenness Stress Centrality.
 // Two densely connected communities (clusters) are linked by a single bridging edge.
 // The bridging edge carries all shortest-path traffic between the clusters, making it the highest-betweenness edge.
@@ -252,7 +252,7 @@ func ExampleGraph_CascadingFailures() {
 //     of a hub vertex and identify the bridging edge among local connections.
 //   - Inventory Integrity: Uses the deterministic Vertices() sequence to partition
 //     and calculate global load factors without external state tracking.
-func ExampleGraph_BetweennessCentrality() {
+func Example_betweennessCentrality() {
 	// Constants for simulation scale (4x4 clusters for the example output)
 	const clusterSize = 4
 	const bridgeID = "e13"
@@ -331,7 +331,7 @@ func ExampleGraph_BetweennessCentrality() {
 	// Load: Betweenness Stress Factor = 16 paths
 }
 
-// ExampleGraph_NeuralEvolution simulates dynamic evolution of a neural network graph structure.
+// Example_neuralEvolution simulates dynamic evolution of a neural network graph structure.
 // It starts with a sparse, weighted graph (few connections),
 // then adds a new neuron (vertex) with new connections, and finally removes an existing connection.
 // The degree of a particular neuron is tracked through these modifications to illustrate network plasticity.
@@ -386,7 +386,7 @@ func ExampleGraph_BetweennessCentrality() {
 //     synapses, avoiding expensive global Edge() scans.
 //   - Amortized O(1) Updates: Add/Remove operations leverage core's map-based
 //     architecture for high-frequency structural shifts.
-func ExampleGraph_NeuralEvolution() {
+func Example_neuralEvolution() {
 	// ---- PHASE 1: Initial Cognitive Seed (Sparse Substrate) ----
 	// Initialize an undirected, weighted graph representing the base neural cluster.
 	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted())

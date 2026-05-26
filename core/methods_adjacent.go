@@ -1,16 +1,29 @@
 // File: methods_adjacent.go
-// Role: Neighborhood APIs (Neighbors, NeighborIDs, AdjacencyList) and adjacency helpers.
+// Role: Neighborhood APIs and private sparse-adjacency-index helpers.
+//
+// Storage law:
+//   - g.adjacencyList is a private sparse edge index, not the vertex catalog.
+//   - Isolated vertices may be absent from g.adjacencyList internally.
+//   - Public AdjacencyList() reconstructs full output from g.vertices and includes isolated vertices.
+//
 // Determinism:
-//   - Neighbors() sorts by Edge.ID asc.
-//   - NeighborIDs() returns unique IDs sorted lex asc.
-//   - AdjacencyList() returns per-vertex edgeID slices sorted by Edge.ID asc.
+//   - Neighbors() sorts by Edge.ID ascending.
+//   - NeighborIDs() returns unique IDs sorted lexicographically ascending.
+//   - AdjacencyList() returns per-vertex edge-ID slices sorted by Edge.ID ascending.
+//   - Go map key iteration order is never part of the contract.
+//
 // Concurrency:
-//   - Read operations hold muVert or muEdgeAdj read locks as needed.
+//   - Public read operations acquire locks in package order when both catalogs are needed.
 //   - Helpers are called only under appropriate write locks by mutating code.
-// AI-HINT (file):
+//   - Private helpers assume the caller already holds muEdgeAdj.Lock().
+//   - Private cleanup helpers never acquire muVert.
+//
+// AI-Hints (file):
 //   - Neighbors(id): directed edges included only if e.From==id; undirected appear once; result sorted by Edge.ID asc.
 //   - NeighborIDs(id): unique, sorted (lex asc).
 //   - AdjacencyList(): per-vertex edgeID slices sorted by Edge.ID asc; returned slices are independent (no shared backing).
+//   - Use public AdjacencyList() when callers need isolated vertices represented.
+//   - Do not infer vertex existence from internal adjacencyList buckets.
 
 package core
 
@@ -181,44 +194,60 @@ func (g *Graph) NeighborIDs(id string) ([]string, error) {
 // AdjacencyList returns a snapshot mapping each "from" vertex ID to the list of incident edge IDs.
 // Each slice is sorted by Edge.ID ascending for deterministic per-vertex enumeration.
 //
+// Storage distinction:
+//   - Internal g.adjacencyList is a sparse edge index and may omit isolated vertices.
+//   - This public method reconstructs the complete vertex-domain view from g.vertices.
+//
 // Implementation:
-//   - Stage 1: Acquire muEdgeAdj read lock for a stable adjacency snapshot.
-//   - Stage 2: For each from vertex, collect all edge IDs from nested adjacency buckets.
-//   - Stage 3: Sort the collected edge IDs per vertex.
-//   - Stage 4: Return the newly allocated map of slices.
+//   - Stage 1: Acquire muVert.RLock(), then muEdgeAdj.RLock() in package lock order.
+//   - Stage 2: Allocate a result map with one key for every current vertex.
+//   - Stage 3: Scan the sparse adjacency index and append existing edge IDs into the
+//     corresponding result[from] slice.
+//   - Stage 4: Sort each per-vertex edge-ID slice by Edge.ID ascending.
+//   - Stage 5: Return the detached map/slice snapshot.
 //
 // Behavior highlights:
-//   - Returned slices are freshly allocated and safe to retain and mutate by the caller.
-//   - Deterministic ordering within each slice (Edge.ID asc).
-//
-// Inputs:
-//   - None.
+//   - Includes isolated vertices with empty slices.
+//   - Returned map and slices are detached containers; callers may mutate them safely.
+//   - Edge IDs identify catalog edges; callers can use GetEdge if they need edge records.
+//   - Does not expose internal adjacency maps.
 //
 // Returns:
-//   - map[string][]string: snapshot from-vertex -> sorted edge ID list.
+//   - map[string][]string: vertex ID -> sorted edge IDs for the current snapshot.
 //
 // Errors:
 //   - None (pure query).
 //
 // Determinism:
-//   - Per-vertex slices are deterministic (sorted).
-//   - Map key iteration order is not deterministic in Go; callers MUST NOT rely on it.
+//   - Per-vertex slices are sorted by Edge.ID ascending.
+//   - Map key iteration remains Go-map order; use Vertices() for deterministic key traversal.
 //
 // Complexity:
-//   - Time O(V + E + Σ sort(deg(v))), Space O(V + E) for the snapshot.
+//   - Time O(V + A + Σ sort(d(v))), where A is indexed adjacency entries.
+//   - Space O(V + A) for detached containers.
 //
 // Notes:
-//   - This is a snapshot of adjacency state; it does not expose internal maps.
+//   - For matrix-shaped adjacency, use the matrix package rather than depending on
+//     this storage snapshot as a dense representation.
 //   - Use Vertices() to obtain deterministic key order if needed.
 //
 // AI-Hints:
 //   - If you need stable iteration over keys, do: keys := g.Vertices(); then read result[key].
+//   - This is the right API when tests must prove isolated vertices are still present.
+//   - Do not “repair” internal adjacencyList to include isolated vertices; this method handles that boundary.
 func (g *Graph) AdjacencyList() map[string][]string {
 	// AI-HINT: Each slice is freshly allocated and sorted; callers may retain and mutate safely.
+	g.muVert.RLock()
+	defer g.muVert.RUnlock()
 	g.muEdgeAdj.RLock()
 	defer g.muEdgeAdj.RUnlock()
 
-	result := make(map[string][]string, len(g.adjacencyList))
+	// Prepare and fill the result map with existing vertices
+	result := make(map[string][]string, len(g.vertices))
+	for id := range g.vertices {
+		result[id] = make([]string, 0)
+	}
+
 	for from, toMap := range g.adjacencyList {
 		// Fresh buffer per vertex to avoid sharing backing arrays across keys.
 		var buf []string
@@ -241,7 +270,9 @@ func (g *Graph) AdjacencyList() map[string][]string {
 //   - Stage 2: If adjacencyList[from][to] is nil, allocate it.
 //
 // Behavior highlights:
-//   - O(1) amortized nested-map initialization.
+//   - Creates only edge-index buckets needed to publish an edge.
+//   - Does not create vertex membership and does not prove vertex existence.
+//   - Does not allocate buckets for isolated vertices.
 //   - No-op when buckets already exist.
 //
 // Inputs:
@@ -266,6 +297,7 @@ func (g *Graph) AdjacencyList() map[string][]string {
 //
 // AI-Hints:
 //   - Keep this helper small and allocation-minimal; it is on mutation hot paths.
+//   - For undirected edges, AddEdge calls ensureAdjacency twice: from->to and to->from.
 func ensureAdjacency(g *Graph, from, to string) {
 	// AI-HINT: Called only under muEdgeAdj write lock by mutating codepaths.
 	if g.adjacencyList[from] == nil {
@@ -288,7 +320,9 @@ func ensureAdjacency(g *Graph, from, to string) {
 //   - Stage 3: If undirected non-loop, repeat for the mirrored bucket.
 //
 // Behavior highlights:
-//   - Keeps adjacency buckets compact by pruning empty nested maps.
+//   - Mutates only adjacencyList; it does not delete from g.edges.
+//   - Does not inspect or mutate g.vertices.
+//   - Safe to call defensively even if a bucket is already absent.
 //
 // Inputs:
 //   - g: target graph.
@@ -308,6 +342,7 @@ func ensureAdjacency(g *Graph, from, to string) {
 //
 // Notes:
 //   - Must be called ONLY under muEdgeAdj write lock.
+//   - Caller is responsible for deleting g.edges[e.ID] separately.
 //
 // AI-Hints:
 //   - Always pair catalog deletion (delete(g.edges,e.ID)) with removeAdjacency to avoid dangling adjacency references.
@@ -338,7 +373,9 @@ func removeAdjacency(g *Graph, e *Edge) {
 //
 // Behavior highlights:
 //   - Maintains compact adjacency structure to keep HasEdge and scans fast.
-//   - Safe to call repeatedly; idempotent relative to empty-state pruning.
+//   - Keeps the private edge index compact after removals.
+//   - Does not preserve isolated vertices internally; g.vertices is the vertex catalog.
+//   - Safe to call repeatedly; Idempotent relative to empty-bucket pruning.
 //
 // Inputs:
 //   - g: target graph.
@@ -358,9 +395,12 @@ func removeAdjacency(g *Graph, e *Edge) {
 //
 // Notes:
 //   - Must be called ONLY under muEdgeAdj write lock.
+//   - Public AdjacencyList() reconstructs isolated vertex keys from g.vertices.
 //
 // AI-Hints:
 //   - Call cleanupAdjacency after bulk removals (FilterEdges, RemoveVertex) rather than after every single deletion if batching is possible.
+//   - Adding muVert locking here can deadlock with AddEdge/AddVertex/RemoveVertex.
+//   - Do not use cleanupAdjacency as a vertex-membership repair mechanism.
 func cleanupAdjacency(g *Graph) {
 	// AI-HINT: Prunes empty buckets after removals; write lock required.
 	for u, toMap := range g.adjacencyList {
@@ -371,6 +411,58 @@ func cleanupAdjacency(g *Graph) {
 		}
 		if len(toMap) == 0 {
 			delete(g.adjacencyList, u)
+		}
+	}
+}
+
+// cleanupAdjacencyVertex removes a deleted vertex from the sparse adjacency index.
+//
+// Implementation:
+//   - Stage 1: Delete the top-level bucket owned by vertexID.
+//   - Stage 2: Scan remaining from buckets and delete second-level references to vertexID.
+//   - Stage 3: Prune empty second-level and top-level buckets left behind.
+//
+// Behavior highlights:
+//   - Used only during RemoveVertex after the caller has decided to delete vertexID.
+//   - Removes vertex-owned and vertex-pointing sparse index state.
+//   - Does not inspect or mutate g.vertices.
+//
+// Inputs:
+//   - vertexID: vertex removed from the authoritative vertex catalog.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic final topology; map iteration order does not affect correctness.
+//
+// Complexity:
+//   - Time O(B), where B is the number of adjacency buckets scanned.
+//   - Space O(1).
+//
+// Notes:
+//   - Caller MUST hold g.muEdgeAdj.Lock().
+//   - RemoveVertex also holds g.muVert.Lock() before this helper is called.
+//   - This helper MUST NOT acquire muVert; doing so would self-deadlock in RemoveVertex.
+//
+// AI-Hints:
+//   - Only RemoveVertex should call cleanupAdjacencyVertex.
+//   - Do not use this helper for edge deletion; use removeAdjacency.
+func cleanupAdjacencyVertex(g *Graph, vertexID string) {
+	delete(g.adjacencyList, vertexID)
+
+	for from, toMap := range g.adjacencyList {
+		delete(toMap, vertexID)
+		for to, edgeSet := range toMap {
+			if len(edgeSet) == 0 {
+				delete(toMap, to)
+			}
+		}
+		if len(toMap) == 0 {
+			delete(g.adjacencyList, from)
 		}
 	}
 }

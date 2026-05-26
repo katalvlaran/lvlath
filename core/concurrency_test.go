@@ -252,3 +252,130 @@ func TestConcurrentNeighborsAndClone(t *testing.T) {
 
 	MustAllErrorsNil(t, errCh, "Concurrent Neighbors/Clone")
 }
+
+// TestGraph_AtomicEdgeIDs ASSERTS concurrent AddEdge yields unique IDs.
+//
+// Implementation:
+//   - Stage 1: Create feature-rich graph (multi-edge enabled).
+//   - Stage 2: Spawn NAtomicEdgeIDs goroutines adding edges A->B with varying weights.
+//   - Stage 3: Goroutines send errors/IDs to channels (no *testing.T inside goroutines).
+//   - Stage 4: Assert no errors, and set size equals NAtomicEdgeIDs.
+//
+// Behavior highlights:
+//   - Locks in uniqueness property of edge IDs under contention.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal if any AddEdge fails or uniqueness is violated.
+//
+// Determinism:
+//   - Schedule nondeterministic; uniqueness assertion deterministic.
+//
+// Complexity:
+//   - Time O(N), Space O(N).
+//
+// Notes:
+//   - This test does not assert the *format* of IDs (only uniqueness/non-emptiness).
+//
+// AI-Hints:
+//   - If you later formalize ID format, extend this test with a parser and pattern assertions.
+func TestGraph_AtomicEdgeIDs(t *testing.T) {
+	g := NewGraphFull(t)
+
+	idCh := make(chan string, NAtomicEdgeIDs)
+	errCh := make(chan error, NAtomicEdgeIDs)
+
+	var wg sync.WaitGroup
+	wg.Add(NAtomicEdgeIDs)
+
+	var i int
+	for i = 0; i < NAtomicEdgeIDs; i++ {
+		go func(i int) {
+			defer wg.Done()
+
+			eid, err := g.AddEdge(VertexA, VertexB, float64(i))
+			if err != nil {
+				errCh <- err
+				return
+			}
+			if eid == "" {
+				errCh <- fmt.Errorf("empty edge ID returned")
+				return
+			}
+			idCh <- eid
+		}(i)
+	}
+
+	wg.Wait()
+	close(idCh)
+	close(errCh)
+
+	MustAllErrorsNil(t, errCh, "Atomic edge IDs")
+
+	ids := make(map[string]struct{}, NAtomicEdgeIDs)
+
+	for eid := range idCh {
+		ids[eid] = struct{}{}
+	}
+
+	MustEqualInt(t, len(ids), NAtomicEdgeIDs, "unique edge IDs count")
+}
+
+// TestGraph_HasVertexConcurrency ASSERTS concurrent HasVertex/AddVertex does not panic.
+//
+// Implementation:
+//   - Stage 1: Create graph.
+//   - Stage 2: Spawn M goroutines adding vertices and M goroutines reading HasVertex.
+//   - Stage 3: Wait; test passes if no panic.
+//
+// Behavior highlights:
+//   - This is a race/panic detector; validate with `go test -race`.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal only if a panic occurs (implicit).
+//
+// Determinism:
+//   - Nondeterministic schedule; expected stability.
+//
+// Complexity:
+//   - Time O(M), Space O(1) extra.
+//
+// Notes:
+//   - This test intentionally does not assert final counts: it targets safety, not outcome.
+//
+// AI-Hints:
+//   - Keep this test lightweight; rely on -race to detect unsynchronized access.
+func TestGraph_HasVertexConcurrency(t *testing.T) {
+	g := NewGraphFull(t)
+
+	const M = 50
+
+	var wg sync.WaitGroup
+	wg.Add(2 * M)
+
+	var i int
+	for i = 0; i < M; i++ {
+		go func(i int) {
+			defer wg.Done()
+			_ = g.AddVertex(fmt.Sprintf("V%d", i))
+		}(i)
+
+		go func(i int) {
+			defer wg.Done()
+			_ = g.HasVertex(fmt.Sprintf("V%d", i))
+		}(i)
+	}
+
+	wg.Wait()
+}

@@ -11,6 +11,7 @@
 // AI-Hints (file):
 //   - Vertices() is a stable enumeration surface; rely on it for reproducible outputs.
 //   - Degree() follows documented academic policy for loops and directedness.
+
 package core
 
 import "sort"
@@ -44,37 +45,42 @@ import "sort"
 //   - Implement the same pattern for other pointer-backed core types that appear behind interfaces.
 func (v *Vertex) IsNil() bool { return v == nil }
 
-// AddVertex inserts a vertex if missing (idempotent).
+// AddVertex inserts a vertex if missing.
 //
 // Implementation:
 //   - Stage 1: Validate non-empty ID (ErrEmptyVertexID).
-//   - Stage 2: Under muVert write lock, check presence; if missing, allocate Vertex and register it.
-//   - Stage 3: Under muEdgeAdj write lock, bootstrap adjacency buckets so edge methods can rely on invariants.
+//   - Stage 2: Acquire muVert write lock.
+//   - Stage 3: If the ID already exists, return nil without mutation.
+//   - Stage 4: Allocate and publish a Vertex record in the authoritative vertex catalog.
 //
 // Behavior highlights:
 //   - Idempotent: adding an existing vertex is a no-op.
-//   - Initializes Metadata map to a non-nil value for convenience in tests and algorithms.
+//   - Initializes Metadata to a non-nil map for convenient caller use.
+//   - Does not create adjacency buckets. Internal adjacencyList is a sparse edge index;
+//     edge insertion creates buckets lazily.
 //
 // Inputs:
 //   - id: vertex identifier; must be non-empty.
 //
 // Returns:
-//   - error: nil on success; ErrEmptyVertexID on invalid input.
+//   - error: nil on success; otherwise a sentinel error.
 //
 // Errors:
 //   - ErrEmptyVertexID: if id == "".
 //
 // Determinism:
-//   - Deterministic map membership logic; does not depend on iteration order.
+//   - Deterministic map membership/update logic; no iteration-order dependency.
 //
 // Complexity:
 //   - Time O(1) amortized, Space O(1) amortized.
 //
 // Notes:
-//   - Lock order is muVert -> muEdgeAdj to avoid lock inversion across vertex/edge code paths.
-//   - The adjacency bootstrap is intentionally minimal; it does not create any edges.
+//   - Vertex existence is represented only by g.vertices.
+//   - Public AdjacencyList() will still include this vertex with an empty slice until
+//     incident edges are added.
 //
 // AI-Hints:
+//   - Use AddVertex when an isolated vertex is semantically meaningful.
 //   - Prefer AddVertex in setup when you want explicit vertex presence before adding edges.
 func (g *Graph) AddVertex(id string) error {
 	// AI-HINT: Empty ID returns ErrEmptyVertexID. Idempotent if vertex exists.
@@ -93,12 +99,6 @@ func (g *Graph) AddVertex(id string) error {
 
 	// Allocate a new vertex record; Metadata is initialized to a non-nil map by policy.
 	g.vertices[id] = &Vertex{ID: id, Metadata: make(map[string]interface{})}
-
-	// Stage 3: Bootstrap adjacency buckets under muEdgeAdj.
-	// This preserves adjacency invariants for later edge operations.
-	g.muEdgeAdj.Lock()
-	ensureAdjacency(g, id, id)
-	g.muEdgeAdj.Unlock()
 
 	return nil
 }
@@ -139,40 +139,46 @@ func (g *Graph) HasVertex(id string) bool {
 	return ok
 }
 
-// RemoveVertex deletes a vertex and all incident edges (directed and undirected).
+// RemoveVertex deletes a vertex and all incident edges.
 //
 // Implementation:
 //   - Stage 1: Validate non-empty ID (ErrEmptyVertexID).
-//   - Stage 2: Acquire muVert write lock and muEdgeAdj write lock for an atomic topology update.
-//   - Stage 3: Verify vertex presence (ErrVertexNotFound).
-//   - Stage 4: Scan edge catalog once; for each incident edge remove adjacency references and delete from catalog.
-//   - Stage 5: Delete vertex from catalog and cleanup adjacency buckets.
+//   - Stage 2: Acquire muVert.Lock(), then muEdgeAdj.Lock() in the package lock order.
+//   - Stage 3: Verify vertex presence in the authoritative vertex catalog.
+//   - Stage 4: Scan the edge catalog once and remove every edge whose From or To is id.
+//   - Stage 5: For each removed edge, unlink adjacency buckets and delete the edge catalog entry.
+//   - Stage 6: Delete the vertex catalog entry.
+//   - Stage 7: Remove any remaining sparse adjacency index references for that vertex.
 //
 // Behavior highlights:
-//   - Removes all incident edges deterministically.
-//   - Leaves the graph in a consistent state (no dangling adjacency references).
+//   - This is a topology rewrite: vertex membership, edge catalog, and adjacency index change together.
+//   - Removes directed incoming, directed outgoing, undirected, loop, and parallel incident edges.
+//   - Leaves no adjacency references to the removed vertex.
 //
 // Inputs:
 //   - id: vertex identifier to remove; must be non-empty.
 //
 // Returns:
-//   - error: nil on success; otherwise a sentinel.
+//   - error: nil on success; otherwise a sentinel error.
 //
 // Errors:
 //   - ErrEmptyVertexID: if id == "".
-//   - ErrVertexNotFound: if the vertex does not exist.
+//   - ErrVertexNotFound: if id is absent from the vertex catalog.
 //
 // Determinism:
-//   - Deterministic for a fixed graph state; does not depend on iteration order for correctness.
+//   - Deterministic final graph state; map scan order does not affect the result.
 //
 // Complexity:
-//   - Time O(E) for scanning the edge catalog (+ cleanup cost), Space O(1) extra.
+//   - Time O(E + B), where E is edge count and B is adjacency bucket count touched/scanned.
+//   - Space O(1) extra.
 //
 // Notes:
-//   - This method is intentionally “heavy”: removing a vertex is a topology rewrite.
-//   - Requires both write locks; concurrent readers are blocked until completion.
+//   - This method is intentionally heavier than RemoveEdge because it changes vertex membership.
+//   - It is the only operation that should call cleanupAdjacencyVertex.
 //
 // AI-Hints:
+//   - Keep the lock order muVert -> muEdgeAdj. Reversing it can deadlock with AddEdge.
+//   - Do not call public graph methods while both locks are held.
 //   - Prefer building subgraphs/views when you need “logical removal” without mutating the original.
 func (g *Graph) RemoveVertex(id string) error {
 	// AI-HINT: Removes all incident edges deterministically; missing vertex → ErrVertexNotFound.
@@ -205,7 +211,7 @@ func (g *Graph) RemoveVertex(id string) error {
 	// Delete the vertex record and cleanup adjacency buckets.
 	delete(g.vertices, id)
 	// prune any empty nested maps
-	cleanupAdjacency(g)
+	cleanupAdjacencyVertex(g, id)
 
 	return nil
 }
@@ -351,7 +357,8 @@ func (g *Graph) VerticesMap() map[string]*Vertex {
 //   - Do not write code that depends on InternalVertices mutating graph membership.
 func (g *Graph) InternalVertices() map[string]*Vertex {
 	// AI-HINT: Deprecated live map; do not mutate in user code. Prefer Vertices()/VerticesMap().
-	return g.vertices
+	//return g.vertices
+	return g.VerticesMap()
 }
 
 // Degree returns the degree components of the given vertex ID.

@@ -15,6 +15,7 @@
 package core
 
 import (
+	"math"
 	"sort"
 	"strconv"
 	"sync/atomic"
@@ -97,47 +98,60 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 	}
 }
 
-// AddEdge creates a new edge (from -> to) with an optional weight and per-edge options.
-// The method enforces graph capabilities (weighted/multi/loops/mixed) and updates adjacency.
+// AddEdge creates a new edge from `from` to `to` with an optional weight and per-edge options.
+// The method enforces graph capabilities (weighted, multi-edge, loop, and mixed-edge policy)
+// and publishes catalog/adjoining adjacency state as one topology transaction.
 //
 // Transactional Safety:
-//   - This operation is TOPOLOGICALLY ATOMIC.
-//   - It acquires muVert.Lock() AND muEdgeAdj.Lock() (in that order) to ensure that
-//     endpoints cannot be concurrently removed by RemoveVertex() during edge creation.
-//   - If endpoints are missing, they are created atomically as part of this transaction.
+//   - This operation is TOPOLOGICALLY ATOMIC for edge publication.
+//   - It acquires muVert.Lock() and muEdgeAdj.Lock() in that order.
+//   - While both locks are held, endpoints cannot be concurrently removed and the edge
+//     catalog/adjoining adjacency buckets cannot be observed half-published.
+//   - If endpoints are missing, they are created as part of the same transaction before
+//     edge publication.
 //
 // Implementation:
-//   - Stage 1: Validate inputs (stateless checks, including nil EdgeOption rejection).
-//   - Stage 2: Acquire muVert.Lock() (Transaction Start).
-//   - Stage 3: Ensure 'from' and 'to' vertices exist in the catalog.
-//   - Stage 4: Acquire muEdgeAdj.Lock().
-//   - Stage 5: Enforce edge policies (multi, loops, mixed).
-//   - Stage 6: Create edge, apply options, assign ID, and update adjacency.
-//   - Stage 7: Release locks (Transaction End).
+//   - Stage 1: Validate stateless public inputs: endpoint IDs, weight policy, loop policy,
+//     and nil EdgeOption values.
+//   - Stage 2: Acquire muVert.Lock() to start the topology transaction.
+//   - Stage 3: Ensure `from` and `to` exist in the vertex catalog.
+//   - Stage 4: Acquire muEdgeAdj.Lock() to protect edge catalog and adjacency mutation.
+//   - Stage 5: Reject forbidden parallel edges before allocation/publication.
+//   - Stage 6: Build a baseline unpublished Edge from validated endpoints, weight, and
+//     graph default directedness.
+//   - Stage 7: Apply EdgeOptions in call order.
+//   - Stage 8: Re-validate option effects: endpoints and weight are immutable; directedness
+//     override requires mixed mode; loop policy remains enforced.
+//   - Stage 9: Assign an explicit or generated Edge.ID and bump the auto-ID counter when needed.
+//   - Stage 10: Publish the edge in the catalog and update primary/mirrored adjacency buckets.
+//   - Stage 11: Release locks through deferred unlocks.
 //
 // Behavior highlights:
-//   - Strict sentinel errors only (errors.Is).
+//   - Strict sentinel errors only (classify with errors.Is).
 //   - No panics as part of the public contract.
 //   - Nil EdgeOption values fail fast before lock acquisition, vertex auto-creation, or adjacency mutation.
-//   - No lock gap between vertex creation and edge insertion.
+//   - Endpoint and weight mutation by custom EdgeOption values is rejected before edge publication.
+//   - Directedness mutation is allowed only when mixed mode is enabled.
+//   - No lock gap exists between endpoint creation and edge insertion.
 //
 // Inputs:
-//   - from: source vertex ID (must be non-empty).
-//   - to: destination vertex ID (must be non-empty).
-//   - weight: edge weight; must be 0 unless WithWeighted() was set.
-//   - opts: optional per-edge mutators.
+//   - from: source vertex ID; must be non-empty.
+//   - to: destination vertex ID; must be non-empty.
+//   - weight: edge weight; must be finite and must be 0 unless WithWeighted() was set.
+//   - opts: optional per-edge mutators; each value must be non-nil.
 //
 // Returns:
-//   - string: the assigned Edge.ID (auto-generated or explicit).
+//   - string: assigned Edge.ID (auto-generated or explicit).
 //   - error: nil on success; otherwise a sentinel error.
 //
 // Errors:
 //   - ErrEmptyVertexID: if from == "" or to == "".
-//   - ErrBadWeight: if weight != 0 on an unweighted graph.
+//   - ErrBadWeight: if weight is NaN/Inf, or if weight != 0 on an unweighted graph.
 //   - ErrLoopNotAllowed: if from == to and loops are disabled.
 //   - ErrNilEdgeOption: if opts contains a nil EdgeOption value.
 //   - ErrMultiEdgeNotAllowed: if a parallel edge is attempted and multi-edges are disabled.
-//   - ErrMixedEdgesNotAllowed: if a directedness override is attempted without mixed mode.
+//   - ErrInvalidEdgeOption: if an EdgeOption mutates Edge.From, Edge.To, or Edge.Weight.
+//   - ErrMixedEdgesNotAllowed: if directedness is changed without mixed mode.
 //   - ErrEmptyEdgeID / ErrEdgeIDConflict: from WithID / ValidateEdgeID rules.
 //
 // Determinism:
@@ -150,17 +164,21 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //   - Space O(1) amortized.
 //
 // Notes:
-//   - Vertices are ensured before the edge lock to avoid lock inversion with vertex mutations.
+//   - AddEdge may auto-create missing endpoint vertices before a later EdgeOption error occurs.
+//     Such vertices are valid catalog state; the edge itself is not published on error.
+//   - Vertices are created while muVert is held to prevent concurrent RemoveVertex from
+//     deleting endpoints during edge publication.
 //
 // AI-Hints:
 //   - Use WithID for stable cross-run edge references.
 //   - For undirected edges, adjacency is mirrored automatically.
+//   - Do not write custom EdgeOption values that rewrite endpoints or weights.
 func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (string, error) {
 	// 1. Input validation (stateless)
 	if from == "" || to == "" {
 		return "", ErrEmptyVertexID
 	}
-	if !g.weighted && weight != 0 {
+	if !g.weighted && weight != 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
 		return "", ErrBadWeight
 	}
 	if from == to && !g.allowLoops {
@@ -192,27 +210,17 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
 
-	// 5. Ensure Adjacency Invariants
-	// (Vertices exist, so their adjacency buckets must exist).
-	// We rely on ensureAdjacency or direct checks.
-	if g.adjacencyList[from] == nil {
-		g.adjacencyList[from] = make(map[string]map[string]struct{})
-	}
-	if g.adjacencyList[to] == nil {
-		g.adjacencyList[to] = make(map[string]map[string]struct{})
-	}
-
-	// 6. Enforce Multi-edge Policy
+	// 5. Enforce Multi-edge Policy
 	if !g.allowMulti {
 		if inner := g.adjacencyList[from][to]; len(inner) > 0 {
 			return "", ErrMultiEdgeNotAllowed
 		}
 	}
 
-	// 7. Build Baseline Edge
+	// 6. Build Baseline Edge
 	e := &Edge{From: from, To: to, Weight: weight, Directed: g.directed}
 
-	// 8. Apply Options
+	// 7. Apply Options
 	// Note: Options are simple mutators; they do not require extra locks.
 	for _, opt = range opts {
 		if err := opt(g, e); err != nil {
@@ -220,12 +228,24 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 		}
 	}
 
+	// EdgeOptions are not allowed to rewrite topology-owned fields.
+	// If this guard is removed, a custom option can make edge catalog endpoints
+	// disagree with adjacency buckets, corrupting RemoveEdge/Neighbors/HasEdge.
+	if e.From != from || e.To != to || e.Weight != weight {
+		return "", ErrInvalidEdgeOption
+	}
+
+	// Directedness is the only topology-semantic field that may be overridden,
+	// and only when the graph explicitly opted into mixed-mode semantics.
+	if !g.allowMixed && e.Directed != g.directed {
+		return "", ErrMixedEdgesNotAllowed
+	}
 	// Re-check loops guard (options might not respect initial check, though they should)
 	if e.From == e.To && !g.allowLoops {
 		return "", ErrLoopNotAllowed
 	}
 
-	// 9. Assign edge ID:
+	// 8. Assign edge ID:
 	//    - If WithID was used, e.ID is already set and validated for uniqueness.
 	//    - Otherwise, generate a new unique textual edge ID in O(1) without fmt allocations.
 	if e.ID == "" {
@@ -240,7 +260,7 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 		}
 	}
 
-	// 10. Store Edge & Update Adjacency
+	// 9. Store Edge & Update Adjacency
 	g.edges[e.ID] = e
 	// Forward Adjacency
 	ensureAdjacency(g, from, to)
@@ -254,32 +274,48 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 	return e.ID, nil
 }
 
-// RemoveEdge deletes one edge by ID and removes its adjacency references.
+// RemoveEdge deletes one edge by ID and unlinks its sparse adjacency references.
 //
 // Implementation:
-//   - Stage 1: Acquire muEdgeAdj write lock.
-//   - Stage 2: Lookup edge in catalog; if absent return ErrEdgeNotFound.
-//   - Stage 3: Delete from catalog, remove adjacency references, cleanup empty buckets.
+//   - Stage 1: Validate non-empty edge ID (ErrEmptyEdgeID).
+//   - Stage 2: Acquire muEdgeAdj.Lock() because only edge catalog and adjacency index mutate.
+//   - Stage 3: Lookup the edge in the authoritative edge catalog.
+//   - Stage 4: Delete the edge catalog entry and remove its adjacency references.
+//   - Stage 5: Prune empty sparse adjacency buckets.
+//
+// Behavior highlights:
+//   - Does not remove endpoint vertices, even if they become isolated.
+//   - Does not acquire muVert because vertex membership is unchanged.
+//   - Leaves public AdjacencyList() able to report isolated endpoints through g.vertices.
 //
 // Inputs:
-//   - eid: edge identifier.
+//   - eid: edge identifier; must be non-empty.
 //
 // Returns:
-//   - error: nil on success; ErrEdgeNotFound if missing.
+//   - error: nil on success; otherwise a sentinel error.
 //
 // Errors:
+//   - ErrEmptyEdgeID: if eid == "".
 //   - ErrEdgeNotFound: if no edge with eid exists.
 //
 // Determinism:
-//   - Deterministic; pure map membership + deletions.
+//   - Deterministic final graph state; no iteration-order dependency.
 //
 // Complexity:
-//   - Time O(1) average for catalog + adjacency deletions (cleanup may scan buckets).
+//   - Time O(B) because cleanup may scan sparse buckets; O(1) average without cleanup cost.
 //   - Space O(1).
 //
+// Notes:
+//   - Edge deletion changes edge topology, not vertex membership.
+//
 // AI-Hints:
-//   - Removing an absent edge returns ErrEdgeNotFound (no silent ignore).
+//   - Do not add muVert locking here; it creates unnecessary contention and can invert lock order.
+//   - Removing the last incident edge of a vertex must not remove the vertex from g.vertices.
 func (g *Graph) RemoveEdge(eid string) error {
+	// Edge-only mutation: vertex catalog is untouched.
+	if eid == "" { // validate edgeID
+		return ErrEmptyEdgeID
+	}
 	// Lock edges+adjacency
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
@@ -288,6 +324,8 @@ func (g *Graph) RemoveEdge(eid string) error {
 	if !ok {
 		return ErrEdgeNotFound
 	}
+
+	// Remove the authoritative edge record, then unlink sparse adjacency index entries.
 	delete(g.edges, eid)  // Delete from global edges map
 	removeAdjacency(g, e) // Remove from adjacencyList[from][to]
 	cleanupAdjacency(g)   // Mirror removal for undirected
@@ -521,6 +559,9 @@ func (g *Graph) GetNamedEdges() []*Edge {
 //   - Use errors.Is(err, ErrEdgeNotFound) to branch without string matching.
 //   - Prefer GetEdge over scanning Edges() when you already have the ID.
 func (g *Graph) GetEdge(edgeID string) (*Edge, error) {
+	if edgeID == "" { // validate edgeID
+		return nil, ErrEmptyEdgeID
+	}
 	// AI-HINT: Use errors.Is(err, ErrEdgeNotFound) to gate fallbacks; returned *Edge is read-only by convention.
 	g.muEdgeAdj.RLock()         // lock edges/adjacency map for a consistent snapshot
 	defer g.muEdgeAdj.RUnlock() // ensure unlock on all paths
@@ -665,38 +706,137 @@ func (g *Graph) HasDirectedEdges() bool {
 	return false
 }
 
-// FilterEdges removes all edges failing the predicate.
+// FilterEdges returns detached copies of all edges for which pred returns true.
 //
 // Implementation:
-//   - Stage 1: Acquire muEdgeAdj write lock.
-//   - Stage 2: Scan edge catalog; for edges where pred(e)==false remove adjacency + delete from catalog.
-//   - Stage 3: Cleanup adjacency buckets.
+//   - Stage 1: Reject nil predicate with ErrNilEdgePredicate.
+//   - Stage 2: Acquire muEdgeAdj.RLock() for a stable edge-catalog snapshot.
+//   - Stage 3: Scan the edge catalog and pass detached Edge values to pred.
+//   - Stage 4: Append matching copies to the result slice.
+//   - Stage 5: Sort returned copies by Edge.ID ascending.
+//
+// Behavior highlights:
+//   - Read-only query; does not mutate edge catalog or adjacency index.
+//   - Predicate receives detached Edge values, not live catalog pointers.
+//   - Returned slice and Edge values are caller-owned copies.
 //
 // Inputs:
-//   - pred: pure predicate; MUST NOT mutate the graph.
+//   - pred: non-nil pure predicate over an Edge value copy.
 //
 // Returns:
-//   - None.
+//   - []Edge: matching detached edge copies sorted by Edge.ID ascending.
+//   - error: nil on success; otherwise a sentinel error.
+//
+// Errors:
+//   - ErrNilEdgePredicate: if pred == nil.
 //
 // Determinism:
-//   - Deterministic for deterministic pred; scan order does not affect final set.
+//   - Output order is deterministic: Edge.ID ascending.
+//   - Predicate call order is not part of the contract.
 //
 // Complexity:
-//   - Time O(E) average + cleanup cost, Space O(1) extra.
-func (g *Graph) FilterEdges(pred func(*Edge) bool) {
-	// AI-HINT: Removes edges not satisfying pred; adjacency is cleaned; graph stays consistent.
+//   - Time O(E log E) due to final sorting, Space O(k) for k matches.
+//
+// Notes:
+//   - Use RemoveEdgesWhere for mutating bulk deletion.
+//
+// AI-Hints:
+//   - Do not reintroduce destructive filtering under this name; FilterEdges is a query surface.
+//   - If caller needs pointers, they can GetEdge(match.ID) explicitly after filtering.
+func (g *Graph) FilterEdges(pred func(Edge) bool) ([]Edge, error) {
+	if pred == nil {
+		return nil, ErrNilEdgePredicate
+	}
+
+	g.muEdgeAdj.RLock()
+	defer g.muEdgeAdj.RUnlock()
+
+	out := make([]Edge, 0)
+	var value Edge
+	for _, e := range g.edges {
+		if e.IsNil() {
+			continue
+		}
+		value = *e
+		if pred(value) {
+			out = append(out, value)
+		}
+	}
+
+	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
+
+	return out, nil
+}
+
+// RemoveEdgesWhere removes every edge for which pred returns true.
+//
+// Implementation:
+//   - Stage 1: Reject nil predicate with ErrNilEdgePredicate.
+//   - Stage 2: Acquire muEdgeAdj write lock for an atomic removal pass.
+//   - Stage 3: Scan the edge catalog once.
+//   - Stage 4: Pass each predicate a detached Edge value copy.
+//   - Stage 5: For matching edges, remove adjacency and delete from the catalog.
+//   - Stage 6: Cleanup empty adjacency buckets once after the bulk mutation.
+//
+// Behavior highlights:
+//   - Removes matching edges; keeps non-matching edges.
+//   - The predicate receives a value copy, so it cannot mutate cataloged edge fields.
+//   - The graph remains catalog/adjacency-consistent after every successful call.
+//   - Predicate execution occurs while muEdgeAdj is held; predicates must be pure and must
+//     not call graph methods or try to mutate the graph.
+//
+// Inputs:
+//   - pred: non-nil pure predicate over a detached Edge value.
+//
+// Returns:
+//   - int: number of removed edges.
+//   - error: nil on success; otherwise a sentinel error.
+//
+// Errors:
+//   - ErrNilEdgePredicate: if pred == nil.
+//
+// Determinism:
+//   - Deterministic for a deterministic predicate; map scan order does not affect the final set.
+//
+// Complexity:
+//   - Time O(E + B), where B is adjacency cleanup bucket count.
+//   - Space O(1) extra.
+//
+// Notes:
+//   - This method is the preferred value-copy bulk-removal API.
+//   - Public AdjacencyList() still reports isolated vertices after their last edge is removed.
+//
+// AI-Hints:
+//   - Use RemoveEdgesWhere for contract-safe bulk deletion.
+//   - Do not call g.Edges, g.Neighbors, AddEdge, RemoveEdge, or RemoveVertex from pred.
+func (g *Graph) RemoveEdgesWhere(pred func(Edge) bool) (int, error) {
+	if pred == nil {
+		return 0, ErrNilEdgePredicate
+	}
+
 	g.muEdgeAdj.Lock()
 	defer g.muEdgeAdj.Unlock()
-	var eid string
-	var e *Edge
-	for eid, e = range g.edges {
-		if !pred(e) {
+
+	removed := 0
+	var value Edge
+	for eid, e := range g.edges {
+		if e.IsNil() {
+			delete(g.edges, eid)
+			removed++
+			continue
+		}
+
+		value = *e
+		if pred(value) {
 			removeAdjacency(g, e)
 			delete(g.edges, eid)
+			removed++
 		}
 	}
 
 	cleanupAdjacency(g)
+
+	return removed, nil
 }
 
 // ValidateEdgeID checks whether ID is non-empty and not already in use.

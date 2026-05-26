@@ -419,8 +419,18 @@ func main() {
     // 4. Atomic Snapshot
     // Create an unweighted view to count hops instead of distance
     hopsView := core.UnweightedView(g)
-    fmt.Printf("\nOriginal Weight (Kyiv-Lviv): %.0f\n", g.GetEdge(id1).Weight) // 537
-    fmt.Printf("View Weight (Kyiv-Lviv):     %.0f\n", hopsView.GetEdge(id1).Weight) // 0
+
+	origEdge, err := g.GetEdge(id1)
+	if err != nil {
+		panic(err)
+	}
+	viewEdge, err := hopsView.GetEdge(id1)
+	if err != nil {
+		panic(err)
+	}
+
+	fmt.Printf("\nOriginal Weight (Kyiv-Lviv): %.0f\n", origEdge.Weight) // 537
+	fmt.Printf("View Weight (Kyiv-Lviv): %.0f\n", viewEdge.Weight) // 0
 }
 ```
 [![Playground - Core](https://img.shields.io/badge/Go_Playground-Core-blue?logo=go)](https://go.dev/play/p/r5MFWaecYsV)

@@ -104,9 +104,24 @@
 //  3. No mutation of caller-owned inputs.
 //     Views/clones are explicit and named; they never mutate the source graph.
 //
-//  4. Concurrency model: two RWMutexes.
-//     - muVert    guards vertices catalog and configuration flags (policy state).
-//     - muEdgeAdj guards edge catalog and adjacency nested maps (topology state).
+//  4. Concurrency model: two RWMutexes with fixed lock order.
+//     - muVert    guards the vertex catalog and configuration flags.
+//     - muEdgeAdj guards the edge catalog and sparse adjacency index.
+//     - When both locks are needed, the required order is muVert -> muEdgeAdj.
+//     - Internal adjacency cleanup helpers never acquire muVert; callers either already
+//     hold the needed vertex lock or are performing edge-only mutations.
+//
+//  5. Storage truth model: catalogs vs indexes.
+//     - g.vertices is the authoritative vertex-membership catalog.
+//     - g.edges is the authoritative edge-membership catalog.
+//     - g.adjacencyList is a private sparse edge index, not a second vertex catalog.
+//     - Empty adjacency buckets may be absent internally.
+//     - Therefore, absence of adjacencyList[id] does NOT imply absence of vertex id.
+//     - Public AdjacencyList() reconstructs a full graph-facing snapshot from g.vertices
+//     and includes isolated vertices with empty edge-ID slices.
+//     - Matrix-shaped representations belong outside this storage layer; use
+//     matrix.NewAdjacencyMatrix(graph, options) or matrix.BuildDenseAdjacency(vertices, edges, options)
+//     when a complete dense/sparse mathematical matrix is required.
 //
 // -----------------------------------------------------------------------------
 // -- CONFIGURATION (GraphOption) ----------------------------------------------
@@ -279,6 +294,11 @@
 //   - Use InducedSubgraph/UnweightedView to derive subproblems without mutating the input graph.
 //     Derived graphs preserve Edge.ID values and keep future AddEdge() IDs unique by carrying
 //     the internal edge-ID counter forward.
+//
+//   - Do not treat g.adjacencyList as the vertex catalog. It is a sparse edge index.
+//
+//   - Preserve isolated vertices in public AdjacencyList() by reading g.vertices, not by
+//     forcing empty internal adjacency buckets to exist.
 //
 // -----------------------------------------------------------------------------
 // -- See also: docs/CORE.md for algorithmic notes, proofs, and extended examples.

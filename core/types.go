@@ -338,26 +338,33 @@ func WithMixedEdges() GraphOption {
 //
 // Implementation:
 //   - Stage 1: AddEdge performs stateless validation, including nil EdgeOption rejection.
-//   - Stage 2: AddEdge builds a baseline Edge (defaults + endpoints + weight).
+//   - Stage 2: AddEdge builds a baseline Edge from the validated endpoints, weight,
+//     and graph default directedness.
 //   - Stage 3: AddEdge applies EdgeOptions sequentially; the first error aborts edge publication.
+//   - Stage 4: AddEdge validates that options did not mutate topology-owned fields
+//     before assigning an ID or publishing adjacency.
 //
 // Behavior highlights:
 //   - Options MUST NOT panic as part of the public contract.
 //   - A nil EdgeOption is rejected with ErrNilEdgeOption before invocation.
 //   - Options MUST NOT mutate global graph state as a side effect.
+//   - Options may set only Edge.ID and, when mixed mode is enabled, Edge.Directed.
+//   - Options MUST NOT mutate Edge.From, Edge.To, or Edge.Weight.
 //   - Options should be O(1) and deterministic.
 //
 // Inputs:
-//   - g: the owning graph (read-only for options; do not mutate global state).
-//   - e: the edge being configured (options may mutate only this edge).
+//   - g: the owning graph; options may inspect immutable policy flags and the edge catalog
+//     only as documented by the specific option.
+//   - e: the unpublished edge being configured.
 //
 // Returns:
-//   - error: nil on success; otherwise a sentinel error
-//     (ErrMixedEdgesNotAllowed, ErrEmptyEdgeID, ErrEdgeIDConflict, ...).
+//   - error: nil on success; otherwise a stable sentinel error
+//     (ErrMixedEdgesNotAllowed, ErrEmptyEdgeID, ErrEdgeIDConflict, ErrInvalidEdgeOption, ...).
 //
 // Errors:
 //   - Nil option values are rejected by AddEdge with ErrNilEdgeOption before invocation.
-//   - Non-nil options must return only stable sentinels (checked via errors.Is).
+//   - Endpoint or weight mutation is rejected by AddEdge with ErrInvalidEdgeOption.
+//   - Directedness override without mixed mode is rejected with ErrMixedEdgesNotAllowed.
 //
 // Determinism:
 //   - Deterministic given deterministic inputs; option order is call-order stable.
@@ -367,10 +374,10 @@ func WithMixedEdges() GraphOption {
 //
 // Notes:
 //   - AddEdge applies non-nil options under the edge/adjacency write lock;
-//     options must not take additional locks.
+//     options must not take additional graph locks or call graph methods.
 //
 // AI-Hints:
-//   - Keep options “local”: modify only *e and validate against graph capability flags.
+//   - Keep options local: set ID or allowed directedness only; never rewrite endpoints.
 type EdgeOption func(g *Graph, e *Edge) error
 
 // WithEdgeDirected overrides directedness for a single edge.
@@ -474,57 +481,88 @@ func WithID(id string) EdgeOption {
 	}
 }
 
-// Graph is a thread-safe, deterministic in-memory graph.
+// Graph is a thread-safe, deterministic in-memory graph storage kernel.
+//
+// Contract role:
+//   - Graph stores vertices and edges; it does not implement graph algorithms.
+//   - Algorithm packages must consume Graph through documented public methods
+//     (Vertices, Edges, Neighbors, NeighborIDs, AdjacencyList, Stats, ...), not by
+//     assuming internal map shapes.
 //
 // Concurrency model:
-//   - muVert protects vertex-level state (vertices map).
-//   - muEdgeAdj protects edges map and adjacencyList.
-//   - Locks are separated to reduce contention in algorithms that iterate neighbors frequently.
+//   - muVert protects the vertex catalog and immutable configuration flags.
+//   - muEdgeAdj protects the edge catalog and the private sparse adjacency index.
+//   - If a method needs both locks, it must acquire muVert before muEdgeAdj.
+//   - Edge-only mutations do not acquire muVert because they do not change vertex membership.
 //
 // Storage model:
-//   - vertices: map[string]*Vertex - vertex catalog by ID.
-//   - edges:    map[string]*Edge   - edge catalog by unique Edge.ID.
-//   - adjacencyList: map[fromID]map[toID]map[edgeID]struct{} for O(1) membership.
+//   - vertices is the authoritative vertex catalog: if vertices[id] exists, the vertex exists.
+//   - edges is the authoritative edge catalog: if edges[eid] exists, the edge exists.
+//   - adjacencyList is a private sparse edge index: fromID -> toID -> edgeID -> unit.
+//   - adjacencyList is NOT a complete vertex mirror. Isolated vertices may have no
+//     top-level adjacency bucket internally.
+//   - Missing adjacencyList[id] means “no indexed outgoing/incident bucket currently stored”,
+//     not “vertex id is absent”. Vertex existence is resolved through vertices.
+//
+// Public adjacency surfaces:
+//   - Use (*Graph).AdjacencyList() for a full graph-facing adjacency snapshot. It includes
+//     every current vertex from vertices, including isolated vertices with empty slices.
+//   - Use package matrix helpers for matrix-shaped representations, e.g.
+//     matrix.NewAdjacencyMatrix(graph, options) or
+//     matrix.BuildDenseAdjacency(vertices, edges, options).
 //
 // Configuration flags:
-//   - directed/weighted/allowMulti/allowLoops/allowMixed are set only during construction
-//     and remain immutable afterwards.
+//   - directed/weighted/allowMulti/allowLoops/allowMixed are set during construction and
+//     treated as immutable afterwards.
 //
 // ID generation:
 //   - Auto edge IDs are "eN" where N is a monotonically increasing counter.
-//   - WithID/SetEdgeID bump the counter when assigning canonical "eN" IDs.
+//   - WithID and SetEdgeID bump the counter when assigning canonical "eN" IDs.
 //
 // Determinism:
 //   - Public enumeration order is stable and documented at package level.
+//   - Internal map iteration order is never part of the contract.
 //
 // Notes:
-//   - Clone is expected to carry over the counter to prevent collisions.
+//   - Clone/view code must preserve edge IDs and nextEdgeID to prevent future collisions.
+//   - Do not add public APIs that expose adjacencyList directly; it is an implementation index.
+//
+// AI-Hints:
+//   - Do not “fix” isolated vertices by storing fake adjacencyList[id][id] empty buckets.
+//   - Do not read or write adjacencyList without muEdgeAdj.
+//   - Do not read or write vertices without muVert.
 type Graph struct {
-	// muVert guards vertex map and configuration flags to allow safe, low-contention reads.
+	// muVert guards the vertex catalog and construction-time configuration flags.
+	// Required lock order when both locks are needed: muVert -> muEdgeAdj.
 	muVert sync.RWMutex
 
-	// muEdgeAdj guards edge catalog and adjacency list for consistent graph topology updates.
+	// muEdgeAdj guards the edge catalog and the private sparse adjacency index.
+	// Edge-only mutations use this lock without muVert because they do not change vertex membership.
 	muEdgeAdj sync.RWMutex
 
-	// Configuration flags (read under muVert; written only during construction).
+	// Configuration flags (written during construction, read afterwards under muVert).
 	directed   bool // default directedness for future edges
-	weighted   bool // allow non-zero weights
-	allowMulti bool // allow parallel edges
-	allowLoops bool // allow self-loops
-	allowMixed bool // allow per-edge directedness overrides (mixed mode)
+	weighted   bool // permits non-zero finite weights
+	allowMulti bool // permits parallel edges between the same effective endpoints
+	allowLoops bool // permits self-loops (from == to)
+	allowMixed bool // permits per-edge directedness overrides
 
-	// nextEdgeID is the next sequential ID number to use for auto-generated edge IDs.
+	// nextEdgeID is the next sequential number for generated edge IDs.
 	// It is incremented atomically. Custom edge IDs (via WithID) overwrite ID, but don't change the counting process.
+	// It is accessed while mutating edge identity under muEdgeAdj.
 	nextEdgeID uint64
 
-	// Vertex catalog: ID -> *Vertex (caller-visible IDs, stable across runtime).
+	// vertices is the authoritative vertex catalog: vertex ID -> vertex record.
+	// This map, not adjacencyList, defines vertex membership.
 	vertices map[string]*Vertex
 
-	// Edge catalog: EdgeID -> *Edge (unique identities across the graph’s lifetime).
+	// edges is the authoritative edge catalog: edge ID -> edge record.
+	// Adjacency buckets only index these edge IDs for fast neighborhood lookup.
 	edges map[string]*Edge
 
-	// Adjacency: fromID -> toID -> edgeID -> unit. Provides O(1) membership checks
-	// and deterministic extraction (final sorting happens at API boundaries).
+	// adjacencyList is a private sparse edge index: fromID -> toID -> edgeID -> unit.
+	// It is intentionally not a full mirror of vertices. Isolated vertices may be absent here.
+	// Public AdjacencyList() reconstructs full per-vertex output from vertices + this index.
 	adjacencyList map[string]map[string]map[string]struct{}
 }
 

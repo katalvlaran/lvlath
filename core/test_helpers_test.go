@@ -11,7 +11,6 @@ package core_test
 
 import (
 	"errors"
-	"fmt"
 	"sort"
 	"testing"
 
@@ -20,7 +19,8 @@ import (
 
 // Common vertex IDs used across core tests.
 const (
-	VertexEmpty = ""
+	VertexEmpty   = ""
+	VertexMissing = "missing"
 
 	VertexA = "A"
 	VertexB = "B"
@@ -64,6 +64,7 @@ const (
 	Count1 = 1
 	Count2 = 2
 	Count3 = 3
+	Count4 = 4
 )
 
 // Common concurrency sizes used across core tests (avoid magic numbers in test bodies).
@@ -76,6 +77,75 @@ const (
 	NReaders = 50
 	NCloners = 20
 )
+
+// ---------- special test data ----------
+const (
+	vertexJohn    = "John"
+	vertexMary    = "Mary"
+	vertexAlice   = "Alice"
+	vertexBob     = "Bob"
+	vertexCharlie = "Charlie"
+	vertexDavid   = "David"
+	vertexEmma    = "Emma"
+	vertexFrank   = "Frank"
+	vertexGrace   = "Grace"
+	vertexHenry   = "Henry"
+	vertexIvy     = "Ivy"
+)
+
+const (
+	socialVertexCount       = 11
+	socialTriangleEdgeCount = 3
+	socialGroupEdgeCount    = 11
+	socialTotalEdgeCount    = socialTriangleEdgeCount + socialGroupEdgeCount
+	socialAfterHenryEdges   = 6
+)
+
+func newSocialComponentsGraph(t *testing.T) *core.Graph {
+	t.Helper()
+
+	g := MustNewGraph(t)
+	for _, id := range []string{
+		vertexJohn, vertexMary, // single vertices
+		vertexAlice, vertexBob, vertexCharlie, // triangle vertices
+		vertexDavid, vertexEmma, vertexFrank, vertexGrace, vertexHenry, vertexIvy, // group vertices
+	} {
+		MustErrorNil(t, g.AddVertex(id), "AddVertex("+id+")")
+	}
+
+	_, err := g.AddEdge(vertexAlice, vertexBob, Weight0, core.WithID("triangle_alice_bob"))
+	MustErrorNil(t, err, "AddEdge("+vertexAlice+","+vertexBob+",triangle_alice_bob)")
+	_, err = g.AddEdge(vertexBob, vertexCharlie, Weight0, core.WithID("triangle_bob_charlie"))
+	MustErrorNil(t, err, "AddEdge("+vertexBob+","+vertexCharlie+",triangle_bob_charlie)")
+	_, err = g.AddEdge(vertexCharlie, vertexAlice, Weight0, core.WithID("triangle_charlie_alice"))
+	MustErrorNil(t, err, "AddEdge("+vertexCharlie+","+vertexAlice+",triangle_charlie_alice)")
+	_, err = g.AddEdge(vertexDavid, vertexEmma, Weight0, core.WithID("group_david_emma"))
+	MustErrorNil(t, err, "AddEdge("+vertexDavid+","+vertexEmma+",group_david_emma)")
+	_, err = g.AddEdge(vertexDavid, vertexFrank, Weight0, core.WithID("group_david_frank"))
+	MustErrorNil(t, err, "AddEdge("+vertexDavid+","+vertexFrank+",group_david_frank)")
+	_, err = g.AddEdge(vertexDavid, vertexGrace, Weight0, core.WithID("group_david_grace"))
+	MustErrorNil(t, err, "AddEdge("+vertexDavid+","+vertexGrace+",group_david_grace)")
+	_, err = g.AddEdge(vertexDavid, vertexHenry, Weight0, core.WithID("group_david_henry"))
+	MustErrorNil(t, err, "AddEdge("+vertexDavid+","+vertexHenry+",group_david_henry)")
+	_, err = g.AddEdge(vertexEmma, vertexHenry, Weight0, core.WithID("group_emma_henry"))
+	MustErrorNil(t, err, "AddEdge("+vertexEmma+","+vertexHenry+",group_emma_henry)")
+	_, err = g.AddEdge(vertexEmma, vertexGrace, Weight0, core.WithID("group_emma_grace"))
+	MustErrorNil(t, err, "AddEdge("+vertexEmma+","+vertexGrace+",group_emma_grace)")
+	_, err = g.AddEdge(vertexEmma, vertexIvy, Weight0, core.WithID("group_emma_ivy"))
+	MustErrorNil(t, err, "AddEdge("+vertexEmma+","+vertexIvy+",group_emma_ivy)")
+	_, err = g.AddEdge(vertexFrank, vertexHenry, Weight0, core.WithID("group_frank_henry"))
+	MustErrorNil(t, err, "AddEdge("+vertexFrank+","+vertexHenry+",group_frank_henry)")
+	_, err = g.AddEdge(vertexGrace, vertexHenry, Weight0, core.WithID("group_grace_henry"))
+	MustErrorNil(t, err, "AddEdge("+vertexGrace+","+vertexHenry+",group_grace_henry)")
+	_, err = g.AddEdge(vertexGrace, vertexIvy, Weight0, core.WithID("group_grace_ivy"))
+	MustErrorNil(t, err, "AddEdge("+vertexGrace+","+vertexIvy+",group_grace_ivy)")
+	_, err = g.AddEdge(vertexHenry, vertexIvy, Weight0, core.WithID("group_henry_ivy"))
+	MustErrorNil(t, err, "AddEdge("+vertexHenry+","+vertexIvy+",group_henry_ivy)")
+
+	return g
+}
+
+// ---------- special test data ----------
 
 // MustNewGraph constructs a graph for tests and fails the owning test on constructor error.
 //
@@ -777,25 +847,17 @@ func MustAllErrorsNil(t *testing.T, errCh <-chan error, op string) {
 	}
 }
 
-// MustPanic asserts that f panics and that the panic value stringifies to expectedMsg.
-//
-// Notes:
-//   - Use only for programmer-error contracts (e.g., construction-time option misuse).
-//   - core runtime API must not require panics for user input.
-func MustPanic(t *testing.T, f func(), expectedMsg string, op string) {
+func MustGraphCounts(t *testing.T, g *core.Graph, wantVertices, wantEdges int, op string) {
 	t.Helper()
+	MustEqualInt(t, g.VertexCount(), wantVertices, op+" VertexCount")
+	MustEqualInt(t, g.EdgeCount(), wantEdges, op+" EdgeCount")
+}
 
-	defer func() {
-		r := recover()
-		if r == nil {
-			t.Fatalf("%s: expected panic, but no panic occurred", op)
-		}
-
-		msg := fmt.Sprint(r) // convert recovered value to string
-		if msg != expectedMsg {
-			t.Fatalf("%s: expected panic message %q, got %q", op, expectedMsg, msg)
-		}
-	}()
-
-	f() // execute the function expected to panic
+func MustUndirectedDegree(t *testing.T, g *core.Graph, id string, want int) {
+	t.Helper()
+	in, out, undirected, err := g.Degree(id)
+	MustErrorNil(t, err, "Degree("+id+")")
+	MustEqualInt(t, in, Count0, "Degree("+id+").in")
+	MustEqualInt(t, out, Count0, "Degree("+id+").out")
+	MustEqualInt(t, undirected, want, "Degree("+id+").undirected")
 }

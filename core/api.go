@@ -236,41 +236,58 @@ func (g *Graph) MixedEdges() bool {
 	return g.allowMixed // return mixed-mode configuration flag
 }
 
-// Stats produces a deterministic, read-only snapshot of configuration flags and catalog sizes,
-// including a classification of edges by their Directed flag.
+// Stats produces a deterministic, read-only diagnostic summary of configuration flags,
+// catalog sizes, and edge directedness counts.
+//
+// Snapshot category:
+//   - BestEffortSnapshot under concurrent mutation.
+//   - Strict for a fixed graph state with no concurrent mutation.
 //
 // Implementation:
-//   - Stage 1: Acquire muVert.RLock, snapshot flags and vertex count, then release.
-//   - Stage 2: Acquire muEdgeAdj.RLock, snapshot edge count and scan edges, then release.
+//   - Stage 1: Acquire muVert.RLock(), snapshot immutable configuration flags and vertex count,
+//     then release muVert.RLock().
+//   - Stage 2: Acquire muEdgeAdj.RLock(), snapshot edge count and scan the edge catalog once,
+//     then release muEdgeAdj.RLock().
+//   - Stage 3: Return the populated GraphStats value object.
 //
 // Behavior highlights:
-//   - Avoids holding both locks simultaneously (reduces contention and avoids lock-order hazards).
-//   - Returns a compact value object suitable for diagnostics and admission checks.
+//   - Avoids holding both locks simultaneously, reducing contention for diagnostics.
+//   - The returned *GraphStats is detached from the graph and immutable by convention.
+//   - Under concurrent mutation, vertex/config fields and edge counters may come from
+//     different read phases; callers must not treat it as a linearizable topology snapshot.
 //
 // Returns:
-//   - *GraphStats: immutable-by-convention snapshot of flags and counts.
+//   - *GraphStats: detached summary of policy flags and catalog counters.
 //
 // Errors:
 //   - None.
 //
 // Determinism:
-//   - Deterministic for a fixed graph state; if the graph is mutated concurrently,
-//     the snapshot reflects a consistent read per phase (flags/vertices, then edges).
+//   - Deterministic for a fixed graph state.
+//   - Under concurrent mutation, each phase is internally consistent, but the whole
+//     result is best-effort telemetry rather than a strict transaction snapshot.
 //
 // Complexity:
-//   - Time O(V+E), Space O(1) plus the returned struct.
+//   - Time O(E), Space O(1) plus the returned struct.
 //
 // Notes:
-//   - DirectedDefault reports the *default policy*, not whether directed edges exist.
+//   - DirectedDefault reports the default policy for new edges, not whether directed edges exist.
+//   - Use HasDirectedEdges or DirectedEdgeCount when gating algorithms by current topology.
 //
 // AI-Hints:
 //   - Use Stats() to gate algorithms quickly (e.g., ensure Weighted==true before reading weights).
+//   - Do not use Stats() as a strict concurrent admission primitive unless the caller owns
+//     external synchronization.
 func (g *Graph) Stats() *GraphStats {
 	// AI-HINT: Deterministic, read-only summary for assertions and tests.
 	//          DirectedEdgeCount/UndirectedEdgeCount scan edge catalog once (O(E)).
 
 	// First phase: capture configuration flags and vertex count under muVert.
-	g.muVert.RLock() // lock config/vertices for consistent reads
+	g.muVert.RLock()            // lock config/vertices for consistent reads
+	defer g.muVert.RUnlock()    // release muVert ASAP to minimize contention
+	g.muEdgeAdj.RLock()         // lock edge catalog and adjacency for consistent scanning
+	defer g.muEdgeAdj.RUnlock() // release edges/adjacency lock
+
 	stats := GraphStats{
 		DirectedDefault: g.directed,      // record default orientation
 		Weighted:        g.weighted,      // record weight policy
@@ -278,13 +295,10 @@ func (g *Graph) Stats() *GraphStats {
 		AllowsLoops:     g.allowLoops,    // record loop policy
 		MixedMode:       g.allowMixed,    // record mixed-mode policy
 		VertexCount:     len(g.vertices), // snapshot of vertex catalog size
-		// Edge counters will be filled in second phase under muEdgeAdj.
+		EdgeCount:       len(g.edges),    // snapshot of edge catalog size
 	}
-	g.muVert.RUnlock() // release muVert ASAP to minimize contention
 
 	// Second phase: compute edge counters under muEdgeAdj.
-	g.muEdgeAdj.RLock()            // lock edge catalog and adjacency for consistent scanning
-	stats.EdgeCount = len(g.edges) // snapshot of edge catalog size
 	var e *Edge
 	for _, e = range g.edges { // single pass over all edges (O(E))
 		if e.Directed { // classify by Directed flag
@@ -293,7 +307,6 @@ func (g *Graph) Stats() *GraphStats {
 			stats.UndirectedEdgeCount++ // undirected edge encountered
 		}
 	}
-	g.muEdgeAdj.RUnlock() // release edges/adjacency lock
 
 	// Return a pointer to the fully populated, immutable-by-convention summary.
 	return &stats

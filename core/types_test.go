@@ -9,8 +9,6 @@
 package core_test
 
 import (
-	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/core"
@@ -115,327 +113,146 @@ func TestGraph_NewGraphRejectsNilOption(t *testing.T) {
 	}
 }
 
-// TestGraph_VertexLifecycle ASSERTS AddVertex/HasVertex/RemoveVertex invariants.
-//
+// TestGraph_StatsSnapshot VERIFIES GraphStats matches graph counts, flags, and directed/undirected tallies.
 // Implementation:
-//   - Stage 1: Create a graph.
-//   - Stage 2: Reject empty ID on AddVertex.
-//   - Stage 3: Add a vertex and validate presence.
-//   - Stage 4: Duplicate AddVertex is no-op.
-//   - Stage 5: RemoveVertex rejects empty and missing IDs.
-//   - Stage 6: Remove existing vertex and validate absence.
+//   - Stage 1: Create a weighted mixed graph with undirected default.
+//   - Stage 2: Add vertices explicitly for deterministic VertexCount.
+//   - Stage 3: Add one undirected edge and one directed override edge.
+//   - Stage 4: Call Stats() and assert counts/flags/tallies.
 //
 // Behavior highlights:
-//   - Locks in sentinel errors for empty/missing IDs.
+//   - Locks in Stats() as a coherent diagnostic snapshot (O(V+E)).
 //
 // Inputs:
-//   - None.
+//   - None (uses package constants).
 //
 // Returns:
 //   - None.
 //
 // Errors:
-//   - Fatal on mismatch.
+//   - Propagates sentinels from AddVertex/AddEdge.
+//
+// Determinism:
+//   - Deterministic for a fixed single-threaded graph state.
+//
+// Complexity:
+//   - Time O(V+E) if Stats walks catalogs, Space O(1) extra.
+//
+// Notes:
+//   - DirectedDefault describes the graph default, not the presence of directed edges.
+//
+// AI-Hints:
+//   - Treat Stats() as best-effort for metrics; avoid correctness-critical dependence under concurrent mutation.
+func TestGraph_StatsSnapshot(t *testing.T) {
+	// Stage 1: Create a weighted mixed graph with an explicit undirected default.
+	g, _ := core.NewGraph(core.WithDirected(false), core.WithWeighted(), core.WithMixedEdges())
+
+	// Stage 2: Add vertices explicitly so VertexCount is deterministic.
+	MustErrorNil(t, g.AddVertex(VertexA), "AddVertex(A) setup for Stats()")
+	MustErrorNil(t, g.AddVertex(VertexB), "AddVertex(B) setup for Stats()")
+	MustErrorNil(t, g.AddVertex(VertexC), "AddVertex(C) setup for Stats()")
+
+	// Stage 3: Add one undirected edge (default) and one directed override edge.
+	_, err := g.AddEdge(VertexA, VertexB, Weight1)
+	MustErrorNil(t, err, "AddEdge(A,B,1) undirected default on mixed graph")
+	_, err = g.AddEdge(VertexB, VertexC, Weight2, core.WithEdgeDirected(true))
+	MustErrorNil(t, err, "AddEdge(B,C,2,WithEdgeDirected(true)) on mixed graph")
+
+	// Stage 4: Read stats snapshot.
+	s := g.Stats()
+
+	// Stage 4: Counts must match public counters.
+	MustEqualInt(t, s.VertexCount, g.VertexCount(), "Stats.VertexCount must match VertexCount()")
+	MustEqualInt(t, s.EdgeCount, g.EdgeCount(), "Stats.EdgeCount must match EdgeCount()")
+
+	// Stage 4: Flags must reflect constructor options.
+	MustEqualBool(t, s.DirectedDefault, false, "Stats.DirectedDefault must be false for WithDirected(false)")
+	MustEqualBool(t, s.Weighted, true, "Stats.Weighted must be true for WithWeighted()")
+	MustEqualBool(t, s.MixedMode, true, "Stats.MixedMode must be true for WithMixedEdges()")
+	MustEqualBool(t, s.AllowsMulti, false, "Stats.AllowsMulti must be false when WithMultiEdges() is not set")
+	MustEqualBool(t, s.AllowsLoops, false, "Stats.AllowsLoops must be false when WithLoops() is not set")
+
+	// Stage 4: Directed/undirected edge tallies must match this construction.
+	MustEqualInt(t, s.DirectedEdgeCount, Count1, "Stats.DirectedEdgeCount must be 1 (one override-directed edge)")
+	MustEqualInt(t, s.UndirectedEdgeCount, Count1, "Stats.UndirectedEdgeCount must be 1 (one default-undirected edge)")
+	MustEqualInt(t, s.EdgeCount, Count2, "Stats.EdgeCount must be 2 in this setup")
+}
+
+// TestGraph_LoopedAndMixedEdgesAccessors verifies immutable policy accessors.
+// Looped() and MixedEdges() report immutable construction-time policy flags.
+func TestGraph_LoopedAndMixedEdgesAccessors(t *testing.T) {
+	plain := MustNewGraph(t)
+	MustEqualBool(t, plain.Looped(), false, "plain.Looped()")
+	MustEqualBool(t, plain.MixedEdges(), false, "plain.MixedEdges()")
+
+	configured := MustNewMixedGraph(t, core.WithLoops())
+	MustEqualBool(t, configured.Looped(), true, "configured.Looped()")
+	MustEqualBool(t, configured.MixedEdges(), true, "configured.MixedEdges()")
+}
+
+// TestVertex_IsNilTypedNil verifies reflect-free typed-nil classification through core.Nilable.
+// Typed nil *Vertex implements core.Nilable safely without reflection-heavy callers.
+func TestVertex_IsNilTypedNil(t *testing.T) {
+	var v *core.Vertex
+	var n core.Nilable = v
+
+	MustEqualBool(t, v.IsNil(), true, "typed nil *Vertex IsNil")
+	MustEqualBool(t, n.IsNil(), true, "typed nil *Vertex through Nilable")
+	MustEqualBool(t, (&core.Vertex{ID: VertexA}).IsNil(), false, "non-nil *Vertex IsNil")
+}
+
+// TestGraph_ClearPreservesFlagsAndResetsState VERIFIES Clear() empties the graph but preserves flags.
+// Implementation:
+//   - Stage 1: Create a configured graph and add at least one edge.
+//   - Stage 2: Call Clear().
+//   - Stage 3: Assert counts are zero and configuration flags are unchanged.
+//   - Stage 4: Assert edge ID counter resets ("e1" is returned for the first new edge).
+//
+// Behavior highlights:
+//   - Clear() is a topology reset, not a configuration reset.
+//
+// Inputs:
+//   - None (uses package constants).
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Propagates any sentinels from AddEdge.
 //
 // Determinism:
 //   - Deterministic.
 //
 // Complexity:
-//   - Time O(k log k) due to Vertices() sorting during count checks (implementation-dependent).
+//   - Time O(1) expected, Space O(1) extra.
 //
 // Notes:
-//   - This test relies on Vertices() being stable and safe.
+//   - "e1" reset is a documented ID contract (types.go + doc.go).
 //
 // AI-Hints:
-//   - Keep vertex IDs short and consistent to avoid noise in failure output.
-func TestGraph_VertexLifecycle(t *testing.T) {
-	g := NewGraphFull(t)
+//   - Use Clear() to reuse configured graphs without reallocating options repeatedly.
+func TestGraph_ClearPreservesFlagsAndResetsState(t *testing.T) {
+	// Stage 1: Create a configured graph and add an edge to advance the internal ID counter.
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 
-	err := g.AddVertex(VertexEmpty)
-	MustErrorIs(t, err, core.ErrEmptyVertexID, "AddVertex(empty)")
+	// Add one edge to ensure the graph is non-empty before Clear().
+	_, err := g.AddEdge(VertexA, VertexB, Weight5)
+	MustErrorNil(t, err, "AddEdge(A,B,5) setup for Clear()")
 
-	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1)")
-	MustEqualBool(t, g.HasVertex(VertexV1), true, "HasVertex(V1) after AddVertex(V1)")
+	// Stage 2: Clear the graph.
+	g.Clear()
 
-	before := len(g.Vertices())
-	MustErrorNil(t, g.AddVertex(VertexV1), "AddVertex(V1) duplicate")
-	after := len(g.Vertices())
-	MustEqualInt(t, after, before, "duplicate AddVertex(V1) must not change vertex count")
+	// Stage 3: Counts must be zero.
+	MustEqualInt(t, g.VertexCount(), Count0, "VertexCount() after Clear()")
+	MustEqualInt(t, g.EdgeCount(), Count0, "EdgeCount() after Clear()")
 
-	err = g.RemoveVertex("Z")
-	MustErrorIs(t, err, core.ErrVertexNotFound, "RemoveVertex(Z missing)")
+	// Stage 3: Flags must be preserved.
+	MustEqualBool(t, g.Directed(), true, "Directed() must be preserved after Clear()")
+	MustEqualBool(t, g.Weighted(), true, "Weighted() must be preserved after Clear()")
+	MustEqualBool(t, g.Multigraph(), true, "Multigraph() must be preserved after Clear()")
 
-	err = g.RemoveVertex(VertexEmpty)
-	MustErrorIs(t, err, core.ErrEmptyVertexID, "RemoveVertex(empty)")
-
-	MustErrorNil(t, g.RemoveVertex(VertexV1), "RemoveVertex(V1)")
-	MustEqualBool(t, g.HasVertex(VertexV1), false, "HasVertex(V1) after RemoveVertex(V1)")
-}
-
-// TestGraph_AtomicEdgeIDs ASSERTS concurrent AddEdge yields unique IDs.
-//
-// Implementation:
-//   - Stage 1: Create feature-rich graph (multi-edge enabled).
-//   - Stage 2: Spawn NAtomicEdgeIDs goroutines adding edges A->B with varying weights.
-//   - Stage 3: Goroutines send errors/IDs to channels (no *testing.T inside goroutines).
-//   - Stage 4: Assert no errors, and set size equals NAtomicEdgeIDs.
-//
-// Behavior highlights:
-//   - Locks in uniqueness property of edge IDs under contention.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal if any AddEdge fails or uniqueness is violated.
-//
-// Determinism:
-//   - Schedule nondeterministic; uniqueness assertion deterministic.
-//
-// Complexity:
-//   - Time O(N), Space O(N).
-//
-// Notes:
-//   - This test does not assert the *format* of IDs (only uniqueness/non-emptiness).
-//
-// AI-Hints:
-//   - If you later formalize ID format, extend this test with a parser and pattern assertions.
-func TestGraph_AtomicEdgeIDs(t *testing.T) {
-	g := NewGraphFull(t)
-
-	idCh := make(chan string, NAtomicEdgeIDs)
-	errCh := make(chan error, NAtomicEdgeIDs)
-
-	var wg sync.WaitGroup
-	wg.Add(NAtomicEdgeIDs)
-
-	var i int
-	for i = 0; i < NAtomicEdgeIDs; i++ {
-		go func(i int) {
-			defer wg.Done()
-
-			eid, err := g.AddEdge(VertexA, VertexB, float64(i))
-			if err != nil {
-				errCh <- err
-				return
-			}
-			if eid == "" {
-				errCh <- fmt.Errorf("empty edge ID returned")
-				return
-			}
-			idCh <- eid
-		}(i)
-	}
-
-	wg.Wait()
-	close(idCh)
-	close(errCh)
-
-	MustAllErrorsNil(t, errCh, "Atomic edge IDs")
-
-	ids := make(map[string]struct{}, NAtomicEdgeIDs)
-
-	for eid := range idCh {
-		ids[eid] = struct{}{}
-	}
-
-	MustEqualInt(t, len(ids), NAtomicEdgeIDs, "unique edge IDs count")
-}
-
-// TestGraph_AdjacencyMap ASSERTS HasEdge is safe and respects add/remove.
-//
-// Implementation:
-//   - Stage 1: Create a graph.
-//   - Stage 2: Verify HasEdge is false on empty graph.
-//   - Stage 3: Add an edge, verify HasEdge true.
-//   - Stage 4: Remove edge, verify HasEdge false.
-//
-// Behavior highlights:
-//   - Ensures membership queries are safe even before vertices exist.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal on mismatch.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(1) per query under nested-map lookup design, Space O(1).
-//
-// Notes:
-//   - If HasEdge policy changes, update this test only when contract changes.
-//
-// AI-Hints:
-//   - Keep HasEdge usable as a fast-path predicate (must never panic on unknown IDs).
-func TestGraph_AdjacencyMap(t *testing.T) {
-	g := NewGraphFull(t)
-
-	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), false, "HasEdge(P,Q) on empty graph must be false")
-
-	eid, err := g.AddEdge(VertexP, VertexQ, Weight0)
-	MustErrorNil(t, err, "AddEdge(P,Q,0)")
-	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), true, "HasEdge(P,Q) after AddEdge(P,Q)")
-
-	MustErrorNil(t, g.RemoveEdge(eid), "RemoveEdge(eid)")
-	MustEqualBool(t, g.HasEdge(VertexP, VertexQ), false, "HasEdge(P,Q) after RemoveEdge")
-}
-
-// TestGraph_CloneMethods ASSERTS CloneEmpty and Clone semantics.
-//
-// Implementation:
-//   - Stage 1: Create a graph and add representative edges.
-//   - Stage 2: CloneEmpty keeps vertices but drops edges.
-//   - Stage 3: Clone preserves edge IDs and does not alias edge objects.
-//
-// Behavior highlights:
-//   - Deep-copy is verified by pointer inequality (no mutation of returned Edge objects).
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal on mismatch.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(V+E), Space O(V+E) for cloning.
-//
-// Notes:
-//   - Edge objects returned by Graph APIs are treated as read-only by contract.
-//
-// AI-Hints:
-//   - Verify deep-copy by pointer identity, not by mutating Weight (avoids contract violations).
-func TestGraph_CloneMethods(t *testing.T) {
-	g := NewGraphFull(t)
-
-	eidXY, err := g.AddEdge(VertexX, VertexY, Weight1)
-	MustErrorNil(t, err, "AddEdge(X,Y,1)")
-	_, err = g.AddEdge(VertexY, VertexY, Weight2)
-	MustErrorNil(t, err, "AddEdge(Y,Y,2)")
-
-	ce := g.CloneEmpty()
-	MustSameStringSet(t, g.Vertices(), ce.Vertices(), "CloneEmpty preserves vertices")
-	MustEqualInt(t, len(ce.Edges()), 0, "CloneEmpty has no edges")
-
-	c := g.Clone()
-	MustSameStringSet(t, g.Vertices(), c.Vertices(), "Clone preserves vertices")
-	MustSameStringSet(t, ExtractEdgeIDs(g.Edges()), ExtractEdgeIDs(c.Edges()), "Clone preserves edge IDs")
-
-	orig, err := g.GetEdge(eidXY)
-	MustErrorNil(t, err, "GetEdge(eidXY) on original")
-
-	cl, err := c.GetEdge(eidXY)
-	MustErrorNil(t, err, "GetEdge(eidXY) on clone")
-
-	MustEqualBool(t, orig != cl, true, "Clone deep-copy: edge pointers must not alias")
-}
-
-// TestGraph_VerticesMapReadOnly ASSERTS VerticesMap returns a safe snapshot.
-//
-// Implementation:
-//   - Stage 1: Add vertex Z.
-//   - Stage 2: Read VerticesMap snapshot.
-//   - Stage 3: Mutate snapshot.
-//   - Stage 4: Assert original graph is unchanged.
-//
-// Behavior highlights:
-//   - Prevents external mutation through returned maps.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal if snapshot is not read-only.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(V) for snapshot copy, Space O(V).
-//
-// Notes:
-//   - This locks in “defensive copy” behavior for maps.
-//
-// AI-Hints:
-//   - Prefer snapshot APIs when you want a safe iteration without holding graph locks.
-func TestGraph_VerticesMapReadOnly(t *testing.T) {
-	g := NewGraphFull(t)
-
-	MustErrorNil(t, g.AddVertex("Z"), "AddVertex(Z)")
-
-	vm := g.VerticesMap()
-	vm["NEW"] = &core.Vertex{ID: "NEW"}
-
-	MustEqualBool(t, g.HasVertex("NEW"), false, "VerticesMap must be read-only snapshot")
-}
-
-// TestGraph_HasVertexConcurrency ASSERTS concurrent HasVertex/AddVertex does not panic.
-//
-// Implementation:
-//   - Stage 1: Create graph.
-//   - Stage 2: Spawn M goroutines adding vertices and M goroutines reading HasVertex.
-//   - Stage 3: Wait; test passes if no panic.
-//
-// Behavior highlights:
-//   - This is a race/panic detector; validate with `go test -race`.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal only if a panic occurs (implicit).
-//
-// Determinism:
-//   - Nondeterministic schedule; expected stability.
-//
-// Complexity:
-//   - Time O(M), Space O(1) extra.
-//
-// Notes:
-//   - This test intentionally does not assert final counts: it targets safety, not outcome.
-//
-// AI-Hints:
-//   - Keep this test lightweight; rely on -race to detect unsynchronized access.
-func TestGraph_HasVertexConcurrency(t *testing.T) {
-	g := NewGraphFull(t)
-
-	const M = 50
-
-	var wg sync.WaitGroup
-	wg.Add(2 * M)
-
-	var i int
-	for i = 0; i < M; i++ {
-		go func(i int) {
-			defer wg.Done()
-			_ = g.AddVertex(fmt.Sprintf("V%d", i))
-		}(i)
-
-		go func(i int) {
-			defer wg.Done()
-			_ = g.HasVertex(fmt.Sprintf("V%d", i))
-		}(i)
-	}
-
-	wg.Wait()
+	// Stage 4: First edge ID after Clear must reset to "e1".
+	eid, err := g.AddEdge(VertexA, VertexB, Weight5)
+	MustErrorNil(t, err, "AddEdge(A,B,5) after Clear()")
+	MustEqualString(t, eid, EdgeIDFirst, "first edge ID after Clear() must be EdgeIDFirst")
 }

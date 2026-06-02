@@ -1,168 +1,265 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package dtw_test verifies the public DTW contract.
+// These tests protect mathematical behavior rather than implementation accidents.
 package dtw_test
 
 import (
+	"errors"
 	"math"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/dtw"
-	"github.com/stretchr/testify/assert"
 )
 
-// TestDTW_EmptyInput verifies that DTW returns ErrEmptyInput
-// when either input sequence is empty.
-func TestDTW_EmptyInput(t *testing.T) {
-	opts := dtw.DefaultOptions()
+func TestDTWLegacyNilOptionsUsesDefaults(t *testing.T) {
+	dist, path, err := dtw.DTW([]float64{1, 2, 3}, []float64{1, 2, 3}, nil)
 
-	// Empty first sequence
-	_, _, err := dtw.DTW([]float64{}, []float64{1, 2, 3}, &opts)
-	assert.ErrorIs(t, err, dtw.ErrEmptyInput, "empty first sequence should error")
+	mustNoError(t, err, "DTW legacy nil options")
+	mustFloatEqual(t, dist, 0, 0, "DTW legacy nil distance")
 
-	// Empty second sequence
-	_, _, err = dtw.DTW([]float64{1, 2, 3}, []float64{}, &opts)
-	assert.ErrorIs(t, err, dtw.ErrEmptyInput, "empty second sequence should error")
+	if path != nil {
+		t.Fatalf("DTW legacy nil options path: got %+v, want nil", path)
+	}
 }
 
-// TestDTW_BadWindowOption ensures that Window < -1 triggers ErrBadInput.
-func TestDTW_BadWindowOption(t *testing.T) {
-	opts := dtw.DefaultOptions()
-	opts.Window = -2
+func TestOptionsValidateNilReceiverReturnsErrNilOptions(t *testing.T) {
+	var opts *dtw.Options
 
-	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
-	assert.ErrorIs(t, err, dtw.ErrBadInput, "Window < -1 must error ErrBadInput")
+	err := opts.Validate()
+
+	mustErrorIs(t, err, dtw.ErrNilOptions, "Options.Validate nil receiver")
 }
 
-// TestDTW_PathNeedsMatrix ensures ReturnPath=true with non-FullMatrix mode errors.
-func TestDTW_PathNeedsMatrix(t *testing.T) {
+func TestAlignRejectsNilInput(t *testing.T) {
+	res, err := dtw.Align(nil, []float64{1})
+
+	mustErrorIs(t, err, dtw.ErrNilInput, "Align nil input")
+	mustEqualBool(t, res == nil, true, "Align nil input result")
+}
+
+func TestAlignRejectsEmptyInput(t *testing.T) {
+	res, err := dtw.Align([]float64{}, []float64{1})
+
+	mustErrorIs(t, err, dtw.ErrEmptyInput, "Align empty input")
+	mustEqualBool(t, res == nil, true, "Align empty input result")
+}
+
+func TestAlignRejectsNaNInputByDefault(t *testing.T) {
+	res, err := dtw.Align([]float64{1, math.NaN()}, []float64{1, 2})
+
+	mustErrorIs(t, err, dtw.ErrNaNInf, "Align NaN input")
+	mustEqualBool(t, res == nil, true, "Align NaN result")
+}
+
+func TestAlignRejectsPositiveInfinityInputByDefault(t *testing.T) {
+	res, err := dtw.Align([]float64{1, math.Inf(1)}, []float64{1, 2})
+
+	mustErrorIs(t, err, dtw.ErrNaNInf, "Align +Inf input")
+	mustEqualBool(t, res == nil, true, "Align +Inf result")
+}
+
+func TestAlignRejectsNaNPenalty(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithSlopePenalty(math.NaN()),
+	)
+
+	mustErrorIs(t, err, dtw.ErrInvalidPenalty, "WithSlopePenalty(NaN)")
+	mustErrorIs(t, err, dtw.ErrBadInput, "WithSlopePenalty(NaN) preserves ErrBadInput")
+	mustEqualBool(t, res == nil, true, "WithSlopePenalty(NaN) result")
+}
+
+func TestAlignRejectsInvalidWindow(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithWindow(-2),
+	)
+
+	mustErrorIs(t, err, dtw.ErrInvalidWindow, "WithWindow(-2)")
+	mustErrorIs(t, err, dtw.ErrBadInput, "WithWindow(-2) preserves ErrBadInput")
+	mustEqualBool(t, res == nil, true, "WithWindow(-2) result")
+}
+
+func TestAlignRejectsNilOption(t *testing.T) {
+	res, err := dtw.Align([]float64{1}, []float64{1}, nil)
+
+	mustErrorIs(t, err, dtw.ErrNilOption, "Align nil option")
+	mustEqualBool(t, res == nil, true, "Align nil option result")
+}
+
+func TestAlignRejectsNilCostFunc(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithCostFunc(nil),
+	)
+
+	mustErrorIs(t, err, dtw.ErrNilCostFunc, "WithCostFunc(nil)")
+	mustEqualBool(t, res == nil, true, "WithCostFunc(nil) result")
+}
+
+func TestAlignRejectsNaNLocalCost(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithCostFunc(func(_, _ float64) (float64, error) {
+			return math.NaN(), nil
+		}),
+	)
+
+	mustErrorIs(t, err, dtw.ErrNaNInf, "CostFunc NaN")
+	mustEqualBool(t, res == nil, true, "CostFunc NaN result")
+}
+
+func TestAlignRejectsNegativeLocalCost(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithCostFunc(func(_, _ float64) (float64, error) {
+			return -1, nil
+		}),
+	)
+
+	mustErrorIs(t, err, dtw.ErrNegativeCost, "CostFunc negative")
+	mustEqualBool(t, res == nil, true, "CostFunc negative result")
+}
+
+func TestWithCostFuncErrorPropagates(t *testing.T) {
+	errUserCost := errors.New("user cost failed")
+
+	res, err := dtw.Align(
+		[]float64{1},
+		[]float64{1},
+		dtw.WithCostFunc(func(_, _ float64) (float64, error) {
+			return 0, errUserCost
+		}),
+	)
+
+	mustErrorIs(t, err, errUserCost, "user cost error")
+	mustEqualBool(t, res == nil, true, "user cost error result")
+}
+
+func TestLegacyReturnPathRequiresFullMatrix(t *testing.T) {
 	opts := dtw.DefaultOptions()
 	opts.ReturnPath = true
 	opts.MemoryMode = dtw.TwoRows
 
-	_, _, err := dtw.DTW([]float64{1, 2}, []float64{1, 2}, &opts)
-	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "ReturnPath without FullMatrix must error ErrPathNeedsMatrix")
+	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
+
+	mustErrorIs(t, err, dtw.ErrPathNeedsMatrix, "legacy ReturnPath without FullMatrix")
 }
 
-// TestDTW_BasicDistance verifies that identical sequences have zero distance
-// and no path is returned by default.
-func TestDTW_BasicDistance(t *testing.T) {
-	a := []float64{0, 1, 2}
-	b := []float64{0, 1, 2}
-	opts := dtw.DefaultOptions()
-
-	dist, path, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err, "identical sequences should not error")
-	assert.Equal(t, 0.0, dist, "identical sequences must have zero distance")
-	assert.Nil(t, path, "default ReturnPath=false should yield nil path")
-}
-
-// TestDTW_SyntheticDistanceAndPath checks a perfect subsequence match
-// and that the path length equals n + (m-n).
-func TestDTW_SyntheticDistanceAndPath(t *testing.T) {
-	a := []float64{1, 2, 3}
-	b := []float64{1, 2, 2, 3}
-	opts := dtw.DefaultOptions()
-	opts.ReturnPath = true
-	opts.MemoryMode = dtw.FullMatrix
-
-	dist, path, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err, "should not error on perfect match")
-	assert.Equal(t, 0.0, dist, "perfect subsequence match yields zero cost")
-	assert.Len(t, path, 4, "path length should be len(a)+(len(b)-len(a))")
-	assert.Equal(t, dtw.Coord{I: 0, J: 0}, path[0], "first path point")
-	assert.Equal(t, dtw.Coord{I: 2, J: 3}, path[len(path)-1], "last path point")
-}
-
-// TestDTW_WindowConstraint verifies that a strict window = 0
-// with a length mismatch yields +Inf distance.
-func TestDTW_WindowConstraint(t *testing.T) {
+func TestWindowLawMinusOneUnconstrainedZeroStrictDiagonal(t *testing.T) {
 	a := []float64{1, 2, 3}
 	b := []float64{1, 2, 3, 4}
-	opts := dtw.DefaultOptions()
-	opts.Window = 0
-	opts.MemoryMode = dtw.FullMatrix
 
-	dist, _, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err, "should not error with window constraint")
-	assert.True(t, math.IsInf(dist, 1), "window=0 with length mismatch should yield +Inf")
+	res, err := dtw.Align(a, b, dtw.WithWindow(-1))
+	mustNoError(t, err, "Align Window=-1")
+	mustFinite(t, res.Distance, "Window=-1 distance")
+	mustEqualBool(t, res.Reachable, true, "Window=-1 reachable")
+
+	res, err = dtw.Align(a, b, dtw.WithWindow(0))
+	mustNoError(t, err, "Align Window=0")
+	mustInf(t, res.Distance, "Window=0 distance")
+	mustEqualBool(t, res.Reachable, false, "Window=0 reachable")
 }
 
-// TestDTW_SlopePenaltyAffectsDistance ensures that a positive slope penalty
-// increases the computed distance by exactly that penalty.
-func TestDTW_SlopePenaltyAffectsDistance(t *testing.T) {
-	a := []float64{1, 2, 3}
-	b := []float64{1, 1, 2, 3}
+func TestBacktrackFullMatrixBoundaryWithPositivePenalty(t *testing.T) {
+	a := []float64{1}
+	b := []float64{1, 1}
 
-	// No penalty
-	opts := dtw.DefaultOptions()
-	opts.MemoryMode = dtw.FullMatrix
-	dist0, _, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err)
-	assert.Equal(t, 0.0, dist0, "zero penalty allows perfect cost")
+	res, err := dtw.Align(
+		a,
+		b,
+		dtw.WithSlopePenalty(1),
+		dtw.WithReturnPath(true),
+	)
 
-	// Penalty = 1.0
-	opts.SlopePenalty = 1.0
-	dist1, _, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err)
-	assert.Equal(t, 1.0, dist1, "penalty=1.0 adds exactly one unit to distance")
+	mustNoError(t, err, "Align path with positive penalty")
+	mustFloatEqual(t, res.Distance, 1, 0, "positive penalty distance")
+	mustEqualBool(t, res.PathTracked, true, "path tracked")
+	mustPathValid(t, res.Path, len(a), len(b), "positive penalty path")
+	mustDistanceMatchesPath(t, a, b, res.Path, 1, res.Distance, "positive penalty path cost")
 }
 
-// TestDTW_TwoRowsDistanceOnly confirms TwoRows mode matches FullMatrix distance
-// and does not return a path.
-func TestDTW_TwoRowsDistanceOnly(t *testing.T) {
-	a := []float64{0, 1, 2, 3}
-	b := []float64{0, 1, 1, 2, 3}
+func TestReturnPathNoPathClassifiedBeforeBacktracking(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1, 2, 3},
+		[]float64{1, 2, 3, 4},
+		dtw.WithWindow(0),
+		dtw.WithReturnPath(true),
+	)
 
-	// Reference with FullMatrix
-	refOpts := dtw.DefaultOptions()
-	refOpts.MemoryMode = dtw.FullMatrix
-	refDist, _, _ := dtw.DTW(a, b, &refOpts)
+	mustErrorIs(t, err, dtw.ErrNoPath, "ReturnPath no admissible path")
 
-	// TwoRows mode
-	opts := dtw.DefaultOptions()
-	opts.MemoryMode = dtw.TwoRows
-	dist, path, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err)
-	assert.Equal(t, refDist, dist, "TwoRows must match FullMatrix distance")
-	assert.Nil(t, path, "TwoRows should not return a path")
+	if res == nil {
+		t.Fatalf("ReturnPath no path: got nil result, want partial result")
+	}
+
+	mustInf(t, res.Distance, "ReturnPath no path distance")
+	mustEqualBool(t, res.Reachable, false, "ReturnPath no path reachable")
 }
 
-// TestDTW_NoMemoryMode confirms NoMemory mode matches FullMatrix distance
-// and does not return a path.
-func TestDTW_NoMemoryMode(t *testing.T) {
-	a := []float64{5, 6, 7}
-	b := []float64{5, 7}
+func TestPathTieBreakDiagonalFirst(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1, 1},
+		[]float64{1, 1},
+		dtw.WithReturnPath(true),
+	)
 
-	refOpts := dtw.DefaultOptions()
-	refOpts.MemoryMode = dtw.FullMatrix
-	refDist, _, _ := dtw.DTW(a, b, &refOpts)
+	mustNoError(t, err, "tie-break path")
+	mustEqualInt(t, len(res.Path), 2, "tie-break path length")
 
-	opts := dtw.DefaultOptions()
-	opts.MemoryMode = dtw.NoMemory
-	dist, path, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err)
-	assert.Equal(t, refDist, dist, "NoMemory must match FullMatrix distance")
-	assert.Nil(t, path, "NoMemory should not return a path")
+	want := dtw.Path{{I: 0, J: 0}, {I: 1, J: 1}}
+	for idx := range want {
+		if res.Path[idx] != want[idx] {
+			t.Fatalf("tie-break path[%d]: got %+v, want %+v; full=%+v", idx, res.Path[idx], want[idx], res.Path)
+		}
+	}
 }
 
-// TestDTW_NegativeWindowUnlimited verifies Window=-1 disables constraint.
-func TestDTW_NegativeWindowUnlimited(t *testing.T) {
-	a := []float64{1, 2, 3, 4}
-	b := []float64{1, 2, 3}
-	opts := dtw.DefaultOptions()
-	opts.Window = -1
-	opts.MemoryMode = dtw.FullMatrix
+func TestResultPathOrErrorStates(t *testing.T) {
+	var nilResult *dtw.Result
 
-	dist, _, err := dtw.DTW(a, b, &opts)
-	assert.NoError(t, err)
-	assert.False(t, math.IsInf(dist, 1), "Window=-1 must allow alignment")
+	_, err := nilResult.PathOrError()
+	mustErrorIs(t, err, dtw.ErrNilResult, "nil Result PathOrError")
+
+	res, err := dtw.Align([]float64{1}, []float64{1})
+	mustNoError(t, err, "Align without path")
+
+	_, err = res.PathOrError()
+	mustErrorIs(t, err, dtw.ErrPathNotTracked, "PathOrError without tracking")
+
+	res, err = dtw.Align([]float64{1}, []float64{1}, dtw.WithReturnPath(true))
+	mustNoError(t, err, "Align with path")
+
+	path, err := res.PathOrError()
+	mustNoError(t, err, "PathOrError with path")
+	mustEqualInt(t, len(path), 1, "PathOrError path length")
+
+	path[0] = dtw.Coord{I: 99, J: 99}
+	mustEqualBool(t, res.Path[0] == (dtw.Coord{I: 0, J: 0}), true, "PathOrError returns detached path")
 }
 
-// TestDTW_BadInputCombination checks that contradictory options error out.
-func TestDTW_BadInputCombination(t *testing.T) {
-	opts := dtw.DefaultOptions()
-	opts.Window = 0
-	opts.MemoryMode = dtw.TwoRows
-	opts.ReturnPath = true
+func TestResultCloneDetachesPath(t *testing.T) {
+	res, err := dtw.Align(
+		[]float64{1, 2},
+		[]float64{1, 2},
+		dtw.WithReturnPath(true),
+	)
 
-	_, _, err := dtw.DTW([]float64{1}, []float64{1}, &opts)
-	assert.ErrorIs(t, err, dtw.ErrPathNeedsMatrix, "invalid options must return ErrPathNeedsMatrix")
+	mustNoError(t, err, "Align for Clone")
+
+	cloned := res.Clone()
+	if cloned == nil {
+		t.Fatalf("Result.Clone: got nil clone")
+	}
+
+	cloned.Path[0] = dtw.Coord{I: 9, J: 9}
+
+	mustEqualBool(t, res.Path[0] == (dtw.Coord{I: 0, J: 0}), true, "Clone detaches path")
 }

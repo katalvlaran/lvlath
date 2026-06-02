@@ -239,9 +239,11 @@ func (g *Graph) MixedEdges() bool {
 // Stats produces a deterministic, read-only diagnostic summary of configuration flags,
 // catalog sizes, and edge directedness counts.
 //
-// Snapshot category:
-//   - BestEffortSnapshot under concurrent mutation.
-//   - Strict for a fixed graph state with no concurrent mutation.
+// Concurrency:
+//   - StrictSnapshot: Stats holds muVert.RLock and muEdgeAdj.RLock together
+//     in package lock order.
+//   - The returned GraphStats is detached and remains valid after unlock.
+//   - Stats is a diagnostic snapshot, not a long-lived synchronization primitive.
 //
 // Implementation:
 //   - Stage 1: Acquire muVert.RLock(), snapshot immutable configuration flags and vertex count,

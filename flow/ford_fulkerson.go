@@ -1,169 +1,227 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package flow implements deterministic DFS Ford-Fulkerson compatibility mode.
+//
+// This kernel is useful for small or educational networks. Dinic remains the
+// default canonical algorithm because it has stronger practical behavior.
 package flow
 
 import (
-	"fmt"
+	"context"
 	"math"
-
-	"github.com/katalvlaran/lvlath/core"
 )
 
-// FordFulkerson computes the maximum flow from `source` to `sink` in the
-// directed, weighted graph `g` using the Ford–Fulkerson method (DFS-based
-// augmenting paths).
+// runFordFulkerson computes maximum flow through deterministic DFS augmentations.
+// It repeatedly finds any admissible source-sink path and pushes its bottleneck.
 //
-// It returns:
-//   - maxFlow       : the total flow value (float64)
-//   - residualGraph : a *core.Graph of remaining capacities, preserving
-//     all original graph options (directed, weighted,
-//     multi-edges, loops, mixed)
-//   - err           : ErrSourceNotFound, ErrSinkNotFound, EdgeError, or
-//     context cancellation error
+// Implementation:
+//   - Stage 1: Check cancellation before each DFS search.
+//   - Stage 2: Find one depth-first augmenting path.
+//   - Stage 3: Stop when no positive residual path exists.
+//   - Stage 4: Apply residual updates through addResidual.
+//   - Stage 5: Notify observer and publish final result.
 //
-// Steps:
-//  1. Normalize options (O(1)).
-//  2. Validate source and sink exist (O(1)).
-//  3. Build initial capacity map via buildCapMap (O(V + E*log d_max)).
-//  4. Repeat until no augmenting path:
-//     a. Iteratively DFS to find any path s→t with positive capacity (O(E)).
-//     b. If none found, break.
-//     c. Augment along path, updating capMap (O(path length)).
-//     d. Accumulate flow; if opts.Verbose, log path and delta.
-//     e. Check ctx for cancellation.
-//  5. Reconstruct residual *core.Graph from capMap via buildCoreResidualFromCapMap (O(V + E_res)).
+// Behavior highlights:
+//   - DFS path choice is deterministic because rn.adj is sorted.
+//   - This kernel is simple but may require many augmentations.
+//   - Observer events include concrete path witnesses.
+//
+// Inputs:
+//   - source: source vertex ID already validated by MaxFlow.
+//   - sink: sink vertex ID already validated by MaxFlow.
+//   - rn: deterministic residual network.
+//   - cfg: finalized runtime options.
+//
+// Returns:
+//   - *MaxFlowResult: canonical result with residual graph and min-cut certificate.
+//   - error: nil on success or sentinel-classified interruption.
+//
+// Errors:
+//   - context cancellation errors.
+//   - ErrObserverFailure from notifyAugmentation.
+//   - core graph construction errors from finalizeResult.
+//
+// Determinism:
+//   - Stack expansion scans rn.adj[from] in sorted order.
+//   - Equal choices follow stable lexical residual adjacency order.
 //
 // Complexity:
+//   - Time O(A * F) for integral-like capacity regimes, where F is the number
+//     of augmentation units/path pushes under the chosen capacities.
+//   - For arbitrary real capacities, Ford-Fulkerson has weaker termination
+//     guarantees than Edmonds-Karp or Dinic.
+//   - Space O(V + A) including residual state and DFS maps.
 //
-//	Time:   O(E * F) where F = maxFlow (sum of all augmentations).
-//	Memory: O(V + E) for capMap and DFS stack.
+// Notes:
+//   - Prefer Dinic for production-sized networks.
+//   - Prefer Edmonds-Karp when shortest augmenting path witnesses are needed.
 //
-// Suitable for small to moderate integral networks; for stronger guarantees,
-// consider Edmonds–Karp (BFS) or Dinic (level graph + blocking flow).
-func FordFulkerson(
-	g *core.Graph,
+// AI-Hints:
+//   - Do not claim Edmonds-Karp complexity for this DFS kernel.
+//   - Do not scan rn.cap maps; that reintroduces nondeterministic DFS.
+func runFordFulkerson(
 	source, sink string,
-	opts FlowOptions,
-) (maxFlow float64, residualGraph *core.Graph, err error) {
-	// 1) Normalize options to ensure Ctx and Epsilon are set
-	opts.normalize()
-	// 1a) Capture context for cancellation checks
-	ctx := opts.Ctx
+	rn *residualNetwork,
+	cfg options,
+) (*MaxFlowResult, error) {
+	maxFlow := 0.0
+	augmentations := 0
 
-	// 2) Validate that source exists in graph
-	if !g.HasVertex(source) {
-		return 0, nil, ErrSourceNotFound
-	}
-	// 2a) Validate that sink exists in graph
-	if !g.HasVertex(sink) {
-		return 0, nil, ErrSinkNotFound
-	}
-
-	// 3) Build the initial capacity map:
-	//    capMap[u][v] = total integer capacity from u→v after aggregating
-	//    parallel edges and filtering by opts.Epsilon.
-	capMap, err := buildCapMap(g, opts)
-	if err != nil {
-		return 0, nil, err
-	}
-
-	// 4) Main Ford–Fulkerson loop: find any augmenting path and push flow
 	for {
-		// 4a) Check for cancellation before each search
-		if err = ctx.Err(); err != nil {
-			return maxFlow, nil, err
+		if err := cfg.ctx.Err(); err != nil {
+			return newPartialResult(source, sink, AlgorithmFordFulkerson, maxFlow, augmentations), err
 		}
 
-		// 4b) Prepare for iterative DFS
-		// parent[v] = preceding vertex on the augmenting path
-		parent := make(map[string]string, len(capMap))
-		// minCap[v] = bottleneck capacity from source to v along discovered path
-		minCap := make(map[string]float64, len(capMap))
-		// visited marks which vertices have been pushed onto the stack
-		visited := make(map[string]bool, len(capMap))
-
-		// stackEntry holds a node ID and the current bottleneck to that node
-		type stackEntry struct {
-			node string  // current vertex ID
-			flow float64 // bottleneck capacity so far
+		parent, delta, found, err := findDepthFirstAugmentingPath(
+			cfg.ctx,
+			rn,
+			source,
+			sink,
+			cfg.epsilon,
+		)
+		if err != nil {
+			return newPartialResult(source, sink, AlgorithmFordFulkerson, maxFlow, augmentations), err
 		}
-		// initialize DFS from source with infinite (MaxInt64) capacity
-		stack := []stackEntry{{node: source, flow: math.MaxInt64}}
-		visited[source] = true         // mark source visited
-		minCap[source] = math.MaxInt64 // source has infinite bottleneck
-		found := false                 // indicates if sink is reached
-
-		// 4c) Iterative DFS loop
-		for len(stack) > 0 && !found {
-			// pop last entry (LIFO)
-			entry := stack[len(stack)-1]
-			stack = stack[:len(stack)-1]
-			u := entry.node
-
-			// explore each neighbor v with residual capacity capUV
-			for v, capUV := range capMap[u] {
-				// skip zero/no capacity or already visited vertices
-				if capUV <= 0 || visited[v] {
-					continue
-				}
-				// mark v visited and record its parent
-				visited[v] = true
-				parent[v] = u
-
-				// compute new bottleneck = min(entry.flow, capUV)
-				if entry.flow < capUV {
-					minCap[v] = entry.flow
-				} else {
-					minCap[v] = capUV
-				}
-
-				// if we reached sink, we can stop DFS
-				if v == sink {
-					found = true
-					break
-				}
-
-				// otherwise push v onto stack to continue search
-				stack = append(stack, stackEntry{node: v, flow: minCap[v]})
-			}
-		}
-
-		// 4d) If no augmenting path found, we're done
-		if !found {
+		if !found || delta <= cfg.epsilon {
 			break
 		}
 
-		// 4e) The amount to add is the bottleneck at sink
-		delta := minCap[sink]
-
-		// 4f) Optionally log the augmenting path and flow
-		if opts.Verbose {
-			// reconstruct path for logging
-			path := []string{sink}
-			for cur := sink; cur != source; cur = parent[cur] {
-				path = append([]string{parent[cur]}, path...)
-			}
-			fmt.Printf("augmenting path %v with flow %g\n", path, delta)
+		// The limit is checked only after proving that one more augmenting path exists.
+		// This prevents false ErrAugmentationLimit when the optimum is reached exactly
+		// on the previous augmentation.
+		if err = checkAugmentationLimit(augmentations, cfg.maxAugmentations); err != nil {
+			return newPartialResult(source, sink, AlgorithmFordFulkerson, maxFlow, augmentations), err
 		}
 
-		// 4g) Accumulate total flow
+		for vertexID := sink; vertexID != source; vertexID = parent[vertexID] {
+			previousID := parent[vertexID]
+			addResidual(rn, previousID, vertexID, delta, cfg.epsilon)
+		}
+
 		maxFlow += delta
+		augmentations++
 
-		// 4h) Update residual capacities along the path
-		for v := sink; v != source; v = parent[v] {
-			u := parent[v]
-			// decrease forward edge capacity
-			capMap[u][v] -= delta
-			// increase reverse edge capacity
-			capMap[v][u] += delta
+		if err = notifyAugmentation(cfg.ctx, cfg, AugmentationEvent{
+			Algorithm: AlgorithmFordFulkerson,
+			Path:      reconstructPath(parent, source, sink),
+			Delta:     delta,
+			Total:     maxFlow,
+			Index:     augmentations,
+		}); err != nil {
+			return newPartialResult(source, sink, AlgorithmFordFulkerson, maxFlow, augmentations), err
 		}
 	}
 
-	// 5) Build the final residual graph from capMap,
-	//    inheriting all configuration flags from the original graph.
-	residualGraph, err = buildCoreResidualFromCapMap(capMap, g, opts)
-	if err != nil {
-		return maxFlow, nil, err
+	return finalizeResult(
+		source,
+		sink,
+		rn,
+		cfg,
+		AlgorithmFordFulkerson,
+		maxFlow,
+		augmentations,
+		false,
+	)
+}
+
+// findDepthFirstAugmentingPath finds one deterministic DFS residual path.
+// It returns parent links and bottleneck capacity for the discovered path.
+//
+// Implementation:
+//   - Stage 1: Initialize explicit stack, parent map, and visited set.
+//   - Stage 2: Pop vertices in LIFO order.
+//   - Stage 3: Scan deterministic residual neighbors with capacity > epsilon.
+//   - Stage 4: Stop when sink is discovered.
+//
+// Behavior highlights:
+//   - Uses an explicit stack instead of recursive DFS.
+//   - Avoids call-stack growth on long residual paths.
+//   - Marks vertices when pushed to prevent duplicate stack entries.
+//
+// Inputs:
+//   - ctx: cancellation context.
+//   - rn: residual network.
+//   - source: source vertex ID.
+//   - sink: sink vertex ID.
+//   - epsilon: residual threshold.
+//
+// Returns:
+//   - map[string]string: parent links for the discovered path.
+//   - float64: path bottleneck capacity.
+//   - bool: true when sink was reached.
+//   - error: context cancellation error.
+//
+// Errors:
+//   - ctx.Err() when cancellation is observed.
+//
+// Determinism:
+//   - Candidate arcs are considered in rn.adj[from] order.
+//   - LIFO stack makes the exact path deterministic for fixed rn.adj.
+//
+// Complexity:
+//   - Time O(V + A) for one search, Space O(V).
+//
+// Notes:
+//   - The parent map is meaningful only when found is true.
+//   - This helper returns one witness path, not all possible paths.
+//
+// AI-Hints:
+//   - Do not replace visited with bottleneck == 0 checks.
+//   - Do not use recursion unless depth limits are explicitly handled.
+func findDepthFirstAugmentingPath(
+	ctx context.Context,
+	rn *residualNetwork,
+	source, sink string,
+	epsilon float64,
+) (map[string]string, float64, bool, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, 0, false, err
 	}
 
-	// return the computed max flow and the residual graph
-	return maxFlow, residualGraph, nil
+	type stackEntry struct {
+		vertexID   string
+		bottleneck float64
+	}
+
+	parent := make(map[string]string, len(rn.vertices))
+	visited := make(map[string]bool, len(rn.vertices))
+
+	stack := make([]stackEntry, 0, len(rn.vertices))
+	stack = append(stack, stackEntry{
+		vertexID:   source,
+		bottleneck: math.Inf(1),
+	})
+	visited[source] = true
+
+	for len(stack) > 0 {
+		if err := ctx.Err(); err != nil {
+			return nil, 0, false, err
+		}
+
+		entry := stack[len(stack)-1]
+		stack = stack[:len(stack)-1]
+
+		for _, to := range rn.adj[entry.vertexID] {
+			capacity := rn.cap[entry.vertexID][to]
+			if capacity <= epsilon || visited[to] {
+				continue
+			}
+
+			parent[to] = entry.vertexID
+			visited[to] = true
+
+			nextBottleneck := math.Min(entry.bottleneck, capacity)
+			if to == sink {
+				return parent, nextBottleneck, true, nil
+			}
+
+			stack = append(stack, stackEntry{
+				vertexID:   to,
+				bottleneck: nextBottleneck,
+			})
+		}
+	}
+
+	return parent, 0, false, nil
 }

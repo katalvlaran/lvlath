@@ -1,107 +1,202 @@
-// Package flow implements a collection of maximum-flow algorithms on graphs
-// represented by *core.Graph. It provides flexible, high-performance routines
-// for computing the maximum feasible flow from a source to a sink in a network,
-// supporting directed and mixed-edge graphs with weights, parallel edges, and loops.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package flow defines deterministic maximum-flow tools for capacity networks
+// represented as core.Graph values.
 //
-// The key algorithms offered are:
+// The package answers one practical question: given a source, a sink, and a
+// network of finite capacities, how much traffic, power, material, or abstract
+// load can be pushed from source to sink without violating any capacity bound?
 //
-//   - Ford–Fulkerson
+// The canonical entry point is MaxFlow. It returns MaxFlowResult, not just a
+// number, because a professional max-flow computation is also a certificate:
+// the final residual network proves that no more augmenting path exists, and
+// the min-cut partition explains which part of the network is the bottleneck.
 //
-//   - Method: depth-first search to find any augmenting path.
+// # Typical use cases
 //
-//   - Time:   O(E * F), where F is the total flow pushed (integral networks).
+// Data-center traffic engineering:
+//   - source: ingress/load-balancer tier;
+//   - intermediate vertices: edge switches, core switches, racks, service pools;
+//   - sink: target service or egress boundary;
+//   - capacity: Gbps, requests/second, or any finite throughput unit.
 //
-//   - Memory: O(V + E) for the residual capacity map and DFS stack.
+// Smart-grid and energy dispatch:
+//   - source: generation portfolio or upstream transmission boundary;
+//   - intermediate vertices: generators, substations, transformers, feeders;
+//   - sink: demand region;
+//   - capacity: MW, MVA, or a normalized engineering capacity unit.
 //
-//   - Use when simplicity and moderate capacities suffice.
+// Logistics and supply networks:
+//   - source: supplier or warehouse;
+//   - intermediate vertices: hubs, ports, depots;
+//   - sink: demand center;
+//   - capacity: tons/hour, containers/day, or shipment slots.
 //
-//   - Edmonds–Karp
+// # Mathematical contract
 //
-//   - Method: breadth-first search for shortest (fewest-edge) augmenting paths.
+// A capacity network is adapted into a residual network. For each directed arc
+// u -> v with capacity c, the residual network stores a forward residual arc
+// u -> v and a reverse residual arc v -> u. Augmenting flow by delta along a path
+// subtracts delta from each forward residual capacity and adds delta to each
+// reverse residual capacity.
 //
-//   - Time:   O(V * E²) in the worst case with integer capacities.
+// A run is complete when no source-to-sink path with residual capacity greater
+// than epsilon exists. At that point the max-flow/min-cut theorem applies:
 //
-//   - Memory: O(V + E) for residual map and BFS queues.
+//	max-flow value == capacity of the final source-side / sink-side cut
 //
-//   - Guarantees polynomial worst-case behavior.
+// MaxFlowResult exposes this proof:
+//   - Value is the computed maximum flow value.
+//   - Residual is a detached directed weighted residual graph.
+//   - CutSourceSide and CutSinkSide are the final residual reachability partition.
+//   - Partial reports interruption before the optimality certificate is complete.
 //
-//   - Dinic
+// # Graph policy
 //
-//   - Method: level graph construction + blocking-flow via DFS.
+// Input graphs must be weighted because core.Edge.Weight stores capacities.
+// Capacity values are float64 and must be finite.
 //
-//   - Time:   O(E * √V) on unit-capacity networks (general networks often near O(E*√V)).
+// Directed edges become one capacity arc.
 //
-//   - Memory: O(V + E) for level map, adjacency slices, and recursion state.
+// Undirected edges are adapted into two directed capacity arcs with the same
+// capacity. This models a bidirectional capacity relationship for max-flow
+// analysis, not a single shared physical pipe with coupled opposite directions.
+// If a domain needs coupled bidirectional capacity, model it explicitly before
+// calling this package.
 //
-//   - High practical performance on dense or high-capacity graphs.
+// Loops are ignored because a self-loop cannot increase s-t flow.
 //
-// # Graph Support
+// Parallel edges are aggregated deterministically. This is useful for networks
+// where multiple cables, lanes, feeders, or contracts connect the same endpoints.
 //
-// All algorithms operate on *core.Graph, respecting its configuration flags:
+// The input graph is never mutated.
 //
-//	– Directed or undirected edges (with per-edge mixed direction support).
-//	– Weighted edges (capacity values).
-//	– Optional multi-edges (parallel edges aggregated).
-//	– Optional loops (ignored for augmenting-path search).
+// # Numeric policy
 //
-// Capacities are represented as int64, but an initial Epsilon threshold
-// (float64) allows filtering very small weights when aggregating parallel edges.
+// Epsilon is the residual threshold:
+//   - capacities <= epsilon are treated as absent;
+//   - capacities < -epsilon are rejected as ErrNegativeCapacity;
+//   - residual values with absolute magnitude <= epsilon are clamped to zero.
 //
-// # API
+// NaN and +/-Inf capacities are rejected with ErrNaNInf. Infinite capacity is
+// not accepted because it would make residual arithmetic and result certificates
+// ambiguous. Use a large explicit engineering capacity if a domain wants a
+// practically unconstrained edge.
 //
-// FlowOptions configures all three algorithms:
+// # Determinism
 //
-//	type FlowOptions struct {
-//	    Ctx                  context.Context // for cancellation / timeouts
-//	    Epsilon              float64         // ignore capacities ≤ Epsilon during build
-//	    Verbose              bool            // log each augmentation step
-//	    LevelRebuildInterval int             // Dinic only: rebuild level graph every N pushes
-//	}
+// The package intentionally makes algorithmic tie-breaking stable:
+//   - vertex order comes from core.Vertices();
+//   - edge ingestion order comes from core.Edges();
+//   - residual adjacency lists are sorted once;
+//   - BFS and DFS kernels scan residual adjacency in that sorted order;
+//   - residual graph edge IDs are deterministic for each residual arc.
 //
-// Use DefaultOptions() to obtain production-safe defaults:
+// This determinism is not cosmetic. It makes examples reproducible, tests stable,
+// residual certificates debuggable, and downstream matrix snapshots comparable.
 //
-//	opts := flow.DefaultOptions()
-//	// opts.Ctx = context.Background()
-//	// opts.Epsilon = 1e-9
-//	// opts.Verbose = false
-//	// opts.LevelRebuildInterval = 0
+// # Algorithms
 //
-// The core entry points all share the same signature:
+// Dinic is the default algorithm for MaxFlow. It builds BFS level graphs and
+// pushes blocking flows through admissible level-increasing arcs. It is the best
+// default for larger networks among the currently implemented kernels.
 //
-//	func FordFulkerson(
-//	    g *core.Graph,
-//	    source, sink string,
-//	    opts FlowOptions,
-//	) (maxFlow float64, residual *core.Graph, err error)
+// Edmonds-Karp uses BFS to find the shortest augmenting path by number of arcs.
+// It is slower, but excellent for auditability, teaching, and path-oriented
+// debugging because each augmentation has a simple witness.
 //
-//	func EdmondsKarp(
-//	    g *core.Graph,
-//	    source, sink string,
-//	    opts FlowOptions,
-//	) (maxFlow float64, residual *core.Graph, err error)
+// Ford-Fulkerson uses deterministic DFS augmenting paths. It is retained for
+// compatibility and small/integral-like networks. On arbitrary real capacities,
+// DFS path choice can be a poor practical strategy, so WithMaxAugmentations can
+// be used as a safety valve.
 //
-//	func Dinic(
-//	    g *core.Graph,
-//	    source, sink string,
-//	    opts FlowOptions,
-//	) (maxFlow float64, residual *core.Graph, err error)
+// # Complexity
 //
-// Each returns the computed maximum flow value and a **residual graph**
-// that preserves all original configuration flags (directedness, weighting,
-// loops, multi-edges, mixed-edges). The residual graph’s edges correspond
-// to remaining forward capacity and newly created reverse edges.
+// Let V be the number of vertices and A be the residual adjacency-entry count.
 //
-// # Errors
+// Residual construction costs O(V + E + A log A) time and O(V + A) space.
 //
-//	ErrSourceNotFound - if the source vertex is missing in the input graph.
-//	ErrSinkNotFound   - if the sink vertex is missing.
-//	EdgeError         - if a negative capacity (beyond Epsilon) is encountered.
-//	context.Canceled / context.DeadlineExceeded - if opts.Ctx is canceled.
+// Dinic has O(V^2 * A) worst-case behavior on general networks, with stronger
+// bounds for special capacity classes.
 //
-// # Integration
+// Edmonds-Karp has O(V * A^2) worst-case behavior.
 //
-//   - Relies on github.com/katalvlaran/lvlath/core for graph storage and iteration.
-//   - Compatible with github.com/katalvlaran/lvlath/matrix for matrix-based pre-/post-processing.
+// Ford-Fulkerson has O(A * F) behavior in integral-like regimes, where F is the
+// number of successful augmenting pushes under the chosen capacities.
 //
-// See: docs/FLOW.md for in‐depth tutorial, pseudocode, ASCII/mermaid diagrams, and pitfalls.
+// CapacityMatrix allocates a dense V x V matrix and therefore costs O(V^2) space.
+// It is intended for diagnostics and downstream algebra, not for inner residual
+// update loops.
+//
+// # Error law
+//
+// Package-defined failures are sentinel-classified. Use errors.Is.
+//
+// Common sentinel errors:
+//   - ErrNilGraph: nil input graph;
+//   - ErrEmptyTerminal: empty source or sink ID;
+//   - ErrSameTerminal: source and sink are the same vertex;
+//   - ErrSourceNotFound / ErrSinkNotFound: missing terminals;
+//   - ErrUnweightedGraph: capacities cannot be represented;
+//   - ErrInvalidEpsilon: invalid numeric threshold;
+//   - ErrInvalidCapacity / ErrNegativeCapacity / ErrNaNInf: bad edge capacity;
+//   - ErrAugmentationLimit: configured augmentation limit interrupted a run;
+//   - ErrObserverFailure: observer rejected an augmentation event.
+//
+// Lower-level core errors are preserved with errors.Join where applicable.
+//
+// # Result interpretation
+//
+// A successful MaxFlowResult is more than a scalar:
+//
+//	result.Value
+//	    The max-flow value.
+//
+//	result.Residual
+//	    Directed weighted residual graph. If the run is complete, there is no
+//	    positive residual path from Source to Sink.
+//
+//	result.CutSourceSide / result.CutSinkSide
+//	    Min-cut certificate. Summing original capacities crossing from source side
+//	    to sink side yields result.Value.
+//
+//	result.Partial
+//	    True when cancellation, observer failure, or augmentation limit stopped
+//	    the run before optimality was proven.
+//
+// # Matrix integration
+//
+// CapacityMatrix produces a deterministic matrix.Dense capacity snapshot using
+// the same adapter law as MaxFlow. This is useful for diagnostics, visualization,
+// regression tests, and downstream matrix workflows.
+//
+// Matrix operations are deliberately not used inside the hot residual update
+// loops. The residual engine uses compact maps and sorted adjacency slices for
+// algorithmic work; matrix artifacts are for pre/post-processing.
+//
+// # Legacy compatibility
+//
+// Dinic, EdmondsKarp, and FordFulkerson keep the historical tuple-return API:
+//
+//	maxFlow, residual, err := flow.Dinic(g, source, sink, flow.DefaultOptions())
+//
+// New code should prefer:
+//
+//	result, err := flow.MaxFlow(g, source, sink, flow.WithAlgorithm(flow.AlgorithmDinic))
+//
+// # AI-Hints
+//
+// Do not infer undirected residual endpoints through core.Neighbors. Build the
+// flow adapter from core.Edges.
+//
+// Do not preserve input graph directedness on residual output. A residual network
+// is mathematically directed and weighted.
+//
+// Do not add fmt.Printf inside kernels. Use WithObserver for instrumentation.
+//
+// Do not use string matching for errors. Use errors.Is.
+//
+// Do not replace proof-style tests with tests that only check the scalar max-flow
+// value. A correct package must also prove residual no-path and min-cut capacity.
 package flow

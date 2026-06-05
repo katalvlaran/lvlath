@@ -146,7 +146,8 @@ func bumpNextEdgeIDToAtLeast(g *Graph, usedN uint64) {
 //
 // Errors:
 //   - ErrEmptyVertexID: if from == "" or to == "".
-//   - ErrBadWeight: if weight is NaN/Inf, or if weight != 0 on an unweighted graph.
+//   - ErrBadWeight: if weight != 0 on an unweighted graph.
+//   - ErrNaNInf: if weight is NaN/Inf.
 //   - ErrLoopNotAllowed: if from == to and loops are disabled.
 //   - ErrNilEdgeOption: if opts contains a nil EdgeOption value.
 //   - ErrMultiEdgeNotAllowed: if a parallel edge is attempted and multi-edges are disabled.
@@ -178,7 +179,10 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 	if from == "" || to == "" {
 		return "", ErrEmptyVertexID
 	}
-	if !g.weighted && weight != 0 || math.IsNaN(weight) || math.IsInf(weight, 0) {
+	if math.IsNaN(weight) || math.IsInf(weight, 0) {
+		return "", ErrNaNInf
+	}
+	if !g.weighted && weight != 0 {
 		return "", ErrBadWeight
 	}
 	if from == to && !g.allowLoops {

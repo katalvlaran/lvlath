@@ -29,6 +29,7 @@ var (
 	// Contract:
 	//   - On graphs without WithWeighted(), only weight == 0 is allowed.
 	ErrBadWeight = errors.New("core: bad weight for unweighted graph")
+	ErrNaNInf    = errors.New("core: weight is NaN or Inf")
 
 	// ErrLoopNotAllowed reports a self-loop attempt when loops are disabled.
 	//

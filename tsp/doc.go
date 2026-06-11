@@ -99,23 +99,23 @@
 //
 //   - SolveMatrix and SolveGraph are canonical facades and return *TSPResult.
 //   - TSPResult owns detached Tour, IDs, and Warnings slices.
-//   - TSResult is a minimal compatibility projection used by legacy SolveWithMatrix
+//   - TSResult is a minimal compatibility projection used by SolveWithMatrix
 //     and SolveWithGraph.
-//   - Legacy wrappers do not publish partial results on error because TSResult cannot
-//     encode TimedOut or Optimal metadata.
 //   - Held-Karp, Christofides, and local-search wrappers return no partial results on failure.
 //   - Branch-and-Bound may return a non-nil TSPResult with TimedOut=true and
 //     Optimal=false when a feasible incumbent exists at timeout.
+//   - Legacy TSResult wrappers discard partial metadata and return zero TSResult on error.
 //   - Callers must treat any result returned with ErrTimeLimit as partial.
 //
 // # Matching Law
 //
-//   - BlossomMatch attempts true MWPM. If it returns ErrMatchingNotImplemented,
-//     the Christofides kernel may fall back to deterministic GreedyMatch.
-//   - Greedy fallback keeps the pipeline deterministic and feasible (if edges exist),
+//   - BlossomMatch attempts true MWPM.
+//   - If BlossomMatch returns ErrMatchingNotImplemented, the Christofides kernel may
+//     fall back to deterministic GreedyMatch.
+//   - Greedy fallback keeps the pipeline deterministic and feasible when finite edges exist,
 //     but clears the formal 1.5 approximation guarantee.
-//   - MatchingFallback and ApproximationRatio are populated from kernel metadata,
-//     never inferred in the facade from Options alone.
+//   - MatchingFallback, ApproximationRatio, and fallback Warnings are populated from
+//     tspApproxWithMeta kernel metadata, never inferred in the facade from Options alone.
 //
 // # Error Law
 //

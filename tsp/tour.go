@@ -24,7 +24,10 @@
 //   - Deterministic behavior with clear pre/post-conditions.
 package tsp
 
-import "fmt"
+import (
+	"strconv"
+	"strings"
+)
 
 // ValidatePermutation checks that perm is a permutation of {0..n-1} of length n.
 // It does not allocate besides a single O(n) boolean marker slice.
@@ -348,31 +351,56 @@ func EqualToursModuloRotation(a, b []int) bool {
 	return true
 }
 
-// DebugString returns a compact printable representation for tests/debug,
-// e.g. "[0 3 1 2 | 0]" where the vertical bar marks the closure.
+// DebugString returns a compact deterministic tour representation.
+// Implementation:
+//   - Stage 1: Return "[]" for empty input.
+//   - Stage 2: Pre-size a strings.Builder.
+//   - Stage 3: Write vertices in tour order with a closure separator.
 //
-// Complexity: O(n) time, O(n) space for formatting.
+// Behavior highlights:
+//   - Deterministic output.
+//   - Avoids repeated string concatenation.
+//
+// Inputs:
+//   - tour: closed or raw tour slice.
+//
+// Returns:
+//   - string: printable representation such as "[0 3 1 2 | 0]".
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Fixed left-to-right tour order.
+//
+// Complexity:
+//   - Time O(len(tour)), Space O(len(tour)).
+//
+// AI-Hints:
+//   - Keep this helper for tests/debug only; do not parse it as protocol.
 func DebugString(tour []int) string {
 	if len(tour) == 0 {
 		return "[]"
 	}
-	var (
-		n = len(tour) - 1
-		s = "["
-		i int
-	)
-	for i = 0; i < n; i++ {
-		if i > 0 {
-			s += " "
+
+	var builder strings.Builder
+	builder.Grow(len(tour) * 4)
+
+	lastIndex := len(tour) - 1
+
+	builder.WriteByte('[')
+	for index := 0; index < lastIndex; index++ {
+		if index > 0 {
+			builder.WriteByte(' ')
 		}
-		s += fmt.Sprintf("%d", tour[i])
+		builder.WriteString(strconv.Itoa(tour[index]))
 	}
-	s += " | "
-	if n >= 0 {
-		s += fmt.Sprintf("%d", tour[n])
-	}
-	s += "]"
-	return s
+
+	builder.WriteString(" | ")
+	builder.WriteString(strconv.Itoa(tour[lastIndex]))
+	builder.WriteByte(']')
+
+	return builder.String()
 }
 
 // ShortcutEulerianToHamiltonian converts an Eulerian vertex sequence (with revisits)

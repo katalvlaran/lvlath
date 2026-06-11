@@ -25,6 +25,85 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
+// solveMeta carries kernel-origin facts from solver dispatch to the canonical TSPResult.
+// It prevents facades from inferring algorithmic state from Options alone.
+//
+// Implementation:
+//   - Stage 1: Each dispatch branch initializes metadata from the selected algorithm.
+//   - Stage 2: Kernels attach additional facts such as matching fallback or B&B counters.
+//   - Stage 3: SolveMatrix publishes metadata into TSPResult.
+//
+// Behavior highlights:
+//   - Private type; public callers consume TSPResult.
+//   - Keeps SolveWithMatrix as a pure compatibility projection.
+//   - Allows partial-result metadata without changing TSResult.
+//
+// Inputs:
+//   - Produced by solvePreparedMatrix.
+//
+// Returns:
+//   - Applied to TSPResult in publishTSPResult.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Metadata mirrors deterministic dispatch branches.
+//
+// Complexity:
+//   - Time O(1), Space O(len(Warnings)) when copied.
+//
+// AI-Hints:
+//   - Do not duplicate this metadata assembly in SolveMatrix.
+//   - Do not infer MatchingFallback from Options.
+type solveMeta struct {
+	algorithm          Algorithm
+	exact              bool
+	optimal            bool
+	timedOut           bool
+	approximationRatio float64
+	matchingFallback   bool
+	iterations         int
+	nodesExpanded      int
+	warnings           []error
+}
+
+// newSolveMeta returns conservative metadata for the selected final algorithm.
+// Implementation:
+//   - Stage 1: Record the final algorithm after Auto selection.
+//   - Stage 2: Mark exact algorithms.
+//   - Stage 3: Mark optimal only for exact algorithms on successful completion.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func newSolveMeta(algo Algorithm) solveMeta {
+	meta := solveMeta{
+		algorithm:          algo,
+		approximationRatio: NoApproximationRatio,
+	}
+
+	if algo == ExactHeldKarp || algo == BranchAndBound {
+		meta.exact = true
+		meta.optimal = true
+	}
+
+	return meta
+}
+
+// applyApprox attaches Christofides metadata observed by tspApproxWithMeta.
+// Implementation:
+//   - Stage 1: Copy proven approximation ratio.
+//   - Stage 2: Copy matching fallback flag.
+//   - Stage 3: Append warnings in stable order.
+//
+// Complexity:
+//   - Time O(len(approx.warnings)), Space O(len(approx.warnings)).
+func (m *solveMeta) applyApprox(approx approxMeta) {
+	m.approximationRatio = approx.provenRatio
+	m.matchingFallback = approx.matchingFallback
+	m.warnings = append(m.warnings, approx.warnings...)
+}
+
 // trivialRing returns a canonical Hamiltonian cycle [start, start+1, …, n−1, 0, …, start]
 // with closure; it allocates exactly n+1 integers and performs no matrix lookups.
 //
@@ -197,6 +276,7 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 //
 // Returns:
 //   - TSResult: minimal successful solver output.
+//   - solveMeta: carries kernel-origin facts.
 //   - error: sentinel-classified failure.
 //
 // Errors:
@@ -213,15 +293,18 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 // AI-Hints:
 //   - Do not call this from public code.
 //   - Do not add validation here except final invariant checks; public facades own validation.
-func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, error) {
+func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, solveMeta, error) {
+	meta := newSolveMeta(opts.Algo)
+
 	switch opts.Algo {
 	case Christofides:
 		// Christofides requires symmetric metric; validated in validateAll.
-		// 1) Build a feasible tour via TSPApprox.
-		result, err := TSPApprox(dist, opts)
+		// 1) Build a feasible tour via tspApprox.
+		result, approx, err := tspApprox(dist, opts)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
+		meta.applyApprox(approx)
 
 		// 2) Optional local search post-pass.
 		//    If BestImprovement==false → a single TwoOpt pass (fast).
@@ -234,7 +317,7 @@ func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, err
 			// Always start with a cheap 2-opt phase.
 			tour2, cost2, err2 := TwoOpt(dist, tour, opts)
 			if err2 != nil {
-				return TSResult{}, err2
+				return TSResult{}, meta, err2
 			}
 			tour, cost = tour2, cost2
 
@@ -242,14 +325,14 @@ func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, err
 				// Stronger middle pass: best-improvement 3-opt (ThreeOpt reads policy from opts).
 				tour3, cost3, err3 := ThreeOpt(dist, tour, opts)
 				if err3 != nil {
-					return TSResult{}, err3
+					return TSResult{}, meta, err3
 				}
 				tour, cost = tour3, cost3
 
 				// Final quick polish: one more 2-opt (often squeezes a bit more).
 				tour4, cost4, err4 := TwoOpt(dist, tour, opts)
 				if err4 != nil {
-					return TSResult{}, err4
+					return TSResult{}, meta, err4
 				}
 				tour, cost = tour4, cost4
 			}
@@ -257,56 +340,58 @@ func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, err
 			// Keep canonical orientation and invariants.
 			_ = CanonicalizeOrientationInPlace(tour)
 			if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
-				return TSResult{}, err
+				return TSResult{}, meta, err
 			}
 
 			result.Tour = tour
 			result.Cost = round1e9(cost)
 		}
 
-		return result, nil
+		return result, meta, nil
 
 	case ExactHeldKarp:
 		// Exact DP; no post-pass needed.
 		result, err := TSPExact(dist, opts)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 		// Stabilize cost for cross-platform consistency.
 		result.Cost = round1e9(result.Cost)
-		return result, nil
+		return result, meta, nil
 
 	case TwoOptOnly:
 		// Build a canonical initial tour (deterministic), then run TwoOpt.
+		meta.optimal = false
 		base, err := trivialRing(n, opts.StartVertex)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
 		tour, cost, err := TwoOpt(dist, base, opts)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
 		_ = CanonicalizeOrientationInPlace(tour)
 		if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
-		return TSResult{Tour: tour, Cost: round1e9(cost)}, nil
+		return TSResult{Tour: tour, Cost: round1e9(cost)}, meta, nil
 
 	case ThreeOptOnly:
 		// Canonical initial tour; deterministic seed.
+		meta.optimal = false
 		base, err := trivialRing(n, opts.StartVertex)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
 		// Optional warm-up 2-opt pass (fast).
 		if opts.EnableLocalSearch && n >= 4 {
 			tour2, _, err2 := TwoOpt(dist, base, opts)
 			if err2 != nil {
-				return TSResult{}, err2
+				return TSResult{}, meta, err2
 			}
 			base = tour2
 		}
@@ -314,31 +399,115 @@ func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, err
 		// 3-opt with user-selected policy (first/best) and optional shuffle.
 		tour, cost, err := ThreeOpt(dist, base, opts)
 		if err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
 		// Optional final 2-opt polish (cheap).
 		if opts.EnableLocalSearch && n >= 4 {
 			tour2, cost2, err2 := TwoOpt(dist, tour, opts)
 			if err2 != nil {
-				return TSResult{}, err2
+				return TSResult{}, meta, err2
 			}
 			tour, cost = tour2, cost2
 		}
 
 		_ = CanonicalizeOrientationInPlace(tour)
 		if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
 
-		return TSResult{Tour: tour, Cost: round1e9(cost)}, nil
+		return TSResult{Tour: tour, Cost: round1e9(cost)}, meta, nil
 
 	case BranchAndBound:
-		return TSPBranchAndBound(dist, opts)
+		result, err := runBranchAndBoundResult(dist, opts)
+		if result == nil {
+			return TSResult{}, meta, err
+		}
+
+		meta.exact = result.Exact
+		meta.optimal = result.Optimal
+		meta.timedOut = result.TimedOut
+		meta.nodesExpanded = result.NodesExpanded
+
+		return result.Minimal(), meta, err
 
 	default:
-		return TSResult{}, ErrUnsupportedAlgorithm
+		return TSResult{}, meta, ErrUnsupportedAlgorithm
 	}
+}
+
+// finalizeSolverOptions resolves size-dependent solver policy after matrix validation.
+// Implementation:
+//   - Stage 1: Normalize MaxExactN zero value to DefaultMaxExactN.
+//   - Stage 2: Resolve Auto into a concrete Algorithm.
+//   - Stage 3: Re-run option validation on the concrete policy.
+//
+// Behavior highlights:
+//   - Auto is explicit and opt-in.
+//   - Exact algorithms still keep their resource guards.
+//   - No hidden fallback happens when opts.Algo is not Auto.
+//
+// Inputs:
+//   - n: validated matrix order.
+//   - opts: user policy after metric-closure flag has been cleared for final solver input.
+//
+// Returns:
+//   - Options: finalized solver policy.
+//   - error: sentinel-classified invalid policy.
+//
+// Errors:
+//   - ErrInvalidOptions for invalid MaxExactN.
+//   - ErrUnsupportedAlgorithm / ErrATSPNotSupportedByAlgo from final validation.
+//
+// Determinism:
+//   - Pure function of n and opts.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not change DefaultOptions to Auto without a compatibility decision.
+//   - Do not silently choose heuristics unless opts.Algo == Auto.
+func finalizeSolverOptions(n int, opts Options) (Options, error) {
+	if opts.MaxExactN < 0 {
+		return Options{}, ErrInvalidOptions
+	}
+	if opts.MaxExactN == 0 {
+		opts.MaxExactN = DefaultMaxExactN
+	}
+
+	if opts.Algo == Auto {
+		opts.Algo = chooseAlgorithm(n, opts)
+	}
+
+	if err := validateOptionsStandalone(opts); err != nil {
+		return Options{}, err
+	}
+
+	return opts, nil
+}
+
+// chooseAlgorithm selects a concrete solver for explicit Auto mode.
+// Implementation:
+//   - Stage 1: Prefer exact Held-Karp when n fits MaxExactN.
+//   - Stage 2: Prefer Christofides for symmetric larger instances.
+//   - Stage 3: Use TwoOptOnly for asymmetric larger instances.
+//
+// Behavior highlights:
+//   - Deterministic and documented.
+//   - Does not override explicit non-Auto algorithms.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func chooseAlgorithm(n int, opts Options) Algorithm {
+	if n <= opts.MaxExactN {
+		return ExactHeldKarp
+	}
+	if opts.Symmetric {
+		return Christofides
+	}
+
+	return TwoOptOnly
 }
 
 // nearestNeighbor (optional) - kept private for future use.

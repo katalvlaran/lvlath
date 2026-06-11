@@ -65,48 +65,28 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 		return nil, err
 	}
 
+	finalOptions := opts
+	finalOptions.RunMetricClosure = false
+
+	finalOptions, err = finalizeSolverOptions(n, finalOptions)
+	if err != nil {
+		return nil, err
+	}
+
 	if ids != nil {
 		if err = validateIDs(ids, n); err != nil {
 			return nil, err
 		}
 	}
 
-	finalOptions := opts
-	finalOptions.RunMetricClosure = false
-
-	minimal, err := solvePreparedMatrix(prepared, finalOptions, n)
-	if err != nil {
+	minimal, meta, err := solvePreparedMatrix(prepared, finalOptions, n)
+	if err != nil && len(minimal.Tour) == 0 {
 		return nil, err
 	}
 
-	result := &TSPResult{
-		Tour:                 append([]int(nil), minimal.Tour...),
-		Cost:                 minimal.Cost,
-		Algorithm:            finalOptions.Algo,
-		Exact:                finalOptions.Algo == ExactHeldKarp || finalOptions.Algo == BranchAndBound,
-		Optimal:              finalOptions.Algo == ExactHeldKarp || finalOptions.Algo == BranchAndBound,
-		TimedOut:             false,
-		MetricClosureApplied: metricClosureApplied,
-		Symmetric:            finalOptions.Symmetric,
-	}
+	result := publishTSPResult(minimal, ids, finalOptions, meta, metricClosureApplied)
 
-	if ids != nil {
-		result.IDs = append([]string(nil), ids...)
-	}
-
-	if finalOptions.Algo == Christofides && finalOptions.MatchingAlgo == BlossomMatch {
-		// Current implementation falls back to greedy when Blossom is not implemented.
-		// Until matching metadata is returned by the kernel, record the observable guarantee state.
-		result.MatchingFallback = true
-		result.ApproximationRatio = 0
-		result.Warnings = append(result.Warnings, ErrMatchingNotImplemented)
-	} else if finalOptions.Algo == Christofides && finalOptions.MatchingAlgo == GreedyMatch {
-		result.ApproximationRatio = 0
-	} else if finalOptions.Algo == Christofides {
-		result.ApproximationRatio = 1.5
-	}
-
-	return result, nil
+	return result, err
 }
 
 // SolveGraph solves a TSP instance by adapting a core.Graph into a matrix distance model.
@@ -288,4 +268,69 @@ func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 	}
 
 	return result.Minimal(), err
+}
+
+// publishTSPResult builds the canonical detached result artifact.
+// Implementation:
+//   - Stage 1: Copy minimal tour/cost.
+//   - Stage 2: Copy optional IDs.
+//   - Stage 3: Attach final policy and kernel-origin metadata.
+//   - Stage 4: Copy warning sentinels into caller-owned storage.
+//
+// Behavior highlights:
+//   - No live references to matrices, graphs, or mutable solver state.
+//   - Metadata comes from solveMeta, not facade inference.
+//
+// Inputs:
+//   - minimal: successful or partial tour/cost payload.
+//   - ids: optional stable row/column IDs.
+//   - opts: finalized options after Auto selection.
+//   - meta: kernel-origin metadata.
+//   - metricClosureApplied: adapter/facade policy fact.
+//
+// Returns:
+//   - *TSPResult: detached canonical result.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Tour, IDs, and warnings preserve source order exactly.
+//
+// Complexity:
+//   - Time O(len(Tour)+len(IDs)+len(Warnings)).
+//   - Space O(len(Tour)+len(IDs)+len(Warnings)).
+//
+// AI-Hints:
+//   - Do not recompute costs or routes here; this is a publishing stage only.
+func publishTSPResult(
+	minimal TSResult,
+	ids []string,
+	opts Options,
+	meta solveMeta,
+	metricClosureApplied bool,
+) *TSPResult {
+	result := &TSPResult{
+		Tour:                 append([]int(nil), minimal.Tour...),
+		Cost:                 minimal.Cost,
+		Algorithm:            opts.Algo,
+		Exact:                meta.exact,
+		Optimal:              meta.optimal,
+		TimedOut:             meta.timedOut,
+		MetricClosureApplied: metricClosureApplied,
+		Symmetric:            opts.Symmetric,
+		ApproximationRatio:   meta.approximationRatio,
+		MatchingFallback:     meta.matchingFallback,
+		Iterations:           meta.iterations,
+		NodesExpanded:        meta.nodesExpanded,
+	}
+
+	if ids != nil {
+		result.IDs = append([]string(nil), ids...)
+	}
+	if meta.warnings != nil {
+		result.Warnings = append([]error(nil), meta.warnings...)
+	}
+
+	return result
 }

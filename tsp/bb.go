@@ -327,6 +327,37 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 	}
 }
 
+// result publishes the current Branch-and-Bound incumbent as a canonical TSPResult.
+// Implementation:
+//   - Stage 1: Detach the best tour.
+//   - Stage 2: Stabilize cost.
+//   - Stage 3: Attach exact/optimal/timeout/search metadata.
+//
+// Behavior highlights:
+//   - Requires e.bestTour to contain a valid incumbent.
+//   - Does not mutate engine state.
+//
+// Returns:
+//   - *TSPResult: detached result snapshot.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// AI-Hints:
+//   - Do not expose engine pointers or mutable slices through TSPResult.
+func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
+	return &TSPResult{
+		Tour:          append([]int(nil), e.bestTour...),
+		Cost:          round1e9(e.bestCost),
+		Algorithm:     BranchAndBound,
+		Exact:         true,
+		Optimal:       optimal,
+		TimedOut:      timedOut,
+		NodesExpanded: e.steps,
+		Symmetric:     e.symmetric,
+	}
+}
+
 // TSPBranchAndBound is the public entrypoint for exact BnB search.
 // It prepares the engine, runs the search, and returns the optimal tour/cost.
 //
@@ -335,84 +366,148 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 //   - ErrIncompleteGraph if no Hamiltonian cycle exists (or all closures are +Inf).
 //   - Strict validation sentinels for malformed inputs (see types.go).
 func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
-	if err := validateOptionsStandalone(opts); err != nil {
-		return TSResult{}, err
-	}
-
-	n, err := validateDistMatrix(dist, opts.Symmetric, false, symTol)
+	result, err := runBranchAndBoundResult(dist, opts)
 	if err != nil {
 		return TSResult{}, err
 	}
+	if result == nil {
+		return TSResult{}, nil
+	}
+
+	return result.Minimal(), nil
+}
+
+// runBranchAndBoundResult executes exact Branch-and-Bound and can publish partial timeout results.
+// Implementation:
+//   - Stage 1: Validate options, matrix, and start vertex.
+//   - Stage 2: Initialize dense engine buffers and deterministic branching order.
+//   - Stage 3: Seed an incumbent upper bound.
+//   - Stage 4: Run DFS with admissible pruning.
+//   - Stage 5: Publish optimal, incomplete, or partial-timeout result.
+//
+// Behavior highlights:
+//   - Exact when completed without timeout.
+//   - On timeout, returns a partial TSPResult only if a feasible incumbent exists.
+//   - Legacy wrappers may discard partial metadata, but canonical SolveMatrix preserves it.
+//
+// Inputs:
+//   - dist: final complete TSP/ATSP distance matrix.
+//   - opts: finalized solver policy.
+//
+// Returns:
+//   - *TSPResult: optimal or partial result.
+//   - error: nil, ErrTimeLimit, ErrIncompleteGraph, or validation sentinel.
+//
+// Errors:
+//   - ErrInvalidOptions / ErrUnsupportedAlgorithm.
+//   - ErrNilDistanceMatrix / ErrNonSquare / ErrDimensionMismatch.
+//   - ErrNaNInf / ErrNegativeWeight / ErrIncompleteGraph.
+//   - ErrStartOutOfRange.
+//   - ErrTimeLimit with non-nil result when an incumbent exists.
+//
+// Determinism:
+//   - Branch order is sorted by edge weight then vertex index.
+//   - Deadline checks are sparse but do not change correctness, only whether partial result is returned.
+//
+// Complexity:
+//   - Worst-case exponential time.
+//   - Space O(n^2) precompute + O(n) search state.
+//
+// AI-Hints:
+//   - Do not clear a valid incumbent on timeout.
+//   - Do not mark timed-out results as Optimal.
+func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	if err := validateOptionsStandalone(opts); err != nil {
+		return nil, err
+	}
+
+	n, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	if err != nil {
+		return nil, err
+	}
 	if err = validateStartVertex(n, opts.StartVertex); err != nil {
-		return TSResult{}, err
+		return nil, err
 	}
 
 	// Engine initialization (no anonymous closures).
-	var e bbEngine
-	e.n = n
-	e.start = opts.StartVertex
-	e.symmetric = opts.Symmetric
-	e.eps = opts.Eps
-	e.useBound = (opts.BoundAlgo != NoBound)
+	var engine bbEngine
+	engine.n = n
+	engine.start = opts.StartVertex
+	engine.symmetric = opts.Symmetric
+	engine.eps = opts.Eps
+	engine.useBound = opts.BoundAlgo != NoBound
 
 	// Deadline setup.
 	if compatibleTimeBudget(opts.TimeLimit) && opts.TimeLimit > 0 {
-		e.useDeadline = true
-		e.deadline = time.Now().Add(opts.TimeLimit)
+		engine.useDeadline = true
+		engine.deadline = time.Now().Add(opts.TimeLimit)
 	}
 
 	// Prefetch and precomputes.
-	if err = e.initPrefetch(dist); err != nil {
-		return TSResult{}, err
+	if err = engine.initPrefetch(dist); err != nil {
+		return nil, err
 	}
-	if err = e.precomputeMinima(); err != nil {
-		return TSResult{}, err
+	if err = engine.precomputeMinima(); err != nil {
+		return nil, err
 	}
-	e.buildNeighborOrder()
+	engine.buildNeighborOrder()
 
 	// Search state.
-	e.visited = make([]bool, n)
-	e.path = make([]int, n+1)
-	e.path[0] = e.start
-	e.visited[e.start] = true
+	engine.visited = make([]bool, n)
+	engine.path = make([]int, n+1)
+	engine.path[0] = engine.start
+	engine.visited[engine.start] = true
 
 	// Optional UB seeding (greatly helps pruning, correctness unaffected).
-	e.seedUB(dist, opts)
+	engine.seedUB(dist, opts)
 
 	// Optional: root-only 1-tree (Held–Karp) lower bound to tighten pruning
 	// before entering DFS. Safe for symmetric instances; correctness unaffected.
 	if opts.BoundAlgo == OneTreeBound && opts.Symmetric {
 		cfg := DefaultOneTreeConfig()
 		// If we already have a finite incumbent, pass it to the step schedule.
-		if !math.IsInf(e.bestCost, 0) && e.bestCost > 0 {
-			cfg.UB = e.bestCost
+		if !math.IsInf(engine.bestCost, 0) && engine.bestCost > 0 {
+			cfg.UB = engine.bestCost
 		}
-		if lb, _, err := OneTreeLowerBound(dist, e.start, true, cfg); err == nil {
+
+		if lowerBound, _, boundErr := OneTreeLowerBound(dist, engine.start, true, cfg); boundErr == nil {
 			// If LB >= UB−eps at the root, the incumbent is optimal; return it.
-			if !math.IsInf(e.bestCost, 0) && lb >= e.bestCost-e.eps {
-				_ = CanonicalizeOrientationInPlace(e.bestTour)
-				if verr := ValidateTour(e.bestTour, n, e.start); verr == nil {
-					return TSResult{Tour: e.bestTour, Cost: round1e9(e.bestCost)}, nil
+			if !math.IsInf(engine.bestCost, 0) && lowerBound >= engine.bestCost-engine.eps {
+				_ = CanonicalizeOrientationInPlace(engine.bestTour)
+				if err = ValidateTour(engine.bestTour, n, engine.start); err != nil {
+					return nil, err
 				}
+
+				return engine.result(true, false), nil
 			}
 		}
 	}
 
 	// Run DFS.
-	e.dfs(e.start, 1, 0)
+	engine.dfs(engine.start, 1, 0)
 
 	// Finalization.
-	if e.useDeadline && time.Now().After(e.deadline) {
-		// Time budget reached (even if an incumbent exists).
-		return TSResult{}, ErrTimeLimit
-	}
-	if !e.foundAny && math.IsInf(e.bestCost, 0) {
-		return TSResult{}, ErrIncompleteGraph
-	}
-	_ = CanonicalizeOrientationInPlace(e.bestTour)
-	if err = ValidateTour(e.bestTour, n, e.start); err != nil {
-		return TSResult{}, err
+	if engine.useDeadline && time.Now().After(engine.deadline) {
+		if engine.foundAny && !math.IsInf(engine.bestCost, 0) {
+			_ = CanonicalizeOrientationInPlace(engine.bestTour)
+			if err = ValidateTour(engine.bestTour, n, engine.start); err != nil {
+				return nil, err
+			}
+
+			return engine.result(false, true), ErrTimeLimit
+		}
+
+		return nil, ErrTimeLimit
 	}
 
-	return TSResult{Tour: e.bestTour, Cost: round1e9(e.bestCost)}, nil
+	if !engine.foundAny && math.IsInf(engine.bestCost, 0) {
+		return nil, ErrIncompleteGraph
+	}
+
+	_ = CanonicalizeOrientationInPlace(engine.bestTour)
+	if err = ValidateTour(engine.bestTour, n, engine.start); err != nil {
+		return nil, err
+	}
+
+	return engine.result(true, false), nil
 }

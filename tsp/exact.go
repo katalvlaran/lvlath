@@ -7,10 +7,10 @@
 // programming algorithm. Symmetry is NOT required here (ATSP is allowed);
 // Christofides-specific symmetry checks are enforced by the dispatcher.
 //
-// Contracts (already enforced by the dispatcher before calling this function):
-//   - dist is a square n×n matrix, n ≥ 2.
-//   - diagonal ≈ 0; no NaN; negative weights are forbidden (sentinel).
-//   - +Inf is allowed and means “no direct edge”; if no cycle exists ⇒ ErrIncompleteGraph.
+// Contracts:
+//   - dist is a complete finite square n×n final solver matrix.
+//   - diagonal ≈ 0; no NaN/-Inf; negative weights are forbidden.
+//   - +Inf off-diagonal is rejected before DP because final TSP kernels consume complete instances.
 //   - opts.StartVertex ∈ [0..n−1].
 //
 // Behavior:
@@ -47,18 +47,13 @@ func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
 		return TSResult{}, err
 	}
 
-	n, err := validateDistMatrix(dist, false, false, symTol)
+	n, err := validateSolverDistanceMatrix(dist, false, true, symTol)
 	if err != nil {
 		return TSResult{}, err
 	}
 	if n > MaxExactN {
 		return TSResult{}, ErrSizeTooLarge
 	}
-	if err = validateStartVertex(n, opts.StartVertex); err != nil {
-		return TSResult{}, err
-	}
-
-	// Start vertex range.
 	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return TSResult{}, err
 	}

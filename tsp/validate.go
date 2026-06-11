@@ -86,14 +86,17 @@ func validateAll(dist matrix.Matrix, ids []string, opts Options) (int, error) {
 	return n, nil
 }
 
-// validateOptionsStandalone checks Options without reading matrix data.
+// validateOptionsStandalone checks solver policy without matrix-size-dependent finalization.
 // Implementation:
-//   - Stage 1: validate numeric knobs that affect search acceptance and time policy.
-//   - Stage 2: validate enum-driven algorithm policies.
-//   - Stage 3: validate algorithm/domain compatibility.
+//   - Stage 1: Validate numeric knobs.
+//   - Stage 2: Validate enum domains.
+//   - Stage 3: Validate cross-policy constraints that are already knowable.
+//   - Stage 4: Accept Auto as an explicit unresolved algorithm mode.
 //
 // Behavior highlights:
 //   - No allocations.
+//   - Auto is valid here, but must be finalized after matrix order is known.
+//   - No hidden fallback occurs unless opts.Algo == Auto.
 //   - No silent normalization of invalid public options.
 //   - Zero TimeLimit remains the documented "unlimited" mode.
 //
@@ -104,9 +107,9 @@ func validateAll(dist matrix.Matrix, ids []string, opts Options) (int, error) {
 //   - error: nil when options are structurally valid.
 //
 // Errors:
-//   - ErrInvalidOptions for negative/NaN/Inf numeric knobs or unknown enum values.
-//   - ErrATSPNotSupportedByAlgo when a symmetric-only algorithm is requested for ATSP.
-//   - ErrUnsupportedAlgorithm for unknown top-level algorithms.
+//   - ErrInvalidOptions for invalid numeric knobs or enum values.
+//   - ErrATSPNotSupportedByAlgo for known symmetric-only modes.
+//   - ErrUnsupportedAlgorithm for unknown Algorithm.
 //
 // Determinism:
 //   - Pure O(1) validation; no randomness and no state mutation.
@@ -134,6 +137,9 @@ func validateOptionsStandalone(opts Options) error {
 	if opts.TwoOptMaxIters < 0 {
 		return ErrInvalidOptions
 	}
+	if opts.MaxExactN < 0 {
+		return ErrInvalidOptions
+	}
 
 	switch opts.MatchingAlgo {
 	case GreedyMatch, BlossomMatch:
@@ -159,7 +165,7 @@ func validateOptionsStandalone(opts Options) error {
 
 	// Accept only known algorithms; dispatcher may still return a runtime sentinel later.
 	switch opts.Algo {
-	case Christofides, ExactHeldKarp, TwoOptOnly, ThreeOptOnly, BranchAndBound:
+	case Auto, Christofides, ExactHeldKarp, TwoOptOnly, ThreeOptOnly, BranchAndBound:
 		return nil
 	default:
 		return ErrUnsupportedAlgorithm
@@ -247,138 +253,6 @@ func validateIDs(ids []string, n int) error {
 	}
 
 	return nil
-}
-
-// validateDistMatrix verifies the structural and numeric TSP distance contract.
-// Implementation:
-//   - Stage 1: delegate nil/typed-nil detection to matrix.ValidateNotNil.
-//   - Stage 2: verify square shape and supported non-trivial size.
-//   - Stage 3: validate diagonal values.
-//   - Stage 4: validate off-diagonal values and +Inf policy.
-//   - Stage 5: optionally validate symmetry.
-//
-// Behavior highlights:
-//   - +Inf is allowed only when allowInf=true.
-//   - -Inf and NaN are always rejected as ErrNaNInf.
-//   - Negative finite distances are rejected as ErrNegativeWeight.
-//
-// Inputs:
-//   - dist: matrix.Matrix distance model.
-//   - symmetric: whether symmetry must be enforced.
-//   - allowInf: whether +Inf off-diagonal is allowed at this pre-solver stage.
-//   - tol: structural tolerance for diagonal/symmetry checks.
-//
-// Returns:
-//   - int: matrix order n on success.
-//   - error: sentinel-classified validation failure.
-//
-// Errors:
-//   - ErrNilDistanceMatrix joined with matrix nil sentinels.
-//   - ErrNonSquare joined with matrix.ErrNonSquare for non-square shape.
-//   - ErrDimensionMismatch for unsupported n==1.
-//   - ErrNaNInf joined with matrix.ErrNaNInf for NaN/-Inf/invalid diagonal Inf.
-//   - ErrNonZeroDiagonal for non-zero diagonal.
-//   - ErrNegativeWeight for negative finite distances.
-//   - ErrIncompleteGraph for +Inf off-diagonal when allowInf=false.
-//   - ErrAsymmetry for symmetry violations.
-//
-// Determinism:
-//   - Fixed row-major scan and upper-triangle symmetry scan.
-//
-// Complexity:
-//   - Time O(n^2), Space O(1).
-//
-// Notes:
-//   - Final solver input must call this with allowInf=false.
-//
-// AI-Hints:
-//   - Do not let RunMetricClosure merely loosen validation; closure must happen before final validation.
-func validateDistMatrix(dist matrix.Matrix, symmetric bool, allowInf bool, tol float64) (int, error) {
-	// Stage 1: shape checks (non-nil, square).
-	if err := matrix.ValidateNotNil(dist); err != nil {
-		return 0, errors.Join(ErrNilDistanceMatrix, err)
-	}
-
-	nr := dist.Rows()
-	nc := dist.Cols()
-
-	if nr != nc {
-		return 0, errors.Join(ErrNonSquare, matrix.ErrNonSquare)
-	}
-	if nr <= 0 {
-		return 0, errors.Join(ErrNonSquare, matrix.ErrInvalidDimensions)
-	}
-	if nr == 1 {
-		// Trivial n==1 instance: treat as invalid for general solvers (we require n>=2).
-		return 0, ErrDimensionMismatch
-	}
-
-	n := nr // the matrix order
-	// Stage 2: diagonal, negativity, infinity, symmetry.
-	var (
-		i, j     int     // loop indices
-		aij, aji float64 // matrix entries a[i][j] and a[j][i]
-		err      error
-	)
-
-	// Diagonal: a_ii ≈ 0 within tol, finite.
-	for i = 0; i < n; i++ { // iterate diagonal positions
-		aij, err = dist.At(i, i) // read diagonal entry
-		if err != nil {
-			return 0, errors.Join(ErrDimensionMismatch, err)
-		}
-		if math.IsNaN(aij) || math.IsInf(aij, 0) {
-			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-		}
-		if math.Abs(aij) > tol {
-			return 0, ErrNonZeroDiagonal
-		}
-	}
-
-	// Off-diagonal scan.
-	for i = 0; i < n; i++ { // rows
-		for j = 0; j < n; j++ { // cols
-			if i == j {
-				continue // skip diagonal (already checked)
-			}
-			aij, err = dist.At(i, j) // read off-diagonal entry
-			if err != nil {
-				return 0, errors.Join(ErrDimensionMismatch, err)
-			}
-			if math.IsNaN(aij) || math.IsInf(aij, -1) {
-				return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-			}
-			if aij < 0 {
-				return 0, ErrNegativeWeight
-			}
-			if math.IsInf(aij, 1) && !allowInf {
-				return 0, ErrIncompleteGraph
-			}
-		}
-	}
-
-	// Symmetry (if required).
-	if symmetric {
-		for i = 0; i < n; i++ { // upper triangle
-			for j = i + 1; j < n; j++ { // avoid double work
-				aij, err = dist.At(i, j) // a_ij
-				if err != nil {
-					return 0, errors.Join(ErrDimensionMismatch, err)
-				}
-
-				aji, err = dist.At(j, i)
-				if err != nil {
-					return 0, errors.Join(ErrDimensionMismatch, err)
-				}
-
-				if math.Abs(aij-aji) > tol {
-					return 0, ErrAsymmetry
-				}
-			}
-		}
-	}
-
-	return n, nil
 }
 
 // compatibleTimeBudget returns whether the remaining time budget is positive.

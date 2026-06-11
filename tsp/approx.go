@@ -58,33 +58,198 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// TSPApprox runs Christofides on a symmetric, metric instance.
+// approxMeta records approximation-specific facts observed inside the Christofides kernel.
+// It is intentionally private because callers should consume this information through TSPResult.
 //
-// Note: SolveWithMatrix already validated Options + Matrix. Here we keep only
-// lightweight guards that do not duplicate the full O(n^2) validation.
+// Implementation:
+//   - Stage 1: Start with the guarantee implied by the requested matching policy.
+//   - Stage 2: Downgrade the guarantee only when the kernel actually falls back.
+//   - Stage 3: Preserve warning sentinels for TSPResult.Warnings.
+//
+// Behavior highlights:
+//   - MatchingFallback is kernel-origin metadata, never facade inference.
+//   - ProvenRatio is 1.5 only when a true MWPM path was used.
+//   - Greedy matching is valid but has no formal Christofides bound.
+//
+// Inputs:
+//   - Produced by tspApproxWithMeta.
+//
+// Returns:
+//   - Internal metadata consumed by solvePreparedMatrix.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Metadata is derived from deterministic matching branch decisions.
+//
+// Complexity:
+//   - Time O(1), Space O(len(Warnings)) only when warnings are copied later.
+//
+// Notes:
+//   - NoApproximationRatio means “do not claim a formal approximation factor”.
+//
+// AI-Hints:
+//   - Do not set MatchingFallback in SolveMatrix from Options alone.
+//   - Do not claim 1.5 when BlossomMatch fell back to GreedyMatch.
+type approxMeta struct {
+	matchingFallback bool
+	provenRatio      float64
+	warnings         []error
+}
+
+// newApproxMeta initializes approximation metadata from the requested matching policy.
+// Implementation:
+//   - Stage 1: If GreedyMatch is explicitly selected, no formal ratio is claimed.
+//   - Stage 2: If BlossomMatch is selected, the ratio is provisional until fallback is observed.
+//
+// Behavior highlights:
+//   - The 1.5 ratio is only retained if Blossom/MWPM succeeds.
+//   - GreedyMatch is an explicit weaker policy.
+//
+// Inputs:
+//   - opts: solver options.
+//
+// Returns:
+//   - approxMeta: initial metadata state.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Keep this helper conservative; false guarantees are worse than missing metadata.
+func newApproxMeta(opts Options) approxMeta {
+	if opts.MatchingAlgo == GreedyMatch {
+		return approxMeta{provenRatio: NoApproximationRatio}
+	}
+
+	return approxMeta{provenRatio: ChristofidesApproximationRatio}
+}
+
+// recordGreedyFallback records BlossomMatch -> GreedyMatch degradation.
+// Implementation:
+//   - Stage 1: Set MatchingFallback.
+//   - Stage 2: Clear the formal approximation ratio.
+//   - Stage 3: Attach ErrMatchingNotImplemented as a non-fatal warning.
+//
+// Behavior highlights:
+//   - The returned tour may still be valid and deterministic.
+//   - The formal 1.5 Christofides guarantee is intentionally removed.
+//
+// Errors:
+//   - None.
+//
+// Complexity:
+//   - Time O(1), Space amortized O(1).
+//
+// AI-Hints:
+//   - Do not return ErrMatchingNotImplemented as a fatal error when greedy fallback succeeds.
+func (m *approxMeta) recordGreedyFallback() {
+	m.matchingFallback = true
+	m.provenRatio = NoApproximationRatio
+	m.warnings = append(m.warnings, ErrMatchingNotImplemented)
+}
+
+// TSPApprox runs the Christofides pipeline and returns the legacy minimal result.
+// It is kept as a compatibility/public kernel wrapper; canonical metadata is published
+// by SolveMatrix through tspApproxWithMeta.
+//
+// Implementation:
+//   - Stage 1: Delegate to tspApprox.
+//   - Stage 2: Discard approximation metadata intentionally.
+//
+// Behavior highlights:
+//   - Does not duplicate Christofides logic.
+//   - Preserves the legacy TSResult surface.
+//
+// Inputs:
+//   - dist: validated symmetric complete distance matrix.
+//   - opts: solver options.
+//
+// Returns:
+//   - TSResult: tour and cost.
+//   - error: sentinel-classified failure.
+//
+// Determinism:
+//   - Same as tspApproxWithMeta.
+//
+// Complexity:
+//   - Same as tspApproxWithMeta.
+//
+// AI-Hints:
+//   - Do not add matching metadata inference here; use tspApproxWithMeta.
 func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
+	result, _, err := tspApprox(dist, opts)
+	return result, err
+}
+
+// tspApprox runs Christofides and returns kernel-origin approximation metadata.
+// Implementation:
+//   - Stage 1: Validate start vertex against matrix order.
+//   - Stage 2: Build MST.
+//   - Stage 3: Collect odd-degree vertices.
+//   - Stage 4: Execute selected matching policy and record real fallback metadata.
+//   - Stage 5: Build Eulerian circuit and shortcut to Hamiltonian tour.
+//   - Stage 6: Compute and validate final cost/tour.
+//
+// Behavior highlights:
+//   - MatchingFallback is set only when BlossomMatch actually falls back to GreedyMatch.
+//   - ApproximationRatio is 1.5 only when true MWPM is used.
+//   - Greedy fallback is deterministic and valid but not formally 1.5-bounded.
+//
+// Inputs:
+//   - dist: symmetric complete TSP distance matrix.
+//   - opts: Christofides policy.
+//
+// Returns:
+//   - TSResult: minimal tour/cost result.
+//   - approxMeta: approximation/fallback metadata.
+//   - error: sentinel-classified failure.
+//
+// Errors:
+//   - ErrStartOutOfRange.
+//   - ErrIncompleteGraph from MST/matching/tour cost.
+//   - ErrInvalidOptions for unsupported matching enum.
+//   - ErrNonEulerian from malformed Eulerian multigraph state.
+//   - ErrInvalidTour / ErrNaNInf / ErrNegativeWeight propagated by cost/tour helpers.
+//
+// Determinism:
+//   - MST starts at vertex 0 and uses stable index tie-breaks.
+//   - Greedy matching uses stable cost then vertex-index tie-break.
+//   - Eulerian walk follows deterministic adjacency order.
+//   - Final tour orientation is canonicalized.
+//
+// Complexity:
+//   - Time O(n^2) with greedy matching on dense instances.
+//   - Space O(n^2) if upstream matrix storage dominates; local extra memory is O(n+E).
+//
+// AI-Hints:
+//   - Do not claim ChristofidesApproximationRatio when meta.matchingFallback is true.
+//   - Do not treat ErrMatchingNotImplemented as fatal when fallback succeeds.
+func tspApprox(dist matrix.Matrix, opts Options) (TSResult, approxMeta, error) {
+	meta := newApproxMeta(opts)
+
 	// Lightweight start-range guard (n already known to be ≥ 2 in the dispatcher).
 	n := dist.Rows()
 	if err := validateStartVertex(n, opts.StartVertex); err != nil {
-		return TSResult{}, err
+		return TSResult{}, meta, err
 	}
 
 	// 1) Minimum Spanning Tree on the metric graph.
 	//    Returns total weight (unused here) and a simple-graph adjacency (no multi-edges).
-	mstW, mstAD, err := MinimumSpanningTree(dist) // O(n^2) Prim (see mst.go)
+	_, mstAD, err := MinimumSpanningTree(dist) // O(n^2) Prim (see mst.go)
 	if err != nil {
-		return TSResult{}, err
+		return TSResult{}, meta, err
 	}
-	_ = mstW // MST weight is not required by Christofides beyond building the multigraph.
 
 	// 2) Collect odd-degree vertices of the MST.
 	//    V has odd degree iff degree(v) mod 2 == 1. Fast parity check via bit-test.
 	//    len(mstAD[v])&1 == 1  ⇔ degree(v) is odd (LSB set).
 	odd := make([]int, 0, n/2+1) // conservative capacity avoids reslices
-	var v int                    // loop iterator
-	for v = 0; v < n; v++ {
-		if (len(mstAD[v]) & 1) == 1 {
-			odd = append(odd, v)
+	var vertex int               // loop iterator
+	for vertex = 0; vertex < n; vertex++ {
+		if (len(mstAD[vertex]) & 1) == 1 {
+			odd = append(odd, vertex)
 		}
 	}
 
@@ -92,24 +257,27 @@ func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
 	//    We modify the adjacency in-place, effectively forming the Eulerian multigraph.
 	switch opts.MatchingAlgo {
 	case BlossomMatch:
-		if mErr := blossomMatch(odd, dist, mstAD); mErr != nil {
-			if errors.Is(mErr, ErrMatchingNotImplemented) {
+		if matchErr := blossomMatch(odd, dist, mstAD); matchErr != nil {
+			if errors.Is(matchErr, ErrMatchingNotImplemented) {
 				// Deterministic and safe fallback; preserves pipeline validity.
 				if err = greedyMatch(odd, dist, mstAD); err != nil {
-					return TSResult{}, err
+					return TSResult{}, meta, err
 				}
+
+				meta.recordGreedyFallback()
 			} else {
-				return TSResult{}, mErr
+				return TSResult{}, meta, matchErr
 			}
 		}
 
 	case GreedyMatch:
 		if err = greedyMatch(odd, dist, mstAD); err != nil {
-			return TSResult{}, err
+			return TSResult{}, meta, err
 		}
+		meta.provenRatio = NoApproximationRatio
 
 	default:
-		return TSResult{}, ErrInvalidOptions
+		return TSResult{}, meta, ErrInvalidOptions
 	}
 
 	// 4) Eulerian circuit on the multigraph (Hierholzer).
@@ -117,26 +285,27 @@ func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
 	//    The circuit cost is O(E), where E is the number of (multi)edges.
 	euler, err := EulerianCircuit(mstAD, opts.StartVertex)
 	if err != nil {
-		return TSResult{}, err
+		return TSResult{}, meta, err
 	}
 	// 5) Shortcut revisits to obtain a Hamiltonian tour; then canonicalize direction.
 	tour, err := ShortcutEulerianToHamiltonian(euler, n, opts.StartVertex)
 	if err != nil {
-		return TSResult{}, err
+		return TSResult{}, meta, err
 	}
+
 	_ = CanonicalizeOrientationInPlace(tour)
 
 	// 6) Compute the stabilized tour cost with strict edge validation.
 	//    tourCost checks Inf/NaN/negatives defensively and rounds to 1e-9.
 	cost, err := TourCost(dist, tour)
 	if err != nil {
-		return TSResult{}, err
+		return TSResult{}, meta, err
 	}
 
 	// Final invariant check (O(n)) - inexpensive, helps catch wiring mistakes early.
-	if verr := ValidateTour(tour, n, opts.StartVertex); verr != nil {
-		return TSResult{}, verr
+	if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
+		return TSResult{}, meta, err
 	}
 
-	return TSResult{Tour: tour, Cost: cost}, nil
+	return TSResult{Tour: tour, Cost: cost}, meta, nil
 }

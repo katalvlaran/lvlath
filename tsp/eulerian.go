@@ -33,8 +33,7 @@ package tsp
 // EulerianCircuit returns a closed Eulerian walk (Hierholzer) over adj starting at start.
 func EulerianCircuit(adj [][]int, start int) ([]int, error) {
 	// Fast guards to avoid panics on malformed wiring; dispatcher ensures valid ranges.
-	var n int
-	n = len(adj)
+	n := len(adj)
 	if n == 0 {
 		return nil, ErrDimensionMismatch
 	}
@@ -43,19 +42,23 @@ func EulerianCircuit(adj [][]int, start int) ([]int, error) {
 		return nil, ErrStartOutOfRange
 	}
 
-	// Count half-edges (each adjacency entry is one half-edge).
-	var (
-		u   int
-		m2  int // number of half-edges
-		deg int
-	)
-	for u = 0; u < n; u++ { // ??
-		deg = len(adj[u])
-		if deg > 0 { // ??
-			m2 += deg
+	halfEdgeCount := 0
+	var fromVertex, toVertex, degree int
+	for fromVertex = 0; fromVertex < n; fromVertex++ {
+		degree = len(adj[fromVertex])
+		if (degree & 1) == 1 {
+			return nil, ErrNonEulerian
+		}
+		halfEdgeCount += degree
+
+		for _, toVertex = range adj[fromVertex] {
+			if toVertex < 0 || toVertex >= n {
+				return nil, ErrDimensionMismatch
+			}
 		}
 	}
-	if m2 == 0 {
+
+	if halfEdgeCount == 0 {
 		// Isolated graph: the only "circuit" is the start itself (deg=0 everywhere).
 		// Christofides never passes such a graph, but keep behavior defined.
 		//return []int{start}, nil
@@ -67,108 +70,86 @@ func EulerianCircuit(adj [][]int, start int) ([]int, error) {
 	//   twin[e] - opposite half-edge id (e ↔ twin[e]); -1 if unmatched (defensive)
 	//   used[e] - visitation mark
 	//   head[v] - list of incident half-edge ids for vertex v (stack semantics)
-	var (
-		to   = make([]int, m2)
-		twin = make([]int, m2)
-		used = make([]bool, m2)
-		head = make([][]int, n)
-	)
+	to := make([]int, halfEdgeCount)
+	twin := make([]int, halfEdgeCount)
+	used := make([]bool, halfEdgeCount)
+	head := make([][]int, n)
+
 	// Initialize twin[] with -1 to make unmatched pairs explicit (defensive).
-	var e int
-	for e = 0; e < m2; e++ {
-		twin[e] = -1
+	var edgeID int
+	for edgeID = 0; edgeID < halfEdgeCount; edgeID++ {
+		twin[edgeID] = -1
 	}
 
-	// Build half-edges and pair twins by undirected (min(u,v), max(u,v)) key.
-	// We store at most one unmatched half-edge id per undirected key; when the
-	// second occurrence arrives we wire the two as twins and clear the slot.
-	var (
-		next int // next half-edge id to assign
-		k    uint64
-		v    int
-		ok   bool
-		i    int // iterator var
-	)
-	// map key -> unmatched half-edge id (or -1 if none)
-	var pending = make(map[uint64]int, m2/2+1)
+	pending := make(map[uint64]int, halfEdgeCount/2+1)
+	nextEdgeID := 0
+	var previousEdgeID int
+	var ok bool
+	for fromVertex = 0; fromVertex < n; fromVertex++ {
+		head[fromVertex] = make([]int, 0, len(adj[fromVertex]))
 
-	for u = 0; u < n; u++ {
-		// Reserve capacity to avoid reslice churn on hot paths.
-		if len(adj[u])%2 != 0 {
-			return nil, ErrNonEulerian
-		}
-		if cap(head[u]) < len(adj[u]) {
-			head[u] = make([]int, 0, len(adj[u]))
-		}
-		for i = 0; i < len(adj[u]); i++ {
-			v = adj[u][i]
-			// Defensive range check; well-formed inputs always satisfy 0 ≤ v < n.
-			if v < 0 || v >= n {
-				return nil, ErrDimensionMismatch
-			}
+		for _, toVertex = range adj[fromVertex] {
+			edgeID = nextEdgeID
+			nextEdgeID++
 
-			// Assign half-edge id and push into incidence list.
-			e = next
-			next = next + 1
-			to[e] = v                    // ??
-			head[u] = append(head[u], e) // ??
+			to[edgeID] = toVertex
+			head[fromVertex] = append(head[fromVertex], edgeID)
 
 			// Undirected key; parallel edges are paired sequentially per key.
-			k = packUndirectedKey(u, v)
-			var prev int
-			prev, ok = pending[k]
-			if !ok || prev == -1 { // ??
-				pending[k] = e
-			} else { // ??
-				twin[e] = prev
-				twin[prev] = e
-				pending[k] = -1
+			key := packUndirectedKey(fromVertex, toVertex)
+			previousEdgeID, ok = pending[key]
+			if !ok || previousEdgeID == -1 {
+				pending[key] = edgeID
+				continue
 			}
+
+			twin[edgeID] = previousEdgeID
+			twin[previousEdgeID] = edgeID
+			pending[key] = -1
 		}
 	}
-	// Trim arrays if defensive skips occurred.
-	if next < m2 {
-		to = to[:next]     // ??
-		twin = twin[:next] // ??
-		used = used[:next] // ??
-		m2 = next          // ??
+
+	for _, unmatchedEdgeID := range pending {
+		if unmatchedEdgeID != -1 {
+			return nil, ErrNonEulerian
+		}
 	}
 
-	// Iteration cursor per vertex: first non-used incident half-edge.
-	var it = make([]int, n)
+	cursor := make([]int, n)
+	stack := make([]int, 0, halfEdgeCount+1)
+	circuit := make([]int, 0, halfEdgeCount+1)
 
-	// Hierholzer: stack of vertices, output circuit of vertices.
-	var (
-		stack   = make([]int, 0, m2+1)
-		circuit = make([]int, 0, m2+1)
-	)
+	var twinID int
 	stack = append(stack, start)
 
 	for len(stack) > 0 {
-		u = stack[len(stack)-1] // ??
+		fromVertex = stack[len(stack)-1]
 
-		// Advance cursor past used half-edges.
-		for it[u] < len(head[u]) && used[head[u][it[u]]] {
-			it[u] = it[u] + 1
+		for cursor[fromVertex] < len(head[fromVertex]) && used[head[fromVertex][cursor[fromVertex]]] {
+			cursor[fromVertex]++
 		}
 
-		if it[u] == len(head[u]) {
+		if cursor[fromVertex] == len(head[fromVertex]) {
 			// No more edges - emit vertex and pop.
-			circuit = append(circuit, u)
+			circuit = append(circuit, fromVertex)
 			stack = stack[:len(stack)-1]
-
-			continue // ??
+			continue
 		}
 
-		// Take the next unused half-edge u -> v
-		e = head[u][it[u]]
-		used[e] = true
-		if twin[e] >= 0 {
-			used[twin[e]] = true // mark the reverse half-edge as used
+		edgeID = head[fromVertex][cursor[fromVertex]]
+		twinID = twin[edgeID]
+		if twinID < 0 {
+			return nil, ErrNonEulerian
 		}
 
-		v = to[e] // ??
-		stack = append(stack, v)
+		used[edgeID] = true
+		used[twinID] = true
+
+		stack = append(stack, to[edgeID])
+	}
+
+	if len(circuit) == 0 || circuit[0] != start || circuit[len(circuit)-1] != start {
+		return nil, ErrNonEulerian
 	}
 
 	// circuit is produced in reverse of the traversal, but it is a valid closed walk

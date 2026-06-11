@@ -27,6 +27,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 
 	"github.com/katalvlaran/lvlath/matrix"
@@ -35,12 +36,14 @@ import (
 // MinimumSpanningTree runs Prim’s algorithm in O(n²) over any matrix.Matrix.
 // Fast-path to *matrix.Dense is kept as an internal branch if needed later.
 func MinimumSpanningTree(dist matrix.Matrix) (totalW float64, adj [][]int, err error) {
-	if dist == nil {
-		return 0, nil, ErrNonSquare
+	if _, err = validateSolverDistanceMatrix(dist, true, true, symTol); err != nil {
+		return 0, nil, err
 	}
+
 	if d, ok := dist.(*matrix.Dense); ok {
 		return mstDense(d)
 	}
+
 	return mstGeneric(dist)
 }
 
@@ -117,8 +120,11 @@ func mstDense(d *matrix.Dense) (float64, [][]int, error) {
 			if err != nil {
 				return 0, nil, ErrDimensionMismatch
 			}
-			if math.IsNaN(w) {
-				return 0, nil, ErrDimensionMismatch
+			if math.IsNaN(w) || math.IsInf(w, -1) {
+				return 0, nil, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+			}
+			if math.IsInf(w, 1) {
+				continue
 			}
 			if w < 0 {
 				return 0, nil, ErrNegativeWeight

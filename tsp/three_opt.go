@@ -26,6 +26,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"time"
 
@@ -93,14 +94,18 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 		for j = 0; j < n; j++ {
 			x, err = dist.At(i, j)
 			if err != nil {
-				return nil, 0, ErrDimensionMismatch
+				return nil, 0, errors.Join(ErrDimensionMismatch, err)
 			}
-			if math.IsNaN(x) {
-				return nil, 0, ErrDimensionMismatch
+			if math.IsNaN(x) || math.IsInf(x, -1) {
+				return nil, 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+			}
+			if math.IsInf(x, 1) {
+				return nil, 0, ErrIncompleteGraph
 			}
 			if x < 0 {
 				return nil, 0, ErrNegativeWeight
 			}
+
 			w[i*n+j] = x // linearized index; avoids [][] bounds/indirection in hot path
 		}
 	}

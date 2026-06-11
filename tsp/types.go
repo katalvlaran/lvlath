@@ -17,57 +17,6 @@ import (
 )
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-// Sentinel errors (validation, feasibility, algorithm governance)
-//–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
-
-// Validation / input-shape errors. Do not wrap with fmt.Errorf where a sentinel suffices.
-var (
-	// ErrNonSquare indicates the distance matrix is not square.
-	ErrNonSquare = errors.New("tsp: matrix is not square")
-
-	// ErrNegativeWeight indicates a negative distance was encountered.
-	ErrNegativeWeight = errors.New("tsp: negative distance encountered")
-
-	// ErrAsymmetry indicates dist[i][j] != dist[j][i] for a symmetric-TSP solver.
-	ErrAsymmetry = errors.New("tsp: asymmetric distance matrix")
-
-	// ErrNonZeroDiagonal indicates some dist[i][i] ≠ 0.
-	ErrNonZeroDiagonal = errors.New("tsp: non-zero self-distance")
-
-	// ErrIncompleteGraph is returned when no Hamiltonian cycle exists
-	// (one or more edges missing, represented by math.Inf(1)).
-	ErrIncompleteGraph = errors.New("tsp: incomplete distance matrix (no Hamiltonian cycle possible)")
-
-	// ErrDimensionMismatch indicates an unexpected matrix/DP shape in exact algorithms.
-	ErrDimensionMismatch = errors.New("tsp: dimension mismatch")
-
-	// ErrStartOutOfRange indicates Options.StartVertex is outside [0..n-1].
-	ErrStartOutOfRange = errors.New("tsp: start vertex out of range")
-
-	// ErrMatchingNotImplemented is returned by BlossomMatch when a true minimum-weight
-	// perfect matching is not available (fallbacks may be applied by the caller).
-	ErrMatchingNotImplemented = errors.New("tsp: blossom matching not implemented")
-
-	// Deprecated: ErrBadInput is kept for legacy callers; do not use in new code.
-	ErrBadInput = errors.New("tsp: invalid input")
-)
-
-// Planner/engine governance sentinels.
-var (
-	// ErrUnsupportedAlgorithm is returned when Options.Algo selects an unavailable strategy.
-	ErrUnsupportedAlgorithm = errors.New("tsp: unsupported algorithm")
-
-	// ErrTimeLimit indicates a user-specified time budget was exhausted.
-	ErrTimeLimit = errors.New("tsp: time limit exceeded")
-
-	// ErrNodeLimit indicates a search-node budget (e.g., for Branch&Bound) was exhausted.
-	ErrNodeLimit = errors.New("tsp: node limit exceeded")
-
-	// ErrATSPNotSupportedByAlgo signals that the chosen algorithm handles only symmetric TSP.
-	ErrATSPNotSupportedByAlgo = errors.New("tsp: algorithm does not support ATSP")
-)
-
-//–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 // Matching & bounding enums used by Christofides/BB
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 
@@ -120,6 +69,15 @@ const (
 
 	// BranchAndBound: exact search with lower/upper bounds (reserved in first iteration).
 	BranchAndBound
+)
+
+const (
+	// Auto selects an explicit size-aware dispatcher policy.
+	//
+	// AI-Hints:
+	//   - Auto is opt-in. Do not silently change DefaultOptions to Auto in a patch release.
+	//   - Existing Algorithm iota values must remain stable for compatibility.
+	Auto Algorithm = -1
 )
 
 //–––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
@@ -428,6 +386,16 @@ const (
 	// DefaultTwoOptMaxIters caps the number of 2-opt swap attempts across all iterations.
 	DefaultTwoOptMaxIters = 10_000
 )
+const (
+	// DefaultMaxExactN is the opt-in Auto-policy cap for exact Held-Karp selection.
+	DefaultMaxExactN = MaxExactN
+
+	// NoApproximationRatio marks solvers or fallback modes with no proven ratio.
+	NoApproximationRatio = 0.0
+
+	// ChristofidesApproximationRatio is the formal ratio when true MWPM is used.
+	ChristofidesApproximationRatio = 1.5
+)
 
 // Options defines configurable parameters for TSP solvers.
 // Zero value is not meaningful; use DefaultOptions() and override fields as needed.
@@ -479,6 +447,10 @@ type Options struct {
 	// Seed controls deterministic behavior of randomized components (seeded RNG).
 	// Default: 0 (fixed seed → deterministic).
 	Seed int64
+
+	// MaxExactN bounds exact selection when Algo==Auto.
+	// Zero means DefaultMaxExactN. Negative values are ErrInvalidOptions.
+	MaxExactN int
 }
 
 // DefaultOptions returns a fully populated Options struct with safe, production-ready defaults:
@@ -501,5 +473,6 @@ func DefaultOptions() Options {
 		Eps:               DefaultEps,
 		TimeLimit:         0,
 		Seed:              0,
+		MaxExactN:         DefaultMaxExactN,
 	}
 }

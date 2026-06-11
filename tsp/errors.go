@@ -78,6 +78,49 @@ var (
 	//   - Do not flatten mixed graphs into a global directed/undirected matrix silently.
 	ErrMixedGraphNotRepresentable = errors.New("tsp: mixed directedness graph cannot be converted to a TSP distance matrix safely")
 
-	// ErrNonEulerian ..
+	// ErrNonEulerian reports a malformed multigraph passed to Eulerian circuit construction.
 	ErrNonEulerian = errors.New("tsp: graph is not Eulerian")
+
+	// Validation / input-shape errors. Do not wrap with fmt.Errorf where a sentinel suffices.
+
+	// ErrNonSquare indicates the distance matrix is not square.
+	ErrNonSquare = errors.New("tsp: matrix is not square")
+
+	// ErrNegativeWeight reports a negative distance in a TSP input.
+	ErrNegativeWeight = errors.New("tsp: negative distance encountered")
+
+	// ErrAsymmetry reports a symmetry violation (dist[i][j] != dist[j][i]) under symmetric TSP policy.
+	ErrAsymmetry = errors.New("tsp: asymmetric distance matrix")
+
+	// ErrNonZeroDiagonal reports a non-zero self-distance (dist[i][i] != 0).
+	ErrNonZeroDiagonal = errors.New("tsp: non-zero self-distance")
+
+	// ErrIncompleteGraph reports that final solver input still has missing edges.
+	ErrIncompleteGraph = errors.New("tsp: incomplete distance matrix (no Hamiltonian cycle possible)")
+
+	// ErrDimensionMismatch reports shape mismatch after a more specific shape sentinel is not available.
+	ErrDimensionMismatch = errors.New("tsp: dimension mismatch")
+
+	// ErrStartOutOfRange indicates Options.StartVertex is outside [0..n-1].
+	ErrStartOutOfRange = errors.New("tsp: start vertex out of range")
+
+	// ErrMatchingNotImplemented reports unavailable Blossom/MWPM implementation.
+	ErrMatchingNotImplemented = errors.New("tsp: blossom matching not implemented")
+
+	// Deprecated: ErrBadInput is kept for legacy callers; do not use in new code.
+	ErrBadInput = errors.New("tsp: invalid input")
+
+	// Planner/engine governance sentinels.
+
+	// ErrUnsupportedAlgorithm reports an unknown or unavailable top-level algorithm(Options.Algo).
+	ErrUnsupportedAlgorithm = errors.New("tsp: unsupported algorithm")
+
+	// ErrTimeLimit reports exhausted wall-clock budget.
+	ErrTimeLimit = errors.New("tsp: time limit exceeded")
+
+	// ErrNodeLimit reports exhausted deterministic search-node budget.
+	ErrNodeLimit = errors.New("tsp: node limit exceeded")
+
+	// ErrATSPNotSupportedByAlgo reports a symmetric-only algorithm used for ATSP.
+	ErrATSPNotSupportedByAlgo = errors.New("tsp: algorithm does not support ATSP")
 )

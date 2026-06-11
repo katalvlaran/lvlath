@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - RNG utilities shared by heuristic solvers.
 //
 // This file centralizes deterministic random generation for all TSP heuristics.

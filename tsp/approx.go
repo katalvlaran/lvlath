@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Christofides 1.5-approximation.
 //
 // TSPApprox computes a 1.5-approximate Hamiltonian cycle for the symmetric,
@@ -92,23 +95,30 @@ func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
 		if mErr := blossomMatch(odd, dist, mstAD); mErr != nil {
 			if errors.Is(mErr, ErrMatchingNotImplemented) {
 				// Deterministic and safe fallback; preserves pipeline validity.
-				greedyMatch(odd, dist, mstAD)
+				if err = greedyMatch(odd, dist, mstAD); err != nil {
+					return TSResult{}, err
+				}
 			} else {
 				return TSResult{}, mErr
 			}
 		}
+
 	case GreedyMatch:
-		greedyMatch(odd, dist, mstAD)
+		if err = greedyMatch(odd, dist, mstAD); err != nil {
+			return TSResult{}, err
+		}
+
 	default:
-		// Strict but user-friendly: unknown enum ⇒ deterministic greedy.
-		greedyMatch(odd, dist, mstAD)
+		return TSResult{}, ErrInvalidOptions
 	}
 
 	// 4) Eulerian circuit on the multigraph (Hierholzer).
 	//    Returns a closed walk that starts at opts.StartVertex and finishes at it.
 	//    The circuit cost is O(E), where E is the number of (multi)edges.
-	euler := EulerianCircuit(mstAD, opts.StartVertex)
-
+	euler, err := EulerianCircuit(mstAD, opts.StartVertex)
+	if err != nil {
+		return TSResult{}, err
+	}
 	// 5) Shortcut revisits to obtain a Hamiltonian tour; then canonicalize direction.
 	tour, err := ShortcutEulerianToHamiltonian(euler, n, opts.StartVertex)
 	if err != nil {

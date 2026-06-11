@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Minimum Spanning Tree (Prim O(n²)) for dense metric graphs.
 //
 // MinimumSpanningTree builds an MST over a non-negative dense distance matrix.

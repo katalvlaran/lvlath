@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test validates the Held–Karp 1-tree lower bound routine.
 // Focus areas:
 //  1. Strict sentinels on invalid inputs (non-square, OOB root, NaN, negative, +Inf).

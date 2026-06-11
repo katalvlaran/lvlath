@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test provides lightweight testing helpers shared across *_test.go
 // files in this package. The helpers are intentionally minimal, stdlib-only,
 // and avoid duplicating functionality that already lives in focused test files.

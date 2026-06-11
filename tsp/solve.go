@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - unified dispatcher for TSP solvers.
 //
 // This file provides the canonical entry points to run TSP algorithms:
@@ -17,265 +20,10 @@
 package tsp
 
 import (
-	"github.com/katalvlaran/lvlath/core"
+	"errors"
+
 	"github.com/katalvlaran/lvlath/matrix"
 )
-
-// SolveWithGraph converts g into a distance matrix (according to its flags),
-// optionally applies metric closure (opts.RunMetricClosure), and delegates
-// to SolveWithMatrix.
-//
-// Contracts:
-//   - g must be non-nil.
-//   - Graph configuration (directed/weighted/loops/multi) is respected via matrix options.
-//   - IDs are reconstructed from matrix vertex indices for round-trip fidelity.
-//
-// Errors: those from validateAll and underlying builders; see types.go.
-//
-// Complexity:
-//   - Building adjacency: O(V^2 + E) (matrix init + edge pass).
-//   - Delegation cost: per chosen algorithm (see SolveWithMatrix).
-func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
-	// Nil graph => invalid shape for building matrices.
-	if g == nil {
-		return TSResult{}, ErrDimensionMismatch
-	}
-
-	var mopts matrix.Options
-	var optsList []matrix.Option
-	st := g.Stats()
-
-	// Map core → matrix options (explicit, no booleans into WithX)
-	// Orientation: mixed OR directed-default ⇒ directed matrix (can encode both types of edges).
-	directed := st.MixedMode || st.DirectedDefault
-	if directed {
-		optsList = append(optsList, matrix.WithDirected())
-	} else {
-		optsList = append(optsList, matrix.WithUndirected())
-	}
-
-	// Multi-edges: matrix default = allowMulti=true; respect core policy explicitly.
-	if st.AllowsMulti {
-		optsList = append(optsList, matrix.WithAllowMulti())
-	} else {
-		optsList = append(optsList, matrix.WithDisallowMulti())
-	}
-
-	// Loops: matrix default = allowLoops=false.
-	if st.AllowsLoops {
-		optsList = append(optsList, matrix.WithAllowLoops())
-	} else {
-		optsList = append(optsList, matrix.WithDisallowLoops())
-	}
-
-	// Weights: matrix default = unweighted(false).
-	if st.Weighted {
-		optsList = append(optsList, matrix.WithWeighted())
-	} else {
-		optsList = append(optsList, matrix.WithUnweighted())
-	}
-
-	// Metric closure (APSP).
-	if opts.RunMetricClosure {
-		optsList = append(optsList, matrix.WithMetricClosure())
-	}
-
-	// Build matrix options from graph flags + dispatcher policy; «single source of truth».
-	mopts, err := matrix.NewMatrixOptions(optsList...)
-	if err != nil {
-		return TSResult{}, err
-	}
-
-	am, err := matrix.NewAdjacencyMatrix(g, mopts)
-	if err != nil {
-		// NewAdjacencyMatrix returns matrix-level errors; forward them as-is.
-		// Upstream validateAll will surface tsp sentinels when we dispatch via SolveWithMatrix.
-		return TSResult{}, err
-	}
-
-	// Recover stable vertex ordering ids[idx] = id.
-	// Map iteration order is irrelevant: we write by canonical index -> stable array.
-	var (
-		n   = am.Mat.Rows()
-		ids = make([]string, n)
-	)
-	// VertexIndex is id -> index, so invert it.
-	var (
-		id  string
-		idx int
-	)
-	for id, idx = range am.VertexIndex {
-		ids[idx] = id
-	}
-
-	// Delegate to matrix dispatcher (unified validation is done there).
-	return SolveWithMatrix(am.Mat, ids, opts)
-}
-
-// SolveWithMatrix validates inputs and routes to the chosen algorithm.
-// Optionally performs local search post-passes when EnableLocalSearch is true
-// (heuristics only; exact solvers return optimal tours as-is).
-//
-// Contracts:
-//   - dist must be a square matrix; n ≥ 2 for non-trivial TSP.
-//   - ids may be nil; if provided, len(ids)==n with unique, non-empty strings.
-//   - Symmetry is enforced when required by the algorithm or opts.Symmetric.
-//
-// Errors: strict sentinels from types.go (e.g., ErrNonSquare, ErrAsymmetry,
-// ErrIncompleteGraph, ErrUnsupportedAlgorithm, ErrATSPNotSupportedByAlgo).
-//
-// Complexity: validation O(n^2); the rest per algorithm:
-//   - Christofides: O(n^2) for Prim + O(k^2) greedy matching (or blossom when present) +
-//     O(E) Hierholzer + O(n) shortcut; typical dense cost bounded by O(n^2).
-//   - Held–Karp:   O(n^2*2^n).
-//   - TwoOptOnly:  O(iter*n^2) (see two_opt.go).
-//   - ThreeOptOnly: O(iter*n^3) (see three_opt.go).
-func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, error) {
-	// Stage 1 - unified validation (Options + matrix + ids).
-	n, err := validateAll(dist, ids, opts)
-	if err != nil {
-		return TSResult{}, err
-	}
-
-	// Stage 2 - route by algorithm.
-	var res TSResult
-	switch opts.Algo {
-	case Christofides:
-		// Christofides requires symmetric metric; validated in validateAll.
-		// 1) Build a feasible tour via TSPApprox.
-		res, err = TSPApprox(dist, opts)
-		if err != nil {
-			return TSResult{}, err
-		}
-
-		// 2) Optional local search post-pass.
-		//    If BestImprovement==false → a single TwoOpt pass (fast).
-		//    If BestImprovement==true  → hybrid “2-opt → 3-opt (best) → 2-opt polish”
-		//    (user opted in for stronger but slower refinement).
-		if opts.EnableLocalSearch && compatibleTimeBudget(opts.TimeLimit) && n >= 4 {
-			tour := res.Tour
-			cost := res.Cost
-
-			// Always start with a cheap 2-opt phase.
-			if t2, c2, e2 := TwoOpt(dist, tour, opts); e2 == nil {
-				tour, cost = t2, c2
-			} else {
-				return TSResult{}, e2
-			}
-
-			if opts.BestImprovement {
-				// Stronger middle pass: best-improvement 3-opt (ThreeOpt reads policy from opts).
-				if t3, c3, e3 := ThreeOpt(dist, tour, opts); e3 == nil {
-					tour, cost = t3, c3
-				} else {
-					return TSResult{}, e3
-				}
-				// Final quick polish: one more 2-opt (often squeezes a bit more).
-				if t4, c4, e4 := TwoOpt(dist, tour, opts); e4 == nil {
-					tour, cost = t4, c4
-				} else {
-					return TSResult{}, e4
-				}
-			}
-
-			// Keep canonical orientation and invariants.
-			_ = CanonicalizeOrientationInPlace(tour)
-			if verr := ValidateTour(tour, n, opts.StartVertex); verr == nil {
-				res.Tour = tour
-				res.Cost = round1e9(cost)
-			}
-		}
-
-		return res, nil
-
-	case ExactHeldKarp:
-		// Exact DP; no post-pass needed.
-		res, err = TSPExact(dist, opts)
-		if err != nil {
-			return TSResult{}, err
-		}
-		// Stabilize cost for cross-platform consistency.
-		res.Cost = round1e9(res.Cost)
-
-		return res, nil
-
-	case TwoOptOnly:
-		// Build a canonical initial tour (deterministic), then run TwoOpt.
-		var base []int
-		base, err = trivialRing(n, opts.StartVertex)
-		if err != nil {
-			return TSResult{}, err
-		}
-		var (
-			best []int
-			cost float64
-		)
-		best, cost, err = TwoOpt(dist, base, opts)
-		if err != nil {
-			return TSResult{}, err
-		}
-		_ = CanonicalizeOrientationInPlace(best)
-		if verr := ValidateTour(best, n, opts.StartVertex); verr != nil {
-			return TSResult{}, verr
-		}
-
-		return TSResult{Tour: best, Cost: round1e9(cost)}, nil
-
-	case ThreeOptOnly:
-		// Canonical initial tour; deterministic seed.
-		var base []int
-		base, err = trivialRing(n, opts.StartVertex)
-		if err != nil {
-			return TSResult{}, err
-		}
-
-		// Optional warm-up 2-opt pass (fast).
-		if opts.EnableLocalSearch && n >= 4 {
-			if tour2, _, err2 := TwoOpt(dist, base, opts); err2 == nil {
-				base = tour2
-			} else {
-				return TSResult{}, err2
-			}
-		}
-
-		// 3-opt with user-selected policy (first/best) and optional shuffle.
-		var (
-			best []int
-			cost float64
-		)
-		best, cost, err = ThreeOpt(dist, base, opts)
-		if err != nil {
-			return TSResult{}, err
-		}
-
-		// Optional final 2-opt polish (cheap).
-		if opts.EnableLocalSearch && n >= 4 {
-			if tour2, cost2, err2 := TwoOpt(dist, best, opts); err2 == nil {
-				best, cost = tour2, cost2
-			} else {
-				return TSResult{}, err2
-			}
-		}
-
-		_ = CanonicalizeOrientationInPlace(best)
-		if verr := ValidateTour(best, n, opts.StartVertex); verr != nil {
-			return TSResult{}, verr
-		}
-
-		return TSResult{Tour: best, Cost: round1e9(cost)}, nil
-
-	case BranchAndBound:
-		res, err = TSPBranchAndBound(dist, opts)
-		if err != nil {
-			return TSResult{}, err
-		}
-
-		return res, nil
-
-	default:
-		return TSResult{}, ErrUnsupportedAlgorithm
-	}
-}
 
 // trivialRing returns a canonical Hamiltonian cycle [start, start+1, …, n−1, 0, …, start]
 // with closure; it allocates exactly n+1 integers and performs no matrix lookups.
@@ -313,6 +61,284 @@ func trivialRing(n int, start int) ([]int, error) {
 	out[n] = start
 
 	return out, nil
+}
+
+// prepareSolverDistanceMatrix prepares direct matrix input for final TSP solver kernels.
+// Implementation:
+//   - Stage 1: Validate option policy before allocation.
+//   - Stage 2: Validate pre-closure TSP distance semantics with complete=false.
+//   - Stage 3: If metric closure is disabled, return the original matrix.
+//   - Stage 4: If metric closure is enabled, copy values into a detached Dense matrix.
+//   - Stage 5: Run matrix.APSPInPlace to compute Floyd-Warshall closure.
+//   - Stage 6: Validate final TSP solver matrix with complete=true.
+//
+// Behavior highlights:
+//   - Does not mutate caller-owned direct matrix inputs.
+//   - Uses matrix.APSPInPlace as the single APSP kernel.
+//   - Uses TSP validation only for TSP-specific laws: no negative weights and final completeness.
+//
+// Inputs:
+//   - dist: direct distance matrix.
+//   - opts: explicit solver policy.
+//
+// Returns:
+//   - matrix.Matrix: original matrix or detached metric-closed matrix.
+//   - bool: true when closure was applied.
+//   - int: final matrix order.
+//   - error: sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions from option validation.
+//   - ErrNilDistanceMatrix / ErrNonSquare / ErrDimensionMismatch from structure validation.
+//   - ErrNaNInf, ErrNonZeroDiagonal, ErrNegativeWeight, ErrIncompleteGraph, ErrAsymmetry.
+//   - ErrNegativeWeight joined with matrix.ErrNegativeCycle if APSP detects a negative cycle.
+//
+// Determinism:
+//   - Copy is row-major.
+//   - APSP uses matrix.FloydWarshall deterministic k→i→j order.
+//   - Final validation uses deterministic row-major / upper-triangle scans.
+//
+// Complexity:
+//   - Without closure: Time O(n^2), Space O(1).
+//   - With closure: Time O(n^3), Space O(n^2).
+//
+// Notes:
+//   - This is a policy-stage helper, not a second TSP algorithm.
+//   - Graph inputs that already asked matrix.NewAdjacencyMatrix for metric closure should clear
+//     RunMetricClosure before delegating to direct matrix solving to avoid double closure.
+//
+// AI-Hints:
+//   - Do not replace this with “allow +Inf in validateAll”; that lets incomplete
+//     final TSP instances reach kernels.
+//   - Do not call matrix.InitDistancesInPlace here; direct matrix input already uses
+//     +Inf as the missing-edge sentinel, not raw 0-as-no-edge adjacency.
+func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matrix, bool, int, error) {
+	if err := validateOptionsStandalone(opts); err != nil {
+		return nil, false, 0, err
+	}
+
+	n, err := validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), false, symTol)
+	if err != nil {
+		return nil, false, 0, err
+	}
+
+	if !opts.RunMetricClosure {
+		n, err = validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), true, symTol)
+		if err != nil {
+			return nil, false, 0, err
+		}
+
+		return dist, false, n, nil
+	}
+
+	closed, err := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
+	if err != nil {
+		return nil, false, 0, errors.Join(ErrDimensionMismatch, err)
+	}
+
+	var (
+		row, col int
+		value    float64
+		readErr  error
+	)
+	for row = 0; row < n; row++ {
+		for col = 0; col < n; col++ {
+			value, readErr = dist.At(row, col)
+			if readErr != nil {
+				return nil, false, 0, errors.Join(ErrDimensionMismatch, readErr)
+			}
+
+			if row == col {
+				value = 0
+			}
+
+			if err = closed.Set(row, col, value); err != nil {
+				return nil, false, 0, errors.Join(ErrNaNInf, err)
+			}
+		}
+	}
+
+	if err = matrix.APSPInPlace(closed); err != nil {
+		if errors.Is(err, matrix.ErrNegativeCycle) {
+			return nil, false, 0, errors.Join(ErrNegativeWeight, err)
+		}
+		if errors.Is(err, matrix.ErrNaNInf) {
+			return nil, false, 0, errors.Join(ErrNaNInf, err)
+		}
+
+		return nil, false, 0, err
+	}
+
+	n, err = validateSolverDistanceMatrix(closed, mustEnforceSymmetry(opts), true, symTol)
+	if err != nil {
+		return nil, false, 0, err
+	}
+
+	return closed, true, n, nil
+}
+
+// solvePreparedMatrix routes an already validated, final TSP distance matrix to the selected kernel.
+// Implementation:
+//   - Stage 1: Dispatch by opts.Algo.
+//   - Stage 2: Run the chosen kernel.
+//   - Stage 3: Apply local-search post-pass where the selected policy permits it.
+//   - Stage 4: Canonicalize and validate the final tour.
+//   - Stage 5: Return the legacy minimal result for canonical wrapping.
+//
+// Behavior highlights:
+//   - Assumes prepareSolverDistanceMatrix and validateIDs already ran.
+//   - Does not run metric closure.
+//   - Does not mutate caller-owned matrix data.
+//
+// Inputs:
+//   - dist: final complete solver matrix.
+//   - opts: final options with RunMetricClosure=false.
+//   - n: matrix order.
+//
+// Returns:
+//   - TSResult: minimal successful solver output.
+//   - error: sentinel-classified failure.
+//
+// Errors:
+//   - Kernel-specific sentinels from TSPApprox, TSPExact, TwoOpt, ThreeOpt, TSPBranchAndBound.
+//   - ErrUnsupportedAlgorithm for unknown algorithm.
+//
+// Determinism:
+//   - Fixed switch dispatch and kernel-level tie-breaks.
+//   - Tour canonicalization is applied before return.
+//
+// Complexity:
+//   - Depends on selected algorithm.
+//
+// AI-Hints:
+//   - Do not call this from public code.
+//   - Do not add validation here except final invariant checks; public facades own validation.
+func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, error) {
+	switch opts.Algo {
+	case Christofides:
+		// Christofides requires symmetric metric; validated in validateAll.
+		// 1) Build a feasible tour via TSPApprox.
+		result, err := TSPApprox(dist, opts)
+		if err != nil {
+			return TSResult{}, err
+		}
+
+		// 2) Optional local search post-pass.
+		//    If BestImprovement==false → a single TwoOpt pass (fast).
+		//    If BestImprovement==true  → hybrid “2-opt → 3-opt (best) → 2-opt polish”
+		//    (user opted in for stronger but slower refinement).
+		if opts.EnableLocalSearch && compatibleTimeBudget(opts.TimeLimit) && n >= 4 {
+			tour := result.Tour
+			cost := result.Cost
+
+			// Always start with a cheap 2-opt phase.
+			tour2, cost2, err2 := TwoOpt(dist, tour, opts)
+			if err2 != nil {
+				return TSResult{}, err2
+			}
+			tour, cost = tour2, cost2
+
+			if opts.BestImprovement {
+				// Stronger middle pass: best-improvement 3-opt (ThreeOpt reads policy from opts).
+				tour3, cost3, err3 := ThreeOpt(dist, tour, opts)
+				if err3 != nil {
+					return TSResult{}, err3
+				}
+				tour, cost = tour3, cost3
+
+				// Final quick polish: one more 2-opt (often squeezes a bit more).
+				tour4, cost4, err4 := TwoOpt(dist, tour, opts)
+				if err4 != nil {
+					return TSResult{}, err4
+				}
+				tour, cost = tour4, cost4
+			}
+
+			// Keep canonical orientation and invariants.
+			_ = CanonicalizeOrientationInPlace(tour)
+			if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
+				return TSResult{}, err
+			}
+
+			result.Tour = tour
+			result.Cost = round1e9(cost)
+		}
+
+		return result, nil
+
+	case ExactHeldKarp:
+		// Exact DP; no post-pass needed.
+		result, err := TSPExact(dist, opts)
+		if err != nil {
+			return TSResult{}, err
+		}
+		// Stabilize cost for cross-platform consistency.
+		result.Cost = round1e9(result.Cost)
+		return result, nil
+
+	case TwoOptOnly:
+		// Build a canonical initial tour (deterministic), then run TwoOpt.
+		base, err := trivialRing(n, opts.StartVertex)
+		if err != nil {
+			return TSResult{}, err
+		}
+
+		tour, cost, err := TwoOpt(dist, base, opts)
+		if err != nil {
+			return TSResult{}, err
+		}
+
+		_ = CanonicalizeOrientationInPlace(tour)
+		if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
+			return TSResult{}, err
+		}
+
+		return TSResult{Tour: tour, Cost: round1e9(cost)}, nil
+
+	case ThreeOptOnly:
+		// Canonical initial tour; deterministic seed.
+		base, err := trivialRing(n, opts.StartVertex)
+		if err != nil {
+			return TSResult{}, err
+		}
+
+		// Optional warm-up 2-opt pass (fast).
+		if opts.EnableLocalSearch && n >= 4 {
+			tour2, _, err2 := TwoOpt(dist, base, opts)
+			if err2 != nil {
+				return TSResult{}, err2
+			}
+			base = tour2
+		}
+
+		// 3-opt with user-selected policy (first/best) and optional shuffle.
+		tour, cost, err := ThreeOpt(dist, base, opts)
+		if err != nil {
+			return TSResult{}, err
+		}
+
+		// Optional final 2-opt polish (cheap).
+		if opts.EnableLocalSearch && n >= 4 {
+			tour2, cost2, err2 := TwoOpt(dist, tour, opts)
+			if err2 != nil {
+				return TSResult{}, err2
+			}
+			tour, cost = tour2, cost2
+		}
+
+		_ = CanonicalizeOrientationInPlace(tour)
+		if err = ValidateTour(tour, n, opts.StartVertex); err != nil {
+			return TSResult{}, err
+		}
+
+		return TSResult{Tour: tour, Cost: round1e9(cost)}, nil
+
+	case BranchAndBound:
+		return TSPBranchAndBound(dist, opts)
+
+	default:
+		return TSResult{}, ErrUnsupportedAlgorithm
+	}
 }
 
 // nearestNeighbor (optional) - kept private for future use.

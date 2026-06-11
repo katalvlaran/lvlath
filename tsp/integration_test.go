@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test provides end-to-end (integration) checks for the public API.
 // Goals:
 //  1. SolveWithMatrix (Auto path) returns a valid Hamiltonian cycle with sane cost.

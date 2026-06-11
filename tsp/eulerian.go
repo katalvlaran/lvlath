@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Eulerian circuit construction (Hierholzer) for undirected multigraphs.
 //
 // EulerianCircuit builds an Eulerian *circuit* of an undirected multigraph given
@@ -28,15 +31,16 @@
 package tsp
 
 // EulerianCircuit returns a closed Eulerian walk (Hierholzer) over adj starting at start.
-func EulerianCircuit(adj [][]int, start int) []int {
+func EulerianCircuit(adj [][]int, start int) ([]int, error) {
 	// Fast guards to avoid panics on malformed wiring; dispatcher ensures valid ranges.
 	var n int
 	n = len(adj)
 	if n == 0 {
-		return nil
+		return nil, ErrDimensionMismatch
 	}
 	if start < 0 || start >= n {
-		start = 0 // defensive; upstream validation guarantees this is not taken in practice
+		//start = 0 // defensive; upstream validation guarantees this is not taken in practice
+		return nil, ErrStartOutOfRange
 	}
 
 	// Count half-edges (each adjacency entry is one half-edge).
@@ -54,7 +58,8 @@ func EulerianCircuit(adj [][]int, start int) []int {
 	if m2 == 0 {
 		// Isolated graph: the only "circuit" is the start itself (deg=0 everywhere).
 		// Christofides never passes such a graph, but keep behavior defined.
-		return []int{start}
+		//return []int{start}, nil
+		return nil, ErrNonEulerian
 	}
 
 	// Half-edge storage:
@@ -82,21 +87,24 @@ func EulerianCircuit(adj [][]int, start int) []int {
 		k    uint64
 		v    int
 		ok   bool
+		i    int // iterator var
 	)
 	// map key -> unmatched half-edge id (or -1 if none)
 	var pending = make(map[uint64]int, m2/2+1)
 
 	for u = 0; u < n; u++ {
 		// Reserve capacity to avoid reslice churn on hot paths.
+		if len(adj[u])%2 != 0 {
+			return nil, ErrNonEulerian
+		}
 		if cap(head[u]) < len(adj[u]) {
 			head[u] = make([]int, 0, len(adj[u]))
 		}
-		var i int
 		for i = 0; i < len(adj[u]); i++ {
 			v = adj[u][i]
 			// Defensive range check; well-formed inputs always satisfy 0 ≤ v < n.
 			if v < 0 || v >= n {
-				continue // ??
+				return nil, ErrDimensionMismatch
 			}
 
 			// Assign half-edge id and push into incidence list.
@@ -165,7 +173,7 @@ func EulerianCircuit(adj [][]int, start int) []int {
 
 	// circuit is produced in reverse of the traversal, but it is a valid closed walk
 	// starting and ending at `start`. No reallocation beyond O(E).
-	return circuit
+	return circuit, nil
 }
 
 // packUndirectedKey encodes an undirected pair {u,v} as a uint64 key.

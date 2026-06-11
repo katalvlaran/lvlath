@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - cost utilities shared by exact/heuristic solvers.
 //
 // This file provides small, allocation-conscious helpers to compute the
@@ -15,6 +18,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 
 	"github.com/katalvlaran/lvlath/matrix"
@@ -24,26 +28,57 @@ import (
 // Avoids tiny FP drifts across platforms/opt levels without affecting optimality.
 const roundScale = 1e9
 
-// TourCost dispatches to a specialized implementation when dist is *matrix.Dense,
-// otherwise uses the generic matrix.Matrix path.
+// TourCost computes the total cost of a closed Hamiltonian tour.
+// Implementation:
+//   - Stage 1: validate nil matrix and nil/short tour inputs.
+//   - Stage 2: choose Dense fast-path or generic matrix.Matrix path.
+//   - Stage 3: each path validates edge indices and numeric weights.
 //
-// Contract:
-//   - tour must represent a closed cycle: len(tour) >= 2 and indices within [0..n-1].
-//   - dist must be square (n×n). See validateDistMatrix for full validation.
-//   - Returns ErrNonSquare, ErrDimensionMismatch, ErrIncompleteGraph, or ErrNegativeWeight.
+// Behavior highlights:
+//   - Does not mutate the tour or matrix.
+//   - Dense and generic paths preserve identical sentinel classification.
 //
-// Note: This is an internal helper; solvers are expected to validate inputs
+// Inputs:
+//   - dist: square distance matrix.
+//   - tour: closed cycle of vertex indices.
 //
-//	upfront via validateAll, but we still guard against misuse.
+// Returns:
+//   - float64: rounded total cost.
+//   - error: sentinel-classified failure.
 //
-// Complexity: O(n).
+// Errors:
+//   - ErrNilDistanceMatrix joined with matrix nil sentinels.
+//   - ErrNilTour for nil tour.
+//   - ErrInvalidTour for malformed non-nil tour.
+//   - ErrNonSquare for bad matrix shape.
+//   - ErrNaNInf for NaN/-Inf.
+//   - ErrIncompleteGraph for +Inf tour edges.
+//   - ErrNegativeWeight for negative finite weights.
+//
+// Determinism:
+//   - Fixed tour order scan from index 0 to len(tour)-2.
+//
+// Complexity:
+//   - Time O(len(tour)), Space O(1).
+//
+// AI-Hints:
+//   - Do not classify NaN as ErrDimensionMismatch.
+//   - Keep Dense and generic path error classes equivalent.
 func TourCost(dist matrix.Matrix, tour []int) (float64, error) {
-	if dist == nil || tour == nil || len(tour) < 2 {
-		return 0, ErrDimensionMismatch
+	if err := matrix.ValidateNotNil(dist); err != nil {
+		return 0, errors.Join(ErrNilDistanceMatrix, err)
 	}
+	if tour == nil {
+		return 0, ErrNilTour
+	}
+	if len(tour) < 2 {
+		return 0, ErrInvalidTour
+	}
+
 	if d, ok := dist.(*matrix.Dense); ok {
 		return tourCostDense(d, tour)
 	}
+
 	return tourCostGeneric(dist, tour)
 }
 
@@ -83,7 +118,7 @@ func tourCostDense(d *matrix.Dense, tour []int) (float64, error) {
 
 		// Index range checks.
 		if u < 0 || u >= n || v < 0 || v >= n {
-			return 0, ErrDimensionMismatch
+			return 0, ErrInvalidTour
 		}
 
 		// Fetch weight and validate.
@@ -93,7 +128,7 @@ func tourCostDense(d *matrix.Dense, tour []int) (float64, error) {
 			return 0, ErrDimensionMismatch
 		}
 		if math.IsNaN(w) {
-			return 0, ErrDimensionMismatch
+			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 		}
 		if math.IsInf(w, 0) {
 			return 0, ErrIncompleteGraph
@@ -140,7 +175,7 @@ func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
 		v = tour[i+1]
 
 		if u < 0 || u >= n || v < 0 || v >= n {
-			return 0, ErrDimensionMismatch
+			return 0, ErrInvalidTour
 		}
 
 		w, err = m.At(u, v)
@@ -148,7 +183,7 @@ func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
 			return 0, ErrDimensionMismatch
 		}
 		if math.IsNaN(w) {
-			return 0, ErrDimensionMismatch
+			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 		}
 		if math.IsInf(w, 0) {
 			return 0, ErrIncompleteGraph
@@ -168,31 +203,34 @@ func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
 //
 // Complexity: O(1).
 func edgeCost(m matrix.Matrix, u, v int) (float64, error) {
-	// Basic shape and range checks.
-	var (
-		nr = m.Rows()
-		nc = m.Cols()
-	)
+	if err := matrix.ValidateNotNil(m); err != nil {
+		return 0, errors.Join(ErrNilDistanceMatrix, err)
+	}
+
+	nr := m.Rows()
+	nc := m.Cols()
+
 	if nr != nc || nr <= 0 {
 		return 0, ErrNonSquare
 	}
 	if u < 0 || u >= nr || v < 0 || v >= nr {
-		return 0, ErrDimensionMismatch
+		return 0, ErrInvalidTour
 	}
 
 	w, err := m.At(u, v)
 	if err != nil {
-		return 0, ErrDimensionMismatch
+		return 0, errors.Join(ErrDimensionMismatch, err)
 	}
-	if math.IsNaN(w) {
-		return 0, ErrDimensionMismatch
+	if math.IsNaN(w) || math.IsInf(w, -1) {
+		return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 	}
-	if math.IsInf(w, 0) {
+	if math.IsInf(w, 1) {
 		return 0, ErrIncompleteGraph
 	}
 	if w < 0 {
 		return 0, ErrNegativeWeight
 	}
+
 	return w, nil
 }
 

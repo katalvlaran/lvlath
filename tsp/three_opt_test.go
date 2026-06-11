@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test exercises the 3-opt local search via the public API.
 // Focus: policy correctness (first vs best), improvement over 2-opt on TSP,
 // validity on ATSP, rejection of +Inf candidates, shuffle determinism,

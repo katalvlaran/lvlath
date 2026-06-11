@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test contains validation tests for lvlath/tsp input options and
 // matrix preconditions. The focus is on strict sentinel errors, determinism,
 // and clean table-driven structure per lvlath Coding Standard (Rules 1–99).

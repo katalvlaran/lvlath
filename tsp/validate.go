@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - validation utilities shared by exact/heuristic solvers.
 //
 // This file contains small, tight, and well-documented helpers that:
@@ -12,49 +15,68 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// symTol is a structural tolerance for symmetry/diagonal checks in matrices.
-// It is independent from Options.Eps (which governs "improvement" in local search).
+// symTol is the structural tolerance for diagonal and symmetry checks in TSP distance matrices.
+// It is intentionally stricter than matrix.DefaultEpsilon because TSP contracts usually consume
+// already prepared costs, not noisy floating-point measurements from algebraic kernels.
 const symTol = 1e-12
 
-// validateAll verifies Options + distance matrix + optional vertex IDs.
-// It returns n (matrix order) on success.
+// validateAll verifies Options, final distance matrix, start vertex, and optional IDs.
+// Implementation:
+//   - Stage 1: Validate option policy before any O(n^2) work.
+//   - Stage 2: Validate final TSP distance matrix as complete solver input.
+//   - Stage 3: Validate StartVertex after n is known.
+//   - Stage 4: Validate optional IDs without changing matrix order.
 //
-// Contract:
-//   - dist must be non-nil, square, and of size n≥2 for non-trivial TSP.
-//   - ids is optional; if provided, len(ids) must equal n and contain unique, non-empty strings.
-//   - Symmetry is enforced if required by the selected algorithm (e.g., Christofides).
-//   - If opts.RunMetricClosure==false, +Inf off-diagonal entries are rejected.
+// Behavior highlights:
+//   - Final solver input is always complete: +Inf off-diagonal is rejected.
+//   - Metric closure is handled before this function by the facade/policy stage.
 //
-// Complexity: O(n²) time, O(n) extra space when ids!=nil (uniqueness check).
+// Inputs:
+//   - dist: final solver distance matrix.
+//   - ids: optional row/column IDs.
+//   - opts: solver options.
+//
+// Returns:
+//   - int: matrix order.
+//   - error: sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions, ErrUnsupportedAlgorithm, ErrATSPNotSupportedByAlgo.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch.
+//   - ErrNaNInf, ErrNonZeroDiagonal, ErrNegativeWeight, ErrIncompleteGraph, ErrAsymmetry.
+//   - ErrStartOutOfRange.
+//   - ErrInvalidIDs.
+//
+// Determinism:
+//   - Fixed validation order: options -> matrix -> start -> IDs.
+//
+// Complexity:
+//   - Time O(n^2), Space O(n) only when ids!=nil.
+//
+// AI-Hints:
+//   - Do not pass opts.RunMetricClosure into this function as “allow +Inf”.
+//     Closure must already be applied; this function protects final solver input.
 func validateAll(dist matrix.Matrix, ids []string, opts Options) (int, error) {
-	var (
-		n   int
-		err error
-	)
-
-	// Stage 1: Options-only sanity.
-	if err = validateOptionsStandalone(opts); err != nil {
+	if err := validateOptionsStandalone(opts); err != nil {
 		return 0, err
 	}
 
-	// Stage 2: Matrix shape/values with algorithm-driven symmetry requirement.
-	n, err = validateDistMatrix(dist, mustEnforceSymmetry(opts), opts.RunMetricClosure, symTol)
+	n, err := validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), true, symTol)
 	if err != nil {
 		return 0, err
 	}
 
-	// Stage 3: Start vertex range (after n is known).
 	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return 0, err
 	}
 
-	// Stage 4: Optional IDs validation.
 	if ids != nil {
 		if err = validateIDs(ids, n); err != nil {
 			return 0, err
@@ -64,24 +86,67 @@ func validateAll(dist matrix.Matrix, ids []string, opts Options) (int, error) {
 	return n, nil
 }
 
-// validateOptionsStandalone checks internal consistency of Options without
-// referencing matrices or tours. Algo↔Symmetric constraints are enforced here.
+// validateOptionsStandalone checks Options without reading matrix data.
+// Implementation:
+//   - Stage 1: validate numeric knobs that affect search acceptance and time policy.
+//   - Stage 2: validate enum-driven algorithm policies.
+//   - Stage 3: validate algorithm/domain compatibility.
 //
-// Complexity: O(1).
+// Behavior highlights:
+//   - No allocations.
+//   - No silent normalization of invalid public options.
+//   - Zero TimeLimit remains the documented "unlimited" mode.
+//
+// Inputs:
+//   - opts: solver configuration assembled by the caller.
+//
+// Returns:
+//   - error: nil when options are structurally valid.
+//
+// Errors:
+//   - ErrInvalidOptions for negative/NaN/Inf numeric knobs or unknown enum values.
+//   - ErrATSPNotSupportedByAlgo when a symmetric-only algorithm is requested for ATSP.
+//   - ErrUnsupportedAlgorithm for unknown top-level algorithms.
+//
+// Determinism:
+//   - Pure O(1) validation; no randomness and no state mutation.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This function does not normalize options; it only rejects invalid public input.
+//
+// AI-Hints:
+//   - Do not reintroduce silent clamps for Eps, TimeLimit, or iteration caps.
+//   - Tests must classify invalid options with errors.Is(err, ErrInvalidOptions).
 func validateOptionsStandalone(opts Options) error {
 	// TimeLimit must be non-negative (negative durations are undefined).
 	if opts.TimeLimit < 0 {
-		return ErrDimensionMismatch
+		return ErrInvalidOptions
 	}
 	// Eps is the acceptance tolerance for Δ<−Eps. A negative epsilon would invert
 	// the acceptance logic and break optimality guarantees ⇒ reject.
-	if opts.Eps < 0 {
-		return ErrDimensionMismatch
+	if math.IsNaN(opts.Eps) || math.IsInf(opts.Eps, 0) || opts.Eps < 0 {
+		return ErrInvalidOptions
 	}
 	// TwoOpt/ThreeOpt iteration bound must be non-negative (0 ⇒ unlimited).
 	if opts.TwoOptMaxIters < 0 {
-		return ErrDimensionMismatch
+		return ErrInvalidOptions
 	}
+
+	switch opts.MatchingAlgo {
+	case GreedyMatch, BlossomMatch:
+	default:
+		return ErrInvalidOptions
+	}
+
+	switch opts.BoundAlgo {
+	case NoBound, SimpleBound, OneTreeBound:
+	default:
+		return ErrInvalidOptions
+	}
+
 	// Christofides requires a symmetric (metric) TSP instance.
 	if opts.Algo == Christofides && !opts.Symmetric {
 		return ErrATSPNotSupportedByAlgo
@@ -95,13 +160,10 @@ func validateOptionsStandalone(opts Options) error {
 	// Accept only known algorithms; dispatcher may still return a runtime sentinel later.
 	switch opts.Algo {
 	case Christofides, ExactHeldKarp, TwoOptOnly, ThreeOptOnly, BranchAndBound:
-		// ok
+		return nil
 	default:
 		return ErrUnsupportedAlgorithm
 	}
-
-	// ShuffleNeighborhood may be set regardless of Seed; seed==0 ⇒ deterministic stream.
-	return nil
 }
 
 // mustEnforceSymmetry tells whether the chosen algorithm *requires* symmetry.
@@ -132,13 +194,39 @@ func validateStartVertex(n int, start int) error {
 	return nil
 }
 
-// validateIDs enforces len(ids)==n, non-empty strings, and uniqueness.
+// validateIDs verifies optional vertex IDs attached to matrix rows/columns.
+// Implementation:
+//   - Stage 1: verify exact shape match len(ids)==n.
+//   - Stage 2: scan IDs once and reject empty or duplicate labels.
 //
-// Complexity: O(n) time and O(n) extra space.
+// Behavior highlights:
+//   - Keeps index-to-ID mapping deterministic and lossless.
+//   - Does not sort; input order is the matrix row/column order.
+//
+// Inputs:
+//   - ids: optional matrix row/column labels.
+//   - n: matrix order.
+//
+// Returns:
+//   - error: nil when IDs are valid.
+//
+// Errors:
+//   - ErrDimensionMismatch when len(ids)!=n.
+//   - ErrInvalidIDs for empty or duplicated IDs.
+//
+// Determinism:
+//   - Fixed increasing index scan.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// AI-Hints:
+//   - Do not collapse empty/duplicate IDs into ErrDimensionMismatch.
 func validateIDs(ids []string, n int) error {
 	if len(ids) != n {
 		return ErrDimensionMismatch
 	}
+
 	seen := make(map[string]struct{}, n)
 
 	var (
@@ -150,10 +238,10 @@ func validateIDs(ids []string, n int) error {
 		id = ids[i] // read ID at position i
 		// Empty or duplicate IDs violate the shape/uniqueness contract.
 		if id == "" {
-			return ErrDimensionMismatch
+			return ErrInvalidIDs
 		}
 		if _, ok = seen[id]; ok {
-			return ErrDimensionMismatch
+			return ErrInvalidIDs
 		}
 		seen[id] = struct{}{} // mark ID as seen
 	}
@@ -161,60 +249,88 @@ func validateIDs(ids []string, n int) error {
 	return nil
 }
 
-// validateDistMatrix performs full matrix validation:
-//   - non-nil, square, n>=2,
-//   - diagonal ≈ 0 (|a_ii| ≤ tol), finite,
-//   - no negative off-diagonal distances,
-//   - if !allowInf: reject +Inf/−Inf off-diagonal,
-//   - if symmetric==true: |a_ij − a_ji| ≤ tol,
-//   - NaN anywhere is invalid.
+// validateDistMatrix verifies the structural and numeric TSP distance contract.
+// Implementation:
+//   - Stage 1: delegate nil/typed-nil detection to matrix.ValidateNotNil.
+//   - Stage 2: verify square shape and supported non-trivial size.
+//   - Stage 3: validate diagonal values.
+//   - Stage 4: validate off-diagonal values and +Inf policy.
+//   - Stage 5: optionally validate symmetry.
 //
-// Returns n (matrix order) on success.
+// Behavior highlights:
+//   - +Inf is allowed only when allowInf=true.
+//   - -Inf and NaN are always rejected as ErrNaNInf.
+//   - Negative finite distances are rejected as ErrNegativeWeight.
 //
-// Complexity: O(n²).
+// Inputs:
+//   - dist: matrix.Matrix distance model.
+//   - symmetric: whether symmetry must be enforced.
+//   - allowInf: whether +Inf off-diagonal is allowed at this pre-solver stage.
+//   - tol: structural tolerance for diagonal/symmetry checks.
+//
+// Returns:
+//   - int: matrix order n on success.
+//   - error: sentinel-classified validation failure.
+//
+// Errors:
+//   - ErrNilDistanceMatrix joined with matrix nil sentinels.
+//   - ErrNonSquare joined with matrix.ErrNonSquare for non-square shape.
+//   - ErrDimensionMismatch for unsupported n==1.
+//   - ErrNaNInf joined with matrix.ErrNaNInf for NaN/-Inf/invalid diagonal Inf.
+//   - ErrNonZeroDiagonal for non-zero diagonal.
+//   - ErrNegativeWeight for negative finite distances.
+//   - ErrIncompleteGraph for +Inf off-diagonal when allowInf=false.
+//   - ErrAsymmetry for symmetry violations.
+//
+// Determinism:
+//   - Fixed row-major scan and upper-triangle symmetry scan.
+//
+// Complexity:
+//   - Time O(n^2), Space O(1).
+//
+// Notes:
+//   - Final solver input must call this with allowInf=false.
+//
+// AI-Hints:
+//   - Do not let RunMetricClosure merely loosen validation; closure must happen before final validation.
 func validateDistMatrix(dist matrix.Matrix, symmetric bool, allowInf bool, tol float64) (int, error) {
 	// Stage 1: shape checks (non-nil, square).
-	if dist == nil {
-		return 0, ErrDimensionMismatch
+	if err := matrix.ValidateNotNil(dist); err != nil {
+		return 0, errors.Join(ErrNilDistanceMatrix, err)
 	}
-	var (
-		nr int
-		nc int
-	)
-	nr = dist.Rows()
-	nc = dist.Cols()
-	if nr != nc || nr <= 0 {
-		return 0, ErrNonSquare
+
+	nr := dist.Rows()
+	nc := dist.Cols()
+
+	if nr != nc {
+		return 0, errors.Join(ErrNonSquare, matrix.ErrNonSquare)
+	}
+	if nr <= 0 {
+		return 0, errors.Join(ErrNonSquare, matrix.ErrInvalidDimensions)
 	}
 	if nr == 1 {
 		// Trivial n==1 instance: treat as invalid for general solvers (we require n>=2).
 		return 0, ErrDimensionMismatch
 	}
-	var n int
-	n = nr // the matrix order
 
+	n := nr // the matrix order
 	// Stage 2: diagonal, negativity, infinity, symmetry.
 	var (
 		i, j     int     // loop indices
 		aij, aji float64 // matrix entries a[i][j] and a[j][i]
 		err      error
-		abs      float64 // scratch for |value|
 	)
 
 	// Diagonal: a_ii ≈ 0 within tol, finite.
 	for i = 0; i < n; i++ { // iterate diagonal positions
 		aij, err = dist.At(i, i) // read diagonal entry
 		if err != nil {
-			return 0, ErrDimensionMismatch
+			return 0, errors.Join(ErrDimensionMismatch, err)
 		}
 		if math.IsNaN(aij) || math.IsInf(aij, 0) {
-			return 0, ErrDimensionMismatch
+			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 		}
-		abs = aij // absolute value without allocations
-		if abs < 0 {
-			abs = -abs // abs(aij)
-		}
-		if abs > tol {
+		if math.Abs(aij) > tol {
 			return 0, ErrNonZeroDiagonal
 		}
 	}
@@ -227,15 +343,15 @@ func validateDistMatrix(dist matrix.Matrix, symmetric bool, allowInf bool, tol f
 			}
 			aij, err = dist.At(i, j) // read off-diagonal entry
 			if err != nil {
-				return 0, ErrDimensionMismatch
+				return 0, errors.Join(ErrDimensionMismatch, err)
 			}
-			if math.IsNaN(aij) {
-				return 0, ErrDimensionMismatch
+			if math.IsNaN(aij) || math.IsInf(aij, -1) {
+				return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 			}
 			if aij < 0 {
 				return 0, ErrNegativeWeight
 			}
-			if math.IsInf(aij, 0) && !allowInf {
+			if math.IsInf(aij, 1) && !allowInf {
 				return 0, ErrIncompleteGraph
 			}
 		}
@@ -247,17 +363,15 @@ func validateDistMatrix(dist matrix.Matrix, symmetric bool, allowInf bool, tol f
 			for j = i + 1; j < n; j++ { // avoid double work
 				aij, err = dist.At(i, j) // a_ij
 				if err != nil {
-					return 0, ErrDimensionMismatch
+					return 0, errors.Join(ErrDimensionMismatch, err)
 				}
-				aji, err = dist.At(j, i) // a_ji
+
+				aji, err = dist.At(j, i)
 				if err != nil {
-					return 0, ErrDimensionMismatch
+					return 0, errors.Join(ErrDimensionMismatch, err)
 				}
-				abs = aij - aji // difference to test symmetry
-				if abs < 0 {
-					abs = -abs // |a_ij - a_ji|
-				}
-				if abs > tol {
+
+				if math.Abs(aij-aji) > tol {
 					return 0, ErrAsymmetry
 				}
 			}
@@ -277,4 +391,147 @@ func compatibleTimeBudget(tl time.Duration) bool {
 	}
 	// Negative handled in validateOptionsStandalone; here treat >0 as allowed.
 	return tl > 0
+}
+
+// validateSolverDistanceMatrix validates the TSP-specific distance-matrix contract.
+// It relies on matrix.ValidateSquare for canonical nil / typed-nil / square checks,
+// then performs exactly the domain checks that are specific to TSP solvers.
+//
+// Implementation:
+//   - Stage 1: Delegate nil, typed-nil, and square shape validation to matrix.ValidateSquare.
+//   - Stage 2: Reject unsupported degenerate size n<2.
+//   - Stage 3: Scan values in deterministic row-major order.
+//   - Stage 4: Enforce TSP numeric policy: diagonal≈0, no NaN/-Inf, no negative weights.
+//   - Stage 5: Enforce final completeness (+Inf forbidden) and optional symmetry.
+//
+// Behavior highlights:
+//   - Does not duplicate matrix structural validation.
+//   - Does not use matrix.ValidateDistanceMatrix as the full validator because APSP permits
+//     finite negative off-diagonal distances, while TSP forbids them.
+//   - Preserves matrix sentinel identity with errors.Join when failures originate in matrix.
+//
+// Inputs:
+//   - dist: matrix.Matrix distance model consumed by TSP kernels.
+//   - symmetric: whether dist[i][j] must match dist[j][i] within symTol.
+//   - complete: whether +Inf off-diagonal values must be rejected as ErrIncompleteGraph.
+//   - tol: non-negative structural tolerance for diagonal and symmetry checks.
+//
+// Returns:
+//   - int: matrix order n on success.
+//   - error: nil on success or a sentinel-classified validation failure.
+//
+// Errors:
+//   - ErrNilDistanceMatrix joined with matrix.ErrNilMatrix from matrix.ValidateSquare.
+//   - ErrNonSquare joined with matrix.ErrNonSquare from matrix.ValidateSquare.
+//   - ErrDimensionMismatch when n<2.
+//   - ErrNaNInf joined with matrix.ErrNaNInf for NaN or -Inf.
+//   - ErrNonZeroDiagonal for non-zero self-distance.
+//   - ErrNegativeWeight for negative finite off-diagonal weights.
+//   - ErrIncompleteGraph for +Inf off-diagonal when complete=true.
+//   - ErrAsymmetry for symmetry violations.
+//
+// Determinism:
+//   - Fixed row-major value scan.
+//   - Fixed upper-triangle symmetry scan.
+//   - The first failing position is deterministic through the loop order.
+//
+// Complexity:
+//   - Time O(n^2), Space O(1).
+//
+// Notes:
+//   - complete=false is valid only before direct-matrix metric closure.
+//   - complete=true is mandatory before any final TSP solver kernel.
+//
+// AI-Hints:
+//   - Do not replace this with matrix.ValidateDistanceMatrix only; that would allow
+//     negative APSP distances that TSP must reject.
+//   - Do not map final +Inf to ErrNaNInf; in TSP it means the Hamiltonian instance is incomplete.
+func validateSolverDistanceMatrix(
+	dist matrix.Matrix,
+	symmetric bool,
+	complete bool,
+	tol float64,
+) (int, error) {
+	if err := matrix.ValidateSquare(dist); err != nil {
+		if errors.Is(err, matrix.ErrNilMatrix) {
+			return 0, errors.Join(ErrNilDistanceMatrix, err)
+		}
+		if errors.Is(err, matrix.ErrNonSquare) {
+			return 0, errors.Join(ErrNonSquare, err)
+		}
+
+		return 0, errors.Join(ErrDimensionMismatch, err)
+	}
+
+	n := dist.Rows()
+	if n < 2 {
+		return 0, ErrDimensionMismatch
+	}
+
+	var (
+		row     int
+		col     int
+		value   float64
+		mirror  float64
+		readErr error
+		absDiff float64
+		absDiag float64
+	)
+
+	for row = 0; row < n; row++ {
+		for col = 0; col < n; col++ {
+			value, readErr = dist.At(row, col)
+			if readErr != nil {
+				return 0, errors.Join(ErrDimensionMismatch, readErr)
+			}
+
+			if math.IsNaN(value) || math.IsInf(value, -1) {
+				return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+			}
+
+			if row == col {
+				if math.IsInf(value, 1) {
+					return 0, ErrNonZeroDiagonal
+				}
+
+				absDiag = math.Abs(value)
+				if absDiag > tol {
+					return 0, ErrNonZeroDiagonal
+				}
+
+				continue
+			}
+
+			if value < 0 {
+				return 0, ErrNegativeWeight
+			}
+
+			if complete && math.IsInf(value, 1) {
+				return 0, ErrIncompleteGraph
+			}
+		}
+	}
+
+	if symmetric {
+		for row = 0; row < n; row++ {
+			for col = row + 1; col < n; col++ {
+				value, readErr = dist.At(row, col)
+				if readErr != nil {
+					return 0, errors.Join(ErrDimensionMismatch, readErr)
+				}
+
+				mirror, readErr = dist.At(col, row)
+				if readErr != nil {
+					return 0, errors.Join(ErrDimensionMismatch, readErr)
+				}
+
+				absDiff = math.Abs(value - mirror)
+				if absDiff > tol {
+					return 0, ErrAsymmetry
+				}
+			}
+		}
+	}
+
+	return n, nil
 }

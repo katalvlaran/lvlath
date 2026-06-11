@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test validates the exact Branch-and-Bound solver (TSPBranchAndBound).
 // Focus:
 //  1. Strict sentinels on malformed inputs (non-square, OOB start, NaN, negative, +Inf).

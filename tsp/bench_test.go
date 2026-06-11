@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test - comprehensive benchmarks for lvlath/tsp algorithms.
 // Scope:
 //   - Branch-and-Bound with SimpleBound and OneTreeBound (small n; exact).
@@ -309,8 +312,8 @@ func BenchmarkEulerian_Hierholzer_n512(b *testing.B) {
 	var it int                   // iteration counter
 	for it = 0; it < b.N; it++ { // repeat Hierholzer
 		// Make a working copy per run because Hierholzer may consume edges.
-		var multi = deepCopyAdj(baseMulti)         // fresh copy for this iteration
-		var _ = tsp.EulerianCircuit(multi, startV) // compute Eulerian circuit from startV
+		var multi = deepCopyAdj(baseMulti)            // fresh copy for this iteration
+		var _, _ = tsp.EulerianCircuit(multi, startV) // compute Eulerian circuit from startV
 		// We intentionally ignore the returned walk; the purpose is timing traversal.
 	}
 }

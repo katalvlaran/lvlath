@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test verifies Prim's MST (O(n^2)) over dense metric matrices.
 // Focus:
 //  1. Correct total weight and tree structure on a small instance.

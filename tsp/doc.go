@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp provides Travelling Salesman Problem (TSP/ATSP) solvers over distance matrices with a consistent API,
 // strict sentinel errors, deterministic behavior, and stable cost rounding (1e-9). The package exposes exact search,
 // classical approximation, and local-search improvements behind a single dispatcher.

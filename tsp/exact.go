@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Held–Karp exact solver (DP O(n²·2ⁿ)) for TSP/ATSP.
 //
 // TSPExact computes an optimal Hamiltonian cycle using the Held–Karp dynamic
@@ -40,27 +43,23 @@ var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices
 
 // TSPExact runs the Held–Karp DP over any matrix.Matrix (symmetric or asymmetric).
 func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
-	// Light shape guards (full validation was done by the dispatcher).
-	if dist == nil {
-		return TSResult{}, ErrNonSquare
+	if err := validateOptionsStandalone(opts); err != nil {
+		return TSResult{}, err
 	}
-	var (
-		nr = dist.Rows()
-		nc = dist.Cols()
-	)
-	if nr != nc || nr <= 0 {
-		return TSResult{}, ErrNonSquare
+
+	n, err := validateDistMatrix(dist, false, false, symTol)
+	if err != nil {
+		return TSResult{}, err
 	}
-	if nr < 2 {
-		return TSResult{}, ErrDimensionMismatch
-	}
-	if nr > MaxExactN {
+	if n > MaxExactN {
 		return TSResult{}, ErrSizeTooLarge
 	}
-	var n = nr
+	if err = validateStartVertex(n, opts.StartVertex); err != nil {
+		return TSResult{}, err
+	}
 
 	// Start vertex range.
-	if err := validateStartVertex(n, opts.StartVertex); err != nil {
+	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return TSResult{}, err
 	}
 
@@ -71,16 +70,18 @@ func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
 	var (
 		i, j int
 		wij  float64
-		err  error
 	)
 	for i = 0; i < n; i++ {
 		for j = 0; j < n; j++ {
 			wij, err = dist.At(i, j)
 			if err != nil {
-				return TSResult{}, ErrDimensionMismatch
+				return TSResult{}, errors.Join(ErrDimensionMismatch, err)
 			}
-			if math.IsNaN(wij) {
-				return TSResult{}, ErrDimensionMismatch
+			if math.IsNaN(wij) || math.IsInf(wij, -1) {
+				return TSResult{}, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+			}
+			if math.IsInf(wij, 1) {
+				return TSResult{}, ErrIncompleteGraph
 			}
 			if wij < 0 {
 				return TSResult{}, ErrNegativeWeight

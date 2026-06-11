@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test validates tour utilities and cost routines in lvlath/tsp.
 // Contract: strict sentinels, deterministic outcomes, table-driven structure.
 package tsp_test

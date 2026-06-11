@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - tour utilities shared by exact/heuristic solvers.
 //
 // This file contains compact, allocation-conscious utilities that operate purely
@@ -100,44 +103,65 @@ func MakeTourFromPermutation(perm []int, n int, start int) ([]int, error) {
 	return tour, nil
 }
 
-// ValidateTour enforces Hamiltonian-cycle invariants (see types.go):
+// ValidateTour verifies a closed Hamiltonian cycle over n vertices.
+// Implementation:
+//   - Stage 1: reject nil and malformed shape.
+//   - Stage 2: verify fixed start/end closure.
+//   - Stage 3: scan each non-closing vertex exactly once.
 //
-//	len(tour) == n+1, tour[0]==tour[n]==start,
-//	each vertex v∈[0..n-1] appears exactly once in positions [0..n-1].
+// Behavior highlights:
+//   - Does not allocate beyond the O(n) seen bitmap.
+//   - Does not canonicalize; it only validates.
 //
-// Returns nil if valid.
+// Inputs:
+//   - tour: closed cycle of length n+1.
+//   - n: vertex count.
+//   - start: required first and last vertex.
 //
-// Complexity: O(n) time, O(n) space.
+// Returns:
+//   - error: nil if the tour is valid.
+//
+// Errors:
+//   - ErrNilTour for nil slices.
+//   - ErrInvalidTour for wrong length, wrong closure, duplicate, or out-of-range vertex.
+//   - ErrStartOutOfRange for invalid start.
+//
+// Determinism:
+//   - Fixed left-to-right scan.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// AI-Hints:
+//   - Do not use ErrDimensionMismatch for semantic tour violations.
 func ValidateTour(tour []int, n int, start int) error {
-	if n <= 0 {
-		return ErrDimensionMismatch
-	}
-	if len(tour) != n+1 {
-		return ErrDimensionMismatch
+	if tour == nil {
+		return ErrNilTour
 	}
 	if start < 0 || start >= n {
 		return ErrStartOutOfRange
 	}
+	if n <= 0 || len(tour) != n+1 {
+		return ErrInvalidTour
+	}
 	if tour[0] != start || tour[n] != start {
-		return ErrDimensionMismatch
+		return ErrInvalidTour
 	}
 
 	seen := make([]bool, n)
 
-	var (
-		i int
-		v int
-	)
+	var i, v int
 	for i = 0; i < n; i++ {
 		v = tour[i]
 		if v < 0 || v >= n {
-			return ErrDimensionMismatch
+			return ErrInvalidTour
 		}
 		if seen[v] {
-			return ErrDimensionMismatch
+			return ErrInvalidTour
 		}
 		seen[v] = true
 	}
+
 	return nil
 }
 

@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test exercises the 2-opt local search via the public API.
 // Focus: determinism, epsilon semantics, correctness on symmetric/ATSP cases,
 // and safe handling of +Inf candidates without touching internals.

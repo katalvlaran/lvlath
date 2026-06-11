@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - 3-opt local search (symmetric 3-opt and ATSP 3-opt*).
 //
 // ThreeOpt performs local search over 3-edge exchanges on a closed tour.
@@ -53,15 +56,30 @@ func ThreeOptBest(dist matrix.Matrix, initTour []int, opts Options) ([]int, floa
 // threeOptCore contains the shared engine. No logs/panics; strict sentinels only.
 func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovement bool) ([]int, float64, error) {
 	// Tour shape & invariants (the dispatcher already validated matrix shape).
-	if initTour == nil || len(initTour) < 2 {
-		return nil, 0, ErrDimensionMismatch
+	if err := validateOptionsStandalone(opts); err != nil {
+		return nil, 0, err
 	}
+	if initTour == nil {
+		return nil, 0, ErrNilTour
+	}
+	if len(initTour) < 2 {
+		return nil, 0, ErrInvalidTour
+	}
+
 	n := len(initTour) - 1
-	if n < 2 { // a closed tour requires at least two vertices (n≥2)
+	if n < 2 {
+		return nil, 0, ErrInvalidTour
+	}
+	matrixOrder, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	if err != nil {
+		return nil, 0, err
+	}
+	if matrixOrder != n {
 		return nil, 0, ErrDimensionMismatch
 	}
+
 	// Validate the cycle invariants: closure, unique vertices, fixed start.
-	if err := ValidateTour(initTour, n, opts.StartVertex); err != nil {
+	if err = ValidateTour(initTour, n, opts.StartVertex); err != nil {
 		return nil, 0, err
 	}
 
@@ -70,7 +88,6 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 	var (
 		i, j int     // matrix indices reused across loops
 		x    float64 // temporary weight holder
-		err  error
 	)
 	for i = 0; i < n; i++ {
 		for j = 0; j < n; j++ {

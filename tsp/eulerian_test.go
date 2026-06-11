@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test validates the Eulerian-circuit construction (Hierholzer)
 // and the shortcut-to-Hamiltonian step used by the Christofides pipeline.
 // Scope (focused):
@@ -72,7 +75,7 @@ func TestEulerian_DoubleMST_EvenDegrees_And_Length(t *testing.T) {
 	}
 
 	// Run Hierholzer starting at canonical startV.
-	walk := tsp.EulerianCircuit(multi, startV)
+	walk, _ := tsp.EulerianCircuit(multi, startV)
 
 	// Basic structure checks: closed walk, exact length |E|+1.
 	if len(walk) != wantEdges+1 {
@@ -117,7 +120,7 @@ func TestEulerian_ShortcutToHamiltonian_Valid_And_CostBound(t *testing.T) {
 	multi := doubleAdj(mstAdj)
 
 	// Eulerian walk (Hierholzer) and shortcut to a Hamiltonian cycle.
-	walk := tsp.EulerianCircuit(multi, startV)
+	walk, _ := tsp.EulerianCircuit(multi, startV)
 	tour, err := tsp.ShortcutEulerianToHamiltonian(walk, n, startV)
 	if err != nil {
 		t.Fatalf("ShortcutEulerianToHamiltonian failed: %v", err)
@@ -167,7 +170,7 @@ func TestEulerian_Determinism_Repeat3(t *testing.T) {
 
 	var base []int
 	Repeat(t, 3, func(t *testing.T) {
-		w := tsp.EulerianCircuit(multi, startV)
+		w, _ := tsp.EulerianCircuit(multi, startV)
 		if base == nil {
 			base = append([]int(nil), w...) // capture first outcome
 			return
@@ -182,7 +185,7 @@ func TestEulerian_Defensive_NoEdges_ReturnsStartOnly(t *testing.T) {
 	// Build an "empty" undirected graph with 4 vertices and 0 edges.
 	adj := make([][]int, 4)
 	// Call EulerianCircuit; contract says no panics and returns [start].
-	walk := tsp.EulerianCircuit(adj, startV)
+	walk, _ := tsp.EulerianCircuit(adj, startV)
 	if len(walk) != 1 || walk[0] != startV {
 		t.Fatalf("want single-vertex walk [%d], got %v", startV, walk)
 	}

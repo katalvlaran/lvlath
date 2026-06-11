@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Branch-and-Bound (exact search with admissible lower bounds).
 //
 // TSPBranchAndBound enumerates Hamiltonian cycles via a depth-first
@@ -332,13 +335,15 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 //   - ErrIncompleteGraph if no Hamiltonian cycle exists (or all closures are +Inf).
 //   - Strict validation sentinels for malformed inputs (see types.go).
 func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
-	// Lightweight shape guard (full validation already performed in SolveWithMatrix).
-	var n int
-	n = dist.Rows()
-	if n != dist.Cols() || n < 2 {
-		return TSResult{}, ErrNonSquare
+	if err := validateOptionsStandalone(opts); err != nil {
+		return TSResult{}, err
 	}
-	if err := validateStartVertex(n, opts.StartVertex); err != nil {
+
+	n, err := validateDistMatrix(dist, opts.Symmetric, false, symTol)
+	if err != nil {
+		return TSResult{}, err
+	}
+	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return TSResult{}, err
 	}
 
@@ -348,9 +353,6 @@ func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
 	e.start = opts.StartVertex
 	e.symmetric = opts.Symmetric
 	e.eps = opts.Eps
-	if e.eps < 0 {
-		e.eps = 0
-	}
 	e.useBound = (opts.BoundAlgo != NoBound)
 
 	// Deadline setup.
@@ -360,10 +362,10 @@ func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
 	}
 
 	// Prefetch and precomputes.
-	if err := e.initPrefetch(dist); err != nil {
+	if err = e.initPrefetch(dist); err != nil {
 		return TSResult{}, err
 	}
-	if err := e.precomputeMinima(); err != nil {
+	if err = e.precomputeMinima(); err != nil {
 		return TSResult{}, err
 	}
 	e.buildNeighborOrder()
@@ -408,7 +410,7 @@ func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
 		return TSResult{}, ErrIncompleteGraph
 	}
 	_ = CanonicalizeOrientationInPlace(e.bestTour)
-	if err := ValidateTour(e.bestTour, n, e.start); err != nil {
+	if err = ValidateTour(e.bestTour, n, e.start); err != nil {
 		return TSResult{}, err
 	}
 

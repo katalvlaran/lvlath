@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test provides runnable, deterministic examples that demonstrate
 // how to solve (A)TSP with lvlath/tsp. Each example prints a tour and cost
 // (or the optimal cost for BnB) with a stable // Output: block.

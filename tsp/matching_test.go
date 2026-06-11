@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test verifies the odd-vertex matching step via test-only hooks.
 // We stay in tsp_test (external view) and use tsp.TestHookGreedyMatch /
 // tsp.TestHookBlossomMatch which exist only under `go test`.

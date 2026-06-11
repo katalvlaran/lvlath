@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - 2-opt local search engine (symmetric 2-opt and asymmetric 2-opt*).
 //
 // TwoOpt performs deterministic first-improvement 2-opt on a closed tour.
@@ -25,6 +28,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"time"
 
@@ -34,15 +38,29 @@ import (
 // TwoOpt runs deterministic first-improvement 2-opt / 2-opt* starting from initTour.
 // Returns the improved tour (same start) and its stabilized cost.
 func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	// --- Shape & invariants (cheap; full matrix validation is done earlier).
-	if initTour == nil || len(initTour) < 2 {
-		return nil, 0, ErrDimensionMismatch
+	if err := validateOptionsStandalone(opts); err != nil {
+		return nil, 0, err
 	}
+	if initTour == nil {
+		return nil, 0, ErrNilTour
+	}
+	if len(initTour) < 2 {
+		return nil, 0, ErrInvalidTour
+	}
+
 	n := len(initTour) - 1
 	if n < 2 { // a closed cycle needs at least two distinct vertices
+		return nil, 0, ErrInvalidTour
+	}
+	matrixOrder, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	if err != nil {
+		return nil, 0, err
+	}
+	if matrixOrder != n {
 		return nil, 0, ErrDimensionMismatch
 	}
-	if err := ValidateTour(initTour, n, opts.StartVertex); err != nil {
+
+	if err = ValidateTour(initTour, n, opts.StartVertex); err != nil {
 		return nil, 0, err
 	}
 
@@ -62,10 +80,13 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 			for j = 0; j < n; j++ {
 				x, err = dist.At(i, j)
 				if err != nil {
-					return nil, 0, ErrDimensionMismatch
+					return nil, 0, errors.Join(ErrDimensionMismatch, err)
 				}
-				if math.IsNaN(x) {
-					return nil, 0, ErrDimensionMismatch
+				if math.IsNaN(x) || math.IsInf(x, -1) {
+					return nil, 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+				}
+				if math.IsInf(x, 1) {
+					return nil, 0, ErrIncompleteGraph
 				}
 				if x < 0 {
 					return nil, 0, ErrNegativeWeight
@@ -87,13 +108,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 		return nil, 0, err
 	}
 
-	// Policy knobs.
 	eps := opts.Eps
-	if eps < 0 {
-		// Defensive clamp: validateOptionsStandalone already forbids negative eps,
-		// but we keep this to guarantee acceptance rule Δ < −eps is well-posed.
-		eps = 0
-	}
 	maxIters := opts.TwoOptMaxIters // 0 ⇒ unlimited (until local optimum)
 
 	// Soft deadline (checked sparsely to keep overhead negligible).

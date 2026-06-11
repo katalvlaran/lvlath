@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test provides focused unit tests for the Christofides approximation.
 // Scope:
 //  1. Valid tour and 1.5×MST sanity on a regular hexagon (symmetric metric).

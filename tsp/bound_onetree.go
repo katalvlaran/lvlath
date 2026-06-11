@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp - Held–Karp 1-tree (Lagrangian) lower bound for symmetric TSP.
 //
 // This module computes an admissible lower bound on OPT via the classical
@@ -41,6 +44,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"time"
 
@@ -92,22 +96,28 @@ func OneTreeLowerBound(
 	symmetric bool,
 	cfg OneTreeConfig,
 ) (lb float64, degrees []int, err error) {
-	// Shape guards (dispatcher has validated already; retain cheap checks).
-	n := dist.Rows()
-	if n != dist.Cols() || n < 2 {
-		return 0, nil, ErrNonSquare
-	}
-	if err = validateStartVertex(n, root); err != nil {
-		return 0, nil, err
-	}
 	if !symmetric {
 		return 0, nil, ErrATSPNotSupportedByAlgo
 	}
 	if cfg.MaxIter <= 0 {
-		cfg.MaxIter = 1
+		return 0, nil, ErrInvalidOptions
 	}
-	if cfg.Alpha <= 0 || cfg.Alpha >= 2 {
-		cfg.Alpha = 0.9
+	if math.IsNaN(cfg.Alpha) || math.IsInf(cfg.Alpha, 0) || cfg.Alpha <= 0 || cfg.Alpha >= 2 {
+		return 0, nil, ErrInvalidOptions
+	}
+	if math.IsNaN(cfg.UB) || math.IsInf(cfg.UB, -1) {
+		return 0, nil, ErrInvalidOptions
+	}
+	if cfg.TimeLimit < 0 {
+		return 0, nil, ErrInvalidOptions
+	}
+
+	n, err := validateSolverDistanceMatrix(dist, true, false, symTol)
+	if err != nil {
+		return 0, nil, err
+	}
+	if err = validateStartVertex(n, root); err != nil {
+		return 0, nil, err
 	}
 
 	// Dense prefetch with strict sentinels; +Inf allowed (represents missing edges).
@@ -119,8 +129,11 @@ func OneTreeLowerBound(
 	for i = 0; i < n; i++ { // scan rows of the distance matrix (origin vertices u=i)
 		for j = 0; j < n; j++ { // scan columns of the distance matrix (destination vertices v=j)
 			x, err = dist.At(i, j)
-			if err != nil || math.IsNaN(x) {
-				return 0, nil, ErrDimensionMismatch
+			if err != nil {
+				return 0, nil, errors.Join(ErrDimensionMismatch, err)
+			}
+			if math.IsNaN(x) || math.IsInf(x, -1) {
+				return 0, nil, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 			}
 			if x < 0 {
 				return 0, nil, ErrNegativeWeight

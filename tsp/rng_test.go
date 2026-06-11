@@ -1,3 +1,6 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 // Package tsp_test validates deterministic RNG behavior used by local-search
 // neighborhoods (e.g., 2-opt) when shuffling is enabled.
 package tsp_test

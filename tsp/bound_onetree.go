@@ -157,7 +157,7 @@ func OneTreeLowerBound(
 	var useDeadline bool   // whether to enforce a per-call wall-clock budget
 	var deadline time.Time // absolute time when the budget expires
 	var tick uint64
-	if cfg.TimeLimit > 0 && compatibleTimeBudget(cfg.TimeLimit) {
+	if cfg.TimeLimit > 0 {
 		useDeadline = true
 		deadline = time.Now().Add(cfg.TimeLimit)
 	}

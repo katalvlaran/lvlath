@@ -28,6 +28,7 @@ package tsp
 import (
 	"errors"
 	"math"
+	"math/rand"
 	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
@@ -42,6 +43,10 @@ const (
 	segS2                 // segment S2 = T[j..k-1] in forward order
 	segS2R                // reversed S2
 )
+
+// defaultRNGSeed is the fixed “zero” seed used when callers pass seed==0.
+// The value is arbitrary but stable to keep reproducible defaults.
+const defaultRNGSeed int64 = 1
 
 // ThreeOpt returns an improved tour and its stabilized cost.
 // Policy is taken from opts.BestImprovement; ATSP uses 3-opt* (tail-swap).
@@ -135,7 +140,7 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 		deadline    time.Time // absolute deadline if enabled
 		steps       int       // Δ-evaluation counter for sparse checks
 	)
-	if compatibleTimeBudget(opts.TimeLimit) && opts.TimeLimit > 0 {
+	if opts.TimeLimit > 0 {
 		useDeadline = true
 		deadline = time.Now().Add(opts.TimeLimit)
 	}
@@ -426,4 +431,16 @@ func maxi(a, b int) int {
 // The actual instance comes from rngFromSeed(opts.Seed); seed==0 ⇒ deterministic stream.
 type randLite interface {
 	Intn(n int) int
+}
+
+// rngFromSeed returns a deterministic *rand.Rand.
+// Policy: seed==0 ⇒ use defaultRNGSeed; otherwise use the provided seed verbatim.
+//
+// Complexity: O(1).
+func rngFromSeed(seed int64) *rand.Rand {
+	if seed == 0 {
+		seed = defaultRNGSeed
+	}
+
+	return rand.New(rand.NewSource(seed))
 }

@@ -438,7 +438,7 @@ func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, erro
 	engine.useBound = opts.BoundAlgo != NoBound
 
 	// Deadline setup.
-	if compatibleTimeBudget(opts.TimeLimit) && opts.TimeLimit > 0 {
+	if opts.TimeLimit > 0 {
 		engine.useDeadline = true
 		engine.deadline = time.Now().Add(opts.TimeLimit)
 	}

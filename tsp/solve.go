@@ -310,7 +310,7 @@ func solvePreparedMatrix(dist matrix.Matrix, opts Options, n int) (TSResult, sol
 		//    If BestImprovement==false → a single TwoOpt pass (fast).
 		//    If BestImprovement==true  → hybrid “2-opt → 3-opt (best) → 2-opt polish”
 		//    (user opted in for stronger but slower refinement).
-		if opts.EnableLocalSearch && compatibleTimeBudget(opts.TimeLimit) && n >= 4 {
+		if opts.EnableLocalSearch && opts.TimeLimit > 0 && n >= 4 {
 			tour := result.Tour
 			cost := result.Cost
 

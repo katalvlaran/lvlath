@@ -17,7 +17,6 @@ package tsp
 import (
 	"errors"
 	"math"
-	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
 )
@@ -26,65 +25,6 @@ import (
 // It is intentionally stricter than matrix.DefaultEpsilon because TSP contracts usually consume
 // already prepared costs, not noisy floating-point measurements from algebraic kernels.
 const symTol = 1e-12
-
-// validateAll verifies Options, final distance matrix, start vertex, and optional IDs.
-// Implementation:
-//   - Stage 1: Validate option policy before any O(n^2) work.
-//   - Stage 2: Validate final TSP distance matrix as complete solver input.
-//   - Stage 3: Validate StartVertex after n is known.
-//   - Stage 4: Validate optional IDs without changing matrix order.
-//
-// Behavior highlights:
-//   - Final solver input is always complete: +Inf off-diagonal is rejected.
-//   - Metric closure is handled before this function by the facade/policy stage.
-//
-// Inputs:
-//   - dist: final solver distance matrix.
-//   - ids: optional row/column IDs.
-//   - opts: solver options.
-//
-// Returns:
-//   - int: matrix order.
-//   - error: sentinel-classified failure.
-//
-// Errors:
-//   - ErrInvalidOptions, ErrUnsupportedAlgorithm, ErrATSPNotSupportedByAlgo.
-//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch.
-//   - ErrNaNInf, ErrNonZeroDiagonal, ErrNegativeWeight, ErrIncompleteGraph, ErrAsymmetry.
-//   - ErrStartOutOfRange.
-//   - ErrInvalidIDs.
-//
-// Determinism:
-//   - Fixed validation order: options -> matrix -> start -> IDs.
-//
-// Complexity:
-//   - Time O(n^2), Space O(n) only when ids!=nil.
-//
-// AI-Hints:
-//   - Do not pass opts.RunMetricClosure into this function as “allow +Inf”.
-//     Closure must already be applied; this function protects final solver input.
-func validateAll(dist matrix.Matrix, ids []string, opts Options) (int, error) {
-	if err := validateOptionsStandalone(opts); err != nil {
-		return 0, err
-	}
-
-	n, err := validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), true, symTol)
-	if err != nil {
-		return 0, err
-	}
-
-	if err = validateStartVertex(n, opts.StartVertex); err != nil {
-		return 0, err
-	}
-
-	if ids != nil {
-		if err = validateIDs(ids, n); err != nil {
-			return 0, err
-		}
-	}
-
-	return n, nil
-}
 
 // validateOptionsStandalone checks solver policy without matrix-size-dependent finalization.
 // Implementation:
@@ -253,18 +193,6 @@ func validateIDs(ids []string, n int) error {
 	}
 
 	return nil
-}
-
-// compatibleTimeBudget returns whether the remaining time budget is positive.
-// Policy: 0 means "unlimited".
-//
-// Complexity: O(1).
-func compatibleTimeBudget(tl time.Duration) bool {
-	if tl == 0 {
-		return true
-	}
-	// Negative handled in validateOptionsStandalone; here treat >0 as allowed.
-	return tl > 0
 }
 
 // validateSolverDistanceMatrix validates the TSP-specific distance-matrix contract.

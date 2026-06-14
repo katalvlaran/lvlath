@@ -117,7 +117,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 		deadline    time.Time // absolute deadline if enabled
 		step        int       // iteration counter to throttle checks
 	)
-	if compatibleTimeBudget(opts.TimeLimit) && opts.TimeLimit > 0 {
+	if opts.TimeLimit > 0 {
 		useDeadline = true
 		deadline = time.Now().Add(opts.TimeLimit)
 	}

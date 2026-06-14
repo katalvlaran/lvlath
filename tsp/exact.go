@@ -91,7 +91,7 @@ func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
 		deadline    time.Time
 		step        int
 	)
-	if compatibleTimeBudget(opts.TimeLimit) && opts.TimeLimit > 0 {
+	if opts.TimeLimit > 0 {
 		useDeadline = true
 		deadline = time.Now().Add(opts.TimeLimit)
 	}

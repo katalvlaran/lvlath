@@ -518,6 +518,10 @@ func (m *Dense) indexOf(row, col int) (int, error) {
 // AI-Hints:
 //   - Prefer At in external code; internal hot paths may index directly.
 func (m *Dense) At(row, col int) (float64, error) {
+	if m == nil {
+		return 0, denseErrorf(ctxAt, row, col, ErrNilMatrix)
+	}
+
 	off, err := m.indexOf(row, col)
 	if err != nil {
 		return 0, denseErrorf(ctxAt, row, col, err) // wrap with context
@@ -931,6 +935,9 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 	if m == nil {
 		return ErrNilMatrix
 	}
+	if f == nil {
+		return ErrNilCallback
+	}
 	var i, j, base int // predeclare loop counters and base offset
 	var v, nv float64  // old and new values
 
@@ -1028,11 +1035,23 @@ type MatrixView struct {
 
 // Rows return the number of rows in the view.
 // Complexity: O(1).
-func (v *MatrixView) Rows() int { return v.r }
+func (v *MatrixView) Rows() int {
+	if v == nil {
+		return 0
+	}
+
+	return v.r
+}
 
 // Cols return the number of columns in the view.
 // Complexity: O(1).
-func (v *MatrixView) Cols() int { return v.c }
+func (v *MatrixView) Cols() int {
+	if v == nil {
+		return 0
+	}
+
+	return v.c
+}
 
 // At reads element (i,j) in the view or returns ErrOutOfRange.
 // Safe read within the view bounds; translates to base coordinates.

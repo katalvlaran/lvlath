@@ -172,6 +172,48 @@ func (am *AdjacencyMatrix) buildGraphOptions() []core.GraphOption {
 	return goOpts
 }
 
+// VertexIDs RETURNS an ordered list of vertex identifiers with initial validation.
+// Implementation:
+//   - Stage 1: run full structural validation of the adjacency matrix.
+//   - Stage 2: allocate a detached slice matched to the index table size.
+//   - Stage 3: deep-copy the internal vertex index array into the result.
+//
+// Behavior highlights:
+//   - No panics: all validation failures are returned as explicit errors.
+//   - Memory isolation: returns a new slice slice memory to prevent external mutations.
+//
+// Inputs:
+//   - (receiver) *AdjacencyMatrix: matrix data structure containing the index registry.
+//
+// Returns:
+//   - ([]string, error): copy of vertex ID registry or validation error.
+//
+// Errors:
+//   - Propagates any structural or mismatch errors surfaced by ValidateGraphAdjacency.
+//
+// Determinism:
+//   - Stable, guarantees consistent slice ordering across identical graph states.
+//
+// Complexity:
+//   - Time: O(N) where N is the number of vertices (due to slice copy).
+//   - Space: O(N) auxiliary space allocated for the returned slice.
+//
+// Notes:
+//   - Safe for external consumption.
+//   - Expensive to call repeatedly in hot loops due to explicit O(N) allocation.
+//
+// AI-Hints:
+//   - If the returned order must strictly represent the layout, preserve 'am.vertexByIndex' mapping order.
+func (am *AdjacencyMatrix) VertexIDs() ([]string, error) {
+	if err := ValidateGraphAdjacency(am); err != nil {
+		return nil, err
+	}
+
+	out := make([]string, len(am.vertexByIndex))
+	copy(out, am.vertexByIndex)
+	return out, nil
+}
+
 // VertexCount RETURN the number of vertices (matrix dimension) with invariant checks, no panics.
 // Implementation:
 //   - Stage 1: validate receiver and underlying Mat presence.
@@ -556,6 +598,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err) // surface matrix read error
 				}
 				if err = returnEdge(g, fromID, toID, val, exportPolicy); err != nil {
+					return nil, fmt.Errorf("ToGraph: entry[%d,%d] %q->%q: %w", i, j, fromID, toID, err)
 				}
 			}
 		}

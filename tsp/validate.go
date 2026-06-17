@@ -73,11 +73,21 @@ func validateOptionsStandalone(opts Options) error {
 	if math.IsNaN(opts.Eps) || math.IsInf(opts.Eps, 0) || opts.Eps < 0 {
 		return ErrInvalidOptions
 	}
-	// TwoOpt/ThreeOpt iteration bound must be non-negative (0 ⇒ unlimited).
+	// TwoOpt iteration bound must be non-negative (0 ⇒ unlimited).
 	if opts.TwoOptMaxIters < 0 {
 		return ErrInvalidOptions
 	}
+	// ThreeOpt uses a larger neighborhood and therefore owns a separate move cap.
+	if opts.ThreeOptMaxMoves < 0 {
+		return ErrInvalidOptions
+	}
 	if opts.MaxExactN < 0 {
+		return ErrInvalidOptions
+	}
+
+	switch opts.MatchingFallbackPolicy {
+	case MatchingFallbackReject, MatchingFallbackGreedy:
+	default:
 		return ErrInvalidOptions
 	}
 

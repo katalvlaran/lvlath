@@ -83,6 +83,9 @@ var (
 	// ErrGraphNil indicates that a nil *core.Graph was passed into an adapter.
 	ErrGraphNil = errors.New("matrix: graph is nil")
 
+	// ErrNilCallback indicates that a nil callback function was passed.
+	ErrNilCallback = errors.New("matrix: nil callback")
+
 	// ErrUnknownVertex indicates that a referenced VertexID is not present
 	// in the current vertex index (adjacency/incidence).
 	ErrUnknownVertex = errors.New("matrix: unknown vertex id")

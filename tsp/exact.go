@@ -41,49 +41,104 @@ const MaxExactN = 16
 // ErrSizeTooLarge signals that n exceeds MaxExactN (pragmatic resource limit).
 var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices")
 
-// TSPExact runs the Held–Karp DP over any matrix.Matrix (symmetric or asymmetric).
+// HeldKarp solves a complete TSP/ATSP instance with the Held-Karp dynamic program.
+// It is the canonical exact DP entrypoint and publishes TSPResult metadata directly.
+//
+// Implementation:
+//   - Stage 1: Validate options, final solver matrix shape, and StartVertex.
+//   - Stage 2: Execute the existing flat-array Held-Karp DP without changing mathematics.
+//   - Stage 3: Publish a detached TSPResult with Exact=true and Optimal=true.
+//
+// Behavior highlights:
+//   - Supports symmetric TSP and asymmetric TSP.
+//   - Returns no partial result on timeout.
+//   - Preserves the existing deterministic parent reconstruction law.
+//
+// Inputs:
+//   - dist: complete finite square distance matrix.
+//   - opts: solver policy; MaxExactN bounds exact DP size.
+//
+// Returns:
+//   - *TSPResult: exact optimal tour result on success.
+//   - error: nil on success or a sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions from option validation.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch from matrix validation.
+//   - ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph from final solver matrix checks.
+//   - ErrStartOutOfRange for invalid StartVertex.
+//   - ErrSizeTooLarge when n exceeds the exact DP guard.
+//   - ErrTimeLimit when a positive wall-clock budget is exhausted.
+//
+// Determinism:
+//   - Fixed subset-size order, mask order, endpoint order, and predecessor tie policy.
+//
+// Complexity:
+//   - Time O(n^2 * 2^n), Space O(n * 2^n).
+//
+// Notes:
+//   - Use SolveMatrix for facade-level ID attachment and optional metric closure.
+//   - This function intentionally does not fall back to heuristics when size limits fail.
+//
+// AI-Hints:
+//   - Do not silently replace Held-Karp with heuristic output on ErrSizeTooLarge.
+//   - Do not mark a timed-out result as Optimal unless incumbent support is implemented.
+func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	minimal, err := heldKarpMinimal(dist, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := newSolveMeta(ExactHeldKarp)
+	meta.exact = true
+	meta.optimal = true
+
+	result := publishTSPResult(minimal, nil, opts, meta, false)
+	result.Algorithm = ExactHeldKarp
+
+	return result, nil
+}
+
+// TSPExact runs the Held-Karp DP over any matrix.Matrix and returns the legacy
+// minimal TSResult projection.
+//
+// Deprecated: use HeldKarp or SolveMatrix.
 func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
+	result, err := HeldKarp(dist, opts)
+	if result == nil {
+		return TSResult{}, err
+	}
+
+	return result.Minimal(), err
+}
+
+// heldKarpMinimal contains the existing Held-Karp DP implementation.
+// It remains private so canonical public code can publish TSPResult while the
+// compatibility wrapper can still project the same mathematics to TSResult.
+func heldKarpMinimal(dist matrix.Matrix, opts Options) (TSResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return TSResult{}, err
 	}
 
-	n, err := validateSolverDistanceMatrix(dist, false, true, symTol)
+	weights, err := copyCompleteWeights(dist, false)
 	if err != nil {
 		return TSResult{}, err
 	}
-	if n > MaxExactN {
+	n := weights.n
+	maxExactN := opts.MaxExactN
+	if maxExactN == 0 {
+		maxExactN = DefaultMaxExactN
+	}
+	if n > maxExactN {
 		return TSResult{}, ErrSizeTooLarge
 	}
 	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return TSResult{}, err
 	}
 
-	// Prefetch weights into a dense 1D buffer w[i*n + j] to remove interface overhead
-	// from the DP hot loops. Also enforce sentinel semantics here:
-	// NaN → ErrDimensionMismatch; negative → ErrNegativeWeight; +Inf is allowed.
-	w := make([]float64, n*n)
-	var (
-		i, j int
-		wij  float64
-	)
-	for i = 0; i < n; i++ {
-		for j = 0; j < n; j++ {
-			wij, err = dist.At(i, j)
-			if err != nil {
-				return TSResult{}, errors.Join(ErrDimensionMismatch, err)
-			}
-			if math.IsNaN(wij) || math.IsInf(wij, -1) {
-				return TSResult{}, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-			}
-			if math.IsInf(wij, 1) {
-				return TSResult{}, ErrIncompleteGraph
-			}
-			if wij < 0 {
-				return TSResult{}, ErrNegativeWeight
-			}
-			w[i*n+j] = wij
-		}
-	}
+	// Use the shared detached weight buffer so exact DP preserves the same
+	// numeric and sentinel policy as local search and Branch-and-Bound.
+	w := weights.w
 
 	// Soft time budget: cheap deadline checks at a low fixed cadence.
 	var (
@@ -142,8 +197,9 @@ func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
 		size int
 		jbit int
 		kbit int
-		k    int
+		j, k int
 		prev int
+		wij  float64
 	)
 	for size = 2; size <= n; size++ {
 		for _, mask = range masksBySize[size] {

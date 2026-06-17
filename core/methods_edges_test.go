@@ -131,7 +131,7 @@ func TestGraph_AddEdgeRejectsNaNAndInfWeights(t *testing.T) {
 
 			id, err := g.AddEdge(VertexA, VertexB, tc.weight)
 
-			MustErrorIs(t, err, core.ErrBadWeight, "AddEdge rejects non-finite weight")
+			MustErrorIs(t, err, core.ErrNaNInf, "AddEdge rejects non-finite weight")
 			MustEqualString(t, id, "", "AddEdge non-finite weight returned edge ID")
 			MustEqualInt(t, g.EdgeCount(), Count0, "non-finite weight must not publish edge")
 			MustEqualBool(t, g.HasVertex(VertexA), false, "non-finite weight must not auto-create source")

@@ -16,9 +16,8 @@ import (
 // Implementation:
 //   - Stage 1: Prepare direct matrix input, including optional metric closure.
 //   - Stage 2: Validate optional IDs against final matrix order.
-//   - Stage 3: Delegate to the existing solver dispatcher without alternative mathematics.
-//   - Stage 4: Attach metadata and detached result slices.
-//   - Stage 5: Publish TSPResult.
+//   - Stage 3: Delegate to the result-native solver dispatcher without alternative mathematics.
+//   - Stage 4: Return the detached canonical TSPResult.
 //
 // Behavior highlights:
 //   - Does not mutate caller-owned direct matrices.
@@ -59,7 +58,16 @@ import (
 // AI-Hints:
 //   - Prefer SolveMatrix over SolveWithMatrix in new code.
 //   - Do not bypass this facade in examples unless testing a specific kernel.
+//   - Do not publish TSResult from this canonical facade; TSResult is legacy projection only.
 func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, error) {
+	if err := validateOptionsStandalone(opts); err != nil {
+		return nil, err
+	}
+
+	if result, handled, err := solveDegenerateIfAny(dist, ids, opts); handled {
+		return result, err
+	}
+
 	prepared, metricClosureApplied, n, err := prepareSolverDistanceMatrix(dist, opts)
 	if err != nil {
 		return nil, err
@@ -79,12 +87,10 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 		}
 	}
 
-	minimal, meta, err := solvePreparedMatrix(prepared, finalOptions, n)
-	if err != nil && len(minimal.Tour) == 0 {
+	result, err := solvePreparedMatrix(prepared, ids, finalOptions, n, metricClosureApplied)
+	if result == nil {
 		return nil, err
 	}
-
-	result := publishTSPResult(minimal, ids, finalOptions, meta, metricClosureApplied)
 
 	return result, err
 }
@@ -250,6 +256,8 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 //
 // AI-Hints:
 //   - Do not add algorithm logic here; wrappers must remain honest projections.
+//
+// Deprecated: use SolveMatrix.
 func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, error) {
 	result, err := SolveMatrix(dist, ids, opts)
 	if result == nil {
@@ -261,6 +269,8 @@ func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, 
 
 // SolveWithGraph is the compatibility wrapper for the legacy graph TSResult surface.
 // New code should prefer SolveGraph because it preserves metadata and result semantics.
+//
+// Deprecated: use SolveGraph.
 func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
 	result, err := SolveGraph(g, opts)
 	if result == nil {

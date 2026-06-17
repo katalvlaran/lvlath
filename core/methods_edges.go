@@ -427,10 +427,6 @@ func (g *Graph) SetEdgeID(oldID, newID string) error {
 	if oldID == "" || newID == "" {
 		return ErrEmptyEdgeID
 	}
-	// No-op rename is allowed.
-	if oldID == newID {
-		return nil
-	}
 
 	// AI-HINT: This operation mutates edge catalog and adjacency maps; it MUST use the write lock.
 	g.muEdgeAdj.Lock()         // exclusive lock: protects map writes (g.edges and adjacencyList buckets)
@@ -438,6 +434,10 @@ func (g *Graph) SetEdgeID(oldID, newID string) error {
 	e, exist := g.edges[oldID] // attempt to find edge by its unique ID
 	if !exist {                // if not found, return the canonical sentinel
 		return ErrEdgeNotFound
+	}
+	// No-op rename is allowed.
+	if oldID == newID {
+		return nil
 	}
 	// Ensure the target ID is free.
 	if _, exist = g.edges[newID]; exist {

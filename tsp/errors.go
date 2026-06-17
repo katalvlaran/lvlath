@@ -104,7 +104,25 @@ var (
 	// ErrStartOutOfRange indicates Options.StartVertex is outside [0..n-1].
 	ErrStartOutOfRange = errors.New("tsp: start vertex out of range")
 
-	// ErrMatchingNotImplemented reports unavailable Blossom/MWPM implementation.
+	// ErrMatchingUnavailable reports that the requested exact MWPM engine cannot be used.
+	//
+	// AI-Hints:
+	//   - Use this as the fatal runtime sentinel when Blossom/MWPM is unavailable
+	//     and MatchingFallbackPolicy does not allow greedy degradation.
+	//   - Do not use this as a non-fatal TSPResult warning.
+	ErrMatchingUnavailable = errors.New("tsp: minimum-weight perfect matching is unavailable")
+
+	// ErrMatchingFallback reports that a weaker matching fallback was explicitly used.
+	//
+	// AI-Hints:
+	//   - Store this in TSPResult.Warnings when BlossomMatch degrades to GreedyMatch.
+	//   - Do not claim ChristofidesApproximationRatio when this warning is present.
+	ErrMatchingFallback = errors.New("tsp: matching fallback used")
+
+	// ErrMatchingNotImplemented reports an implementation placeholder.
+	//
+	// Deprecated: use ErrMatchingUnavailable for runtime refusal and ErrMatchingFallback
+	// for non-fatal fallback metadata.
 	ErrMatchingNotImplemented = errors.New("tsp: blossom matching not implemented")
 
 	// Deprecated: ErrBadInput is kept for legacy callers; do not use in new code.

@@ -13,11 +13,11 @@
 //   - Deterministic scanning order; no RNG usage (seed reserved for future shuffles).
 //   - Strict sentinel errors only (see types.go). No fmt.Errorf in hot paths.
 //   - Defensive but allocation-conscious: O(1) per-check; O(n) only on accepted move.
-//   - Soft time budget via compatibleTimeBudget + periodic deadline checks.
+//   - Soft time budget via periodic deadline checks.
 //   - Cost stabilized to 1e−9 via round1e9.
 //
 // Contracts:
-//   - dist is n×n; validateAll already ran in the dispatcher.
+//   - dist is a complete n×n final solver matrix validated through copyCompleteWeights.
 //   - tour is a *closed* Hamiltonian cycle (len==n+1, tour[0]==tour[n]==opts.StartVertex).
 //   - For asymmetric instances, the solver uses 2-opt* (does not reverse segments).
 //
@@ -28,7 +28,6 @@
 package tsp
 
 import (
-	"errors"
 	"math"
 	"time"
 
@@ -36,67 +35,85 @@ import (
 )
 
 // TwoOpt runs deterministic first-improvement 2-opt / 2-opt* starting from initTour.
-// Returns the improved tour (same start) and its stabilized cost.
+// It is the compatibility wrapper over twoOptKernel and returns only tour/cost.
 func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
+	local, err := twoOptKernel(dist, initTour, opts)
+	if local.hasTour() {
+		return append([]int(nil), local.tour...), local.cost, err
+	}
+
+	return nil, 0, err
+}
+
+// twoOptKernel runs deterministic first-improvement 2-opt / 2-opt* and returns
+// structured local-search metadata for canonical facades.
+//
+// Implementation:
+//   - Stage 1: Validate options, tour shape, complete weights, and tour invariants.
+//   - Stage 2: Copy the input tour and compute baseline cost.
+//   - Stage 3: Scan candidate pairs in deterministic order and apply first improvements.
+//   - Stage 4: Publish a valid localSearchResult on success, move cap, or timeout.
+//
+// Behavior highlights:
+//   - Symmetric mode reverses one segment.
+//   - ATSP mode uses orientation-preserving 2-opt* tail rewiring.
+//   - Timeout with a current valid tour returns localSearchResult plus ErrTimeLimit.
+//
+// Inputs:
+//   - dist: complete final distance matrix.
+//   - initTour: closed Hamiltonian tour starting and ending at opts.StartVertex.
+//   - opts: validated local-search policy.
+//
+// Returns:
+//   - localSearchResult: finalized local-search result when a current tour exists.
+//   - error: nil on success or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions, ErrNilTour, ErrInvalidTour, ErrDimensionMismatch.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph.
+//   - ErrTimeLimit with non-empty localSearchResult when a valid current tour exists.
+//
+// Determinism:
+//   - Fixed increasing i,k scan order.
+//   - First-improvement restarts scanning after every accepted move.
+//
+// Complexity:
+//   - Time O(iter*n^2), Space O(n).
+//   - Symmetric accepted moves reverse O(k-i); ATSP accepted moves rebuild O(n).
+//
+// Notes:
+//   - iterations counts accepted moves, not candidate evaluations.
+//   - TimeLimit==0 disables deadline checks.
+//
+// AI-Hints:
+//   - Do not return nil tour on ErrTimeLimit after a valid current tour exists.
+//   - Do not let +Inf into final local-search kernels.
+func twoOptKernel(dist matrix.Matrix, initTour []int, opts Options) (localSearchResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
 	if initTour == nil {
-		return nil, 0, ErrNilTour
+		return localSearchResult{}, ErrNilTour
 	}
 	if len(initTour) < 2 {
-		return nil, 0, ErrInvalidTour
+		return localSearchResult{}, ErrInvalidTour
 	}
 
 	n := len(initTour) - 1
 	if n < 2 { // a closed cycle needs at least two distinct vertices
-		return nil, 0, ErrInvalidTour
+		return localSearchResult{}, ErrInvalidTour
 	}
-	matrixOrder, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	weights, err := copyCompleteWeights(dist, opts.Symmetric)
 	if err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
-	if matrixOrder != n {
-		return nil, 0, ErrDimensionMismatch
+	if weights.n != n {
+		return localSearchResult{}, ErrDimensionMismatch
 	}
 
 	if err = ValidateTour(initTour, n, opts.StartVertex); err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
-
-	// Prefetch weights into a dense 1D buffer w[i*n + j] to remove interface indirection
-	// from hot loops. We also enforce sentinel semantics:
-	//   - NaN          → ErrDimensionMismatch (ill-posed input),
-	//   - negative     → ErrNegativeWeight   (forbidden),
-	//   - +Inf allowed → candidate moves that rely on +Inf are simply rejected.
-	w := make([]float64, n*n)
-	{
-		var (
-			i, j int     // matrix indices; declared outside loops to avoid rebinds
-			x    float64 // temporary holder for At(i,j)
-			err  error
-		)
-		for i = 0; i < n; i++ {
-			for j = 0; j < n; j++ {
-				x, err = dist.At(i, j)
-				if err != nil {
-					return nil, 0, errors.Join(ErrDimensionMismatch, err)
-				}
-				if math.IsNaN(x) || math.IsInf(x, -1) {
-					return nil, 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-				}
-				if math.IsInf(x, 1) {
-					return nil, 0, ErrIncompleteGraph
-				}
-				if x < 0 {
-					return nil, 0, ErrNegativeWeight
-				}
-				// Store in linearized form for cache-friendly reads: w[u*n+v] ~ At(u,v).
-				w[i*n+j] = x
-			}
-		}
-	}
-	at := func(u, v int) float64 { return w[u*n+v] } // hot-path accessor with zero allocations
 
 	// Current working tour (copy to keep the input immutable).
 	cur := make([]int, n+1)
@@ -105,7 +122,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 	// Baseline cost with strict checks (rejects +Inf/NaN on existing edges).
 	cost, err := TourCost(dist, cur)
 	if err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
 
 	eps := opts.Eps
@@ -113,22 +130,22 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 
 	// Soft deadline (checked sparsely to keep overhead negligible).
 	var (
-		useDeadline bool      // whether we enforce a wall-clock time budget
-		deadline    time.Time // absolute deadline if enabled
-		step        int       // iteration counter to throttle checks
+		useDeadline     bool      // whether we enforce a wall-clock time budget
+		deadline        time.Time // absolute deadline if enabled
+		candidateChecks int       // candidate counter to throttle checks
 	)
 	if opts.TimeLimit > 0 {
 		useDeadline = true
-		deadline = time.Now().Add(opts.TimeLimit)
+		deadline = localSearchNow().Add(opts.TimeLimit)
 	}
-	// Check every 2048 iterations (~cheap). This preserves throughput in tight loops.
+	// Check every 2048 candidate events. This preserves throughput in tight loops.
 	checkDeadline := func() bool {
-		step++
-		if !useDeadline || (step&2047) != 0 {
+		candidateChecks++
+		if (candidateChecks & twoOptDeadlineCheckMask) != 0 {
 			return false
 		}
 
-		return time.Now().After(deadline)
+		return localSearchDeadlineExpired(useDeadline, deadline)
 	}
 
 	// Main first-improvement loop: restart scan after every accepted move.
@@ -149,6 +166,13 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 		// In 2-opt* (ATSP) we skip (i==1 && k==n−1) to avoid creating start→start directly.
 		for i = 1; i <= n-2; i++ {
 			for k = i + 1; k <= n-1; k++ {
+				if checkDeadline() {
+					local, finishErr := finishLocalSearchCurrent(cur, cost, accepted, true, n, opts.StartVertex)
+					if finishErr != nil {
+						return localSearchResult{}, finishErr
+					}
+					return local, ErrTimeLimit
+				}
 				if !opts.Symmetric && i == 1 && k == n-1 {
 					// Would connect start→start in the middle of the tour; skip.
 					continue
@@ -162,10 +186,10 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 
 				if opts.Symmetric {
 					// Classic 2-opt reversal on [i..k].
-					wab = at(a, b)
-					wcd = at(c, d)
-					wac = at(a, c)
-					wbd = at(b, d)
+					wab = weights.at(a, b)
+					wcd = weights.at(c, d)
+					wac = weights.at(a, c)
+					wbd = weights.at(b, d)
 
 					// If the new edges do not exist, reject this candidate.
 					if math.IsInf(wac, 0) || math.IsInf(wbd, 0) {
@@ -176,17 +200,17 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 					if delta < -eps {
 						// Apply by in-place reversal of segment [i..k] (O(k−i+1)).
 						if err = reverseArcInPlace(cur, i, k); err != nil {
-							return nil, 0, err
+							return localSearchResult{}, err
 						}
 					} else {
 						continue // not improving
 					}
 				} else {
 					// ATSP - 2-opt* (no reversal). Replace (a→b),(c→d) with (a→d),(c→b).
-					wab = at(a, b)
-					wcd = at(c, d)
-					wad = at(a, d)
-					wcb = at(c, b)
+					wab = weights.at(a, b)
+					wcd = weights.at(c, d)
+					wad = weights.at(a, d)
+					wcb = weights.at(c, b)
 
 					if math.IsInf(wad, 0) || math.IsInf(wcb, 0) {
 						continue // candidate would introduce missing arcs
@@ -207,12 +231,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 
 				// Guards.
 				if maxIters > 0 && accepted >= maxIters {
-					_ = CanonicalizeOrientationInPlace(cur)
-
-					return cur, round1e9(cost), nil
-				}
-				if checkDeadline() {
-					return nil, 0, ErrTimeLimit
+					return finishLocalSearchCurrent(cur, cost, accepted, false, n, opts.StartVertex)
 				}
 
 				// First-improvement policy: restart scanning from the beginning.
@@ -229,13 +248,7 @@ func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, e
 		}
 	}
 
-	_ = CanonicalizeOrientationInPlace(cur)
-	// Defensive: keep invariants tight and explicit before returning.
-	if verr := ValidateTour(cur, n, opts.StartVertex); verr != nil {
-		return nil, 0, verr
-	}
-
-	return cur, round1e9(cost), nil
+	return finishLocalSearchCurrent(cur, cost, accepted, false, n, opts.StartVertex)
 }
 
 // applyTwoOptStar applies an asymmetric 2-opt* move on a closed tour.

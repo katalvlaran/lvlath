@@ -784,8 +784,11 @@ func BuildDenseIncidence(
 	var i int
 	var id string
 	for i, id = range vertices {
+		if id == "" {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: empty vertex id at %d: %w", i, core.ErrEmptyVertexID)
+		}
 		if _, dup := idx[id]; dup {
-			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: duplicate vertex id %q: %w", id, ErrUnknownVertex)
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: duplicate vertex id %q: %w", id, ErrBadShape)
 		}
 		idx[id] = i
 	}
@@ -811,6 +814,9 @@ func BuildDenseIncidence(
 	)
 	for ej = 0; ej < len(edges); ej++ {
 		e = edges[ej] // address is safe (backed by the slice)
+		if e == nil {
+			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: nil edge at index %d: %w", ej, ErrBadShape)
+		}
 		// Resolve endpoints to row indices; unknown vertex is a hard error.
 		if u, ok = idx[e.From]; !ok {
 			return nil, nil, nil, fmt.Errorf("BuildDenseIncidence: unknown source %q: %w", e.From, ErrUnknownVertex)

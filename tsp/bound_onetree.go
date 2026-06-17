@@ -44,7 +44,6 @@
 package tsp
 
 import (
-	"errors"
 	"math"
 	"time"
 
@@ -112,40 +111,19 @@ func OneTreeLowerBound(
 		return 0, nil, ErrInvalidOptions
 	}
 
-	n, err := validateSolverDistanceMatrix(dist, true, false, symTol)
+	weights, err := copyClosureReadyWeights(dist, true)
 	if err != nil {
 		return 0, nil, err
 	}
+	n := weights.n
 	if err = validateStartVertex(n, root); err != nil {
 		return 0, nil, err
-	}
-
-	// Dense prefetch with strict sentinels; +Inf allowed (represents missing edges).
-	w := make([]float64, n*n)
-	var (
-		i, j int
-		x    float64
-	)
-	for i = 0; i < n; i++ { // scan rows of the distance matrix (origin vertices u=i)
-		for j = 0; j < n; j++ { // scan columns of the distance matrix (destination vertices v=j)
-			x, err = dist.At(i, j)
-			if err != nil {
-				return 0, nil, errors.Join(ErrDimensionMismatch, err)
-			}
-			if math.IsNaN(x) || math.IsInf(x, -1) {
-				return 0, nil, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-			}
-			if x < 0 {
-				return 0, nil, ErrNegativeWeight
-			}
-			w[i*n+j] = x // write c_{ij} into the dense linear buffer at offset i*n + j
-		}
 	}
 
 	eng := oneTreeEngine{
 		n:      n,
 		root:   root,
-		w:      w,
+		w:      weights.w,
 		pi:     make([]float64, n),
 		deg:    make([]int, n),
 		inTree: make([]bool, n),
@@ -174,7 +152,7 @@ func OneTreeLowerBound(
 	var (
 		bestLB    = math.Inf(-1) // best L(π) observed so far
 		sumPi     float64        // running Σ π_i
-		iter      int            // iteration counter
+		i, iter   int            // iteration counter
 		norm2     float64        // ||s||² where s_i = deg(i)−2
 		redCost   float64        // reduced-cost sum of the current 1-tree, cost_c'(T(π))
 		degDiff   int            // s_i = deg(i) − 2 for the current i

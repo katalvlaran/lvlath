@@ -33,6 +33,9 @@
 //   - The matrix package validates nil, typed-nil, square shape, and APSP distance semantics.
 //   - The tsp package adds TSP-domain constraints: n >= 2, diagonal ≈ 0, no negative weights,
 //     optional symmetry, and finite complete final solver input.
+//   - Solver kernels consume a detached internal weightBuffer built by weights.go helpers.
+//   - copyCompleteWeights is required for final solver kernels and rejects +Inf.
+//   - copyClosureReadyWeights is reserved for pre-closure and lower-bound helpers that can reason about +Inf.
 //   - Direct RunMetricClosure copies input into a detached Dense distance matrix and
 //     delegates APSP to matrix.APSPInPlace.
 //   - Final solver kernels must never receive +Inf as a missing-edge sentinel.
@@ -101,6 +104,8 @@
 //   - TSPResult owns detached Tour, IDs, and Warnings slices.
 //   - TSResult is a minimal compatibility projection used by SolveWithMatrix
 //     and SolveWithGraph.
+//   - Internal dispatcher code publishes TSPResult directly; TSResult must not
+//     be used as the canonical orchestration boundary.
 //   - Held-Karp, Christofides, and local-search wrappers return no partial results on failure.
 //   - Branch-and-Bound may return a non-nil TSPResult with TimedOut=true and
 //     Optimal=false when a feasible incumbent exists at timeout.
@@ -110,12 +115,12 @@
 // # Matching Law
 //
 //   - BlossomMatch attempts true MWPM.
-//   - If BlossomMatch returns ErrMatchingNotImplemented, the Christofides kernel may
-//     fall back to deterministic GreedyMatch.
+//   - If Blossom/MWPM is unavailable, Christofides returns ErrMatchingUnavailable
+//     unless Options.MatchingFallbackPolicy == MatchingFallbackGreedy.
 //   - Greedy fallback keeps the pipeline deterministic and feasible when finite edges exist,
 //     but clears the formal 1.5 approximation guarantee.
 //   - MatchingFallback, ApproximationRatio, and fallback Warnings are populated from
-//     tspApproxWithMeta kernel metadata, never inferred in the facade from Options alone.
+//     kernel metadata, never inferred in the facade from Options alone.
 //
 // # Error Law
 //
@@ -127,8 +132,10 @@
 // # AI-Hints
 //
 //   - Do not use SolveWithMatrix in new code when metadata matters.
+//   - Do not return TSResult from canonical facades or dispatcher boundaries.
 //   - Do not infer MatchingFallback outside tspApproxWithMeta.
 //   - Do not allow +Inf into final solver kernels.
+//   - Do not use closure-ready weights in final solver kernels.
 //   - Do not compare error strings; use errors.Is.
 //   - Do not change DefaultOptions to Auto in a patch release without an explicit
 //     compatibility decision.

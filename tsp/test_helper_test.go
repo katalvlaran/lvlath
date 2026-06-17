@@ -322,3 +322,22 @@ func doubleAdj(adj [][]int) [][]int {
 	// Return the multigraph adjacency.
 	return cp
 }
+
+// mustEqualStrings asserts exact equality of two string slices with a domain-specific
+// operation label. It avoids reflect.DeepEqual so result-projection failures are easier
+// to diagnose.
+func mustEqualStrings(t *testing.T, got []string, want []string, op string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("%s: len mismatch: got=%d want=%d; got=%v want=%v", op, len(got), len(want), got, want)
+	}
+
+	var index int
+	for index = 0; index < len(got); index++ {
+		if got[index] != want[index] {
+			t.Fatalf("%s: value mismatch at %d: got=%q want=%q; got=%v want=%v",
+				op, index, got[index], want[index], got, want)
+		}
+	}
+}

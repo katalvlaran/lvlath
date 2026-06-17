@@ -570,9 +570,21 @@ func ValidateSymmetric(m Matrix, tol float64) error {
 		return nil
 	}
 
+	// Scan diagonal
+	var i int       // loop counter
+	var aii float64 // A[i,i]
+	for i = 0; i < n; i++ {
+		aii, err = m.At(i, i)
+		if err != nil {
+			return fmt.Errorf("ValidateSymmetric: At(%d,%d): %w", i, i, err)
+		}
+		if isNonFinite(aii) {
+			return fmt.Errorf("ValidateSymmetric: diagonal[%d,%d]=%v: %w", i, i, aii, ErrNaNInf)
+		}
+	}
 	// Scan the strict upper triangle once, tracking the maximum deviation.
 	// Deterministic i→j order ensures reproducible short-circuiting behavior.
-	var i, j int         // loop counters
+	var j int            // loop counter
 	var aij, aji float64 // A[i,j] and A[j,i]
 	for i = 0; i < n; i++ {
 		for j = i + 1; j < n; j++ {

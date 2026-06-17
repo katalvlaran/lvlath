@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - Christofides 1.5-approximation.
+// Package tsp - Christofides approximation pipeline.
 //
 // TSPApprox computes a 1.5-approximate Hamiltonian cycle for the symmetric,
 // metric Travelling Salesman Problem using the Christofides pipeline:
@@ -12,8 +12,8 @@
 //  4. Shortcutting the Eulerian walk to a Hamiltonian cycle (skip revisits).
 //
 // Mathematical guarantee:
-//   - For metric symmetric TSP (triangle inequality, non-negative, symmetric),
-//     the returned tour length ≤ 1.5 · OPT.
+//   - The returned tour has the Christofides 1.5 bound only when the matching
+//     stage computes exact minimum-weight perfect matching.
 //
 // Contracts (validated by the dispatcher via validateAll):
 //   - dist is square n×n, n ≥ 2,
@@ -23,8 +23,8 @@
 //
 // Options notes:
 //   - opts.StartVertex fixes the start/closure of the cycle.
-//   - opts.MatchingAlgo selects between BlossomMatch (preferred) and GreedyMatch,
-//     with a strict fallback to Greedy when blossom returns ErrMatchingNotImplemented.
+//   - opts.MatchingAlgo selects between exact matching mode and GreedyMatch.
+//   - Greedy fallback is allowed only when MatchingFallbackPolicy explicitly enables it.
 //   - No RNG is used here; determinism is intrinsic.
 //   - Local-search post-passes (2-opt / 3-opt) orchestrates the dispatcher (SolveWithMatrix):
 //   - if EnableLocalSearch && !BestImprovement → fast 2-opt
@@ -44,12 +44,9 @@
 //   - Only strict sentinels from types.go (e.g., ErrStartOutOfRange, ErrIncompleteGraph, …).
 //
 // Guarantee note:
-//   - The 1.5·OPT bound relies on step (2) being a true minimum-weight perfect matching (MWPM).
-//     When Blossom/MWPM is unavailable, the implementation explicitly falls back to a
-//     deterministic greedy matching to keep the pipeline correct and reproducible.
-//     In the greedy fallback the tour remains valid (Eulerian multigraph → shortcut),
-//     but the formal 1.5 factor is not guaranteed. Set MatchingAlgo=GreedyMatch to opt in
-//     explicitly; keep BlossomMatch to automatically benefit once MWPM is enabled.
+//   - Exact-small MWPM may justify the 1.5 metadata for small odd sets.
+//   - Large odd sets return ErrMatchingUnavailable until a true Blossom engine is implemented,
+//     unless explicit greedy fallback is selected.
 package tsp
 
 import (
@@ -62,13 +59,13 @@ import (
 // It is intentionally private because callers should consume this information through TSPResult.
 //
 // Implementation:
-//   - Stage 1: Start with the guarantee implied by the requested matching policy.
-//   - Stage 2: Downgrade the guarantee only when the kernel actually falls back.
-//   - Stage 3: Preserve warning sentinels for TSPResult.Warnings.
+//   - Stage 1: Start without a formal approximation ratio.
+//   - Stage 2: Record the 1.5 ratio only after exact MWPM succeeds.
+//   - Stage 3: Preserve fallback warning sentinels for TSPResult.Warnings.
 //
 // Behavior highlights:
 //   - MatchingFallback is kernel-origin metadata, never facade inference.
-//   - ProvenRatio is 1.5 only when a true MWPM path was used.
+//   - ProvenRatio is 1.5 only after exact MWPM success.
 //   - Greedy matching is valid but has no formal Christofides bound.
 //
 // Inputs:
@@ -98,17 +95,17 @@ type approxMeta struct {
 	warnings         []error
 }
 
-// newApproxMeta initializes approximation metadata from the requested matching policy.
+// newApproxMeta initializes conservative approximation metadata.
 // Implementation:
-//   - Stage 1: If GreedyMatch is explicitly selected, no formal ratio is claimed.
-//   - Stage 2: If BlossomMatch is selected, the ratio is provisional until fallback is observed.
+//   - Stage 1: Start with NoApproximationRatio.
+//   - Stage 2: Let the matching branch record exact MWPM success explicitly.
 //
 // Behavior highlights:
-//   - The 1.5 ratio is only retained if Blossom/MWPM succeeds.
-//   - GreedyMatch is an explicit weaker policy.
+//   - No branch receives a provisional ratio.
+//   - GreedyMatch and fallback remain ratio-free.
 //
 // Inputs:
-//   - opts: solver options.
+//   - opts: solver options; currently unused but kept for signature stability.
 //
 // Returns:
 //   - approxMeta: initial metadata state.
@@ -126,11 +123,47 @@ func newApproxMeta(opts Options) approxMeta {
 	return approxMeta{provenRatio: ChristofidesApproximationRatio}
 }
 
+// recordExactMWPM records a successful exact minimum-weight perfect matching.
+// This is the only metadata transition that enables the formal Christofides ratio.
+//
+// Implementation:
+//   - Stage 1: Clear matching fallback.
+//   - Stage 2: Store ChristofidesApproximationRatio.
+//
+// Behavior highlights:
+//   - Does not modify warnings.
+//   - Does not infer exactness from Options.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure metadata mutation.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Use only after blossomMatch succeeds.
+//
+// AI-Hints:
+//   - Do not call this after GreedyMatch or greedy fallback.
+func (m *approxMeta) recordExactMWPM() {
+	m.matchingFallback = false
+	m.provenRatio = ChristofidesApproximationRatio
+}
+
 // recordGreedyFallback records BlossomMatch -> GreedyMatch degradation.
 // Implementation:
 //   - Stage 1: Set MatchingFallback.
 //   - Stage 2: Clear the formal approximation ratio.
-//   - Stage 3: Attach ErrMatchingNotImplemented as a non-fatal warning.
+//   - Stage 3: Attach ErrMatchingFallback as a non-fatal warning.
 //
 // Behavior highlights:
 //   - The returned tour may still be valid and deterministic.
@@ -143,20 +176,79 @@ func newApproxMeta(opts Options) approxMeta {
 //   - Time O(1), Space amortized O(1).
 //
 // AI-Hints:
-//   - Do not return ErrMatchingNotImplemented as a fatal error when greedy fallback succeeds.
+//   - Do not use ErrMatchingNotImplemented as the public warning for fallback.
+//   - Do not keep the 1.5 ratio after any greedy fallback.
 func (m *approxMeta) recordGreedyFallback() {
 	m.matchingFallback = true
 	m.provenRatio = NoApproximationRatio
-	m.warnings = append(m.warnings, ErrMatchingNotImplemented)
+	m.warnings = append(m.warnings, ErrMatchingFallback)
+}
+
+// ChristofidesSolve runs the Christofides pipeline and publishes canonical result metadata.
+// It is the direct solver entrypoint for symmetric metric TSP instances when callers do
+// not need SolveMatrix adapter features such as ID attachment or metric closure.
+//
+// Implementation:
+//   - Stage 1: Run the existing Christofides pipeline and collect approximation metadata.
+//   - Stage 2: Publish a detached TSPResult with matching and approximation facts.
+//   - Stage 3: Preserve warning sentinels for caller classification through errors.Is.
+//
+// Behavior highlights:
+//   - Claims ApproximationRatio=1.5 only when the matching metadata proves it.
+//   - Clears the formal approximation ratio when greedy matching is used.
+//   - Does not run graph or matrix adapter logic.
+//
+// Inputs:
+//   - dist: final symmetric complete distance matrix.
+//   - opts: Christofides policy.
+//
+// Returns:
+//   - *TSPResult: canonical approximation result.
+//   - error: nil on success or a sentinel-classified failure.
+//
+// Errors:
+//   - ErrStartOutOfRange.
+//   - ErrIncompleteGraph from MST, matching, or tour-cost checks.
+//   - ErrInvalidOptions for invalid matching policy.
+//   - ErrNonEulerian from malformed Eulerian multigraph state.
+//   - ErrInvalidTour, ErrNaNInf, ErrNegativeWeight from cost/tour helpers.
+//
+// Determinism:
+//   - MST, matching fallback, Eulerian walk, shortcutting, and canonicalization use fixed orders.
+//
+// Complexity:
+//   - Time O(n^2) with greedy matching on dense instances.
+//   - Space O(n+E) beyond the input matrix.
+//
+// Notes:
+//   - Use SolveMatrix when IDs or direct matrix metric closure are required.
+//   - Matching fallback policy is repaired in the matching correctness phase.
+//
+// AI-Hints:
+//   - Do not claim 1.5 approximation when MatchingFallback is true.
+//   - Do not infer matching fallback from Options outside the matching kernel.
+func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	minimal, approx, err := tspApprox(dist, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	meta := newSolveMeta(Christofides)
+	meta.applyApprox(approx)
+
+	result := publishTSPResult(minimal, nil, opts, meta, false)
+	result.Algorithm = Christofides
+
+	return result, nil
 }
 
 // TSPApprox runs the Christofides pipeline and returns the legacy minimal result.
 // It is kept as a compatibility/public kernel wrapper; canonical metadata is published
-// by SolveMatrix through tspApproxWithMeta.
+// by ChristofidesSolve and SolveMatrix.
 //
 // Implementation:
-//   - Stage 1: Delegate to tspApprox.
-//   - Stage 2: Discard approximation metadata intentionally.
+//   - Stage 1: Delegate to ChristofidesSolve.
+//   - Stage 2: Project TSPResult to TSResult through Minimal.
 //
 // Behavior highlights:
 //   - Does not duplicate Christofides logic.
@@ -177,10 +269,16 @@ func (m *approxMeta) recordGreedyFallback() {
 //   - Same as tspApproxWithMeta.
 //
 // AI-Hints:
-//   - Do not add matching metadata inference here; use tspApproxWithMeta.
+//   - Do not add matching metadata inference here; use TSPResult from ChristofidesSolve.
+//
+// Deprecated: use ChristofidesSolve or SolveMatrix.
 func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
-	result, _, err := tspApprox(dist, opts)
-	return result, err
+	result, err := ChristofidesSolve(dist, opts)
+	if result == nil {
+		return TSResult{}, err
+	}
+
+	return result.Minimal(), err
 }
 
 // tspApprox runs Christofides and returns kernel-origin approximation metadata.
@@ -225,7 +323,7 @@ func TSPApprox(dist matrix.Matrix, opts Options) (TSResult, error) {
 //
 // AI-Hints:
 //   - Do not claim ChristofidesApproximationRatio when meta.matchingFallback is true.
-//   - Do not treat ErrMatchingNotImplemented as fatal when fallback succeeds.
+//   - Do not treat ErrMatchingUnavailable as non-fatal unless fallback policy allows it.
 func tspApprox(dist matrix.Matrix, opts Options) (TSResult, approxMeta, error) {
 	meta := newApproxMeta(opts)
 
@@ -258,20 +356,25 @@ func tspApprox(dist matrix.Matrix, opts Options) (TSResult, approxMeta, error) {
 	switch opts.MatchingAlgo {
 	case BlossomMatch:
 		if matchErr := blossomMatch(odd, dist, mstAD); matchErr != nil {
-			if errors.Is(matchErr, ErrMatchingNotImplemented) {
-				// Deterministic and safe fallback; preserves pipeline validity.
-				if err = greedyMatch(odd, dist, mstAD); err != nil {
-					return TSResult{}, meta, err
-				}
-
-				meta.recordGreedyFallback()
-			} else {
+			if !errors.Is(matchErr, ErrMatchingNotImplemented) && !errors.Is(matchErr, ErrMatchingUnavailable) {
 				return TSResult{}, meta, matchErr
 			}
+
+			if opts.MatchingFallbackPolicy != MatchingFallbackGreedy {
+				return TSResult{}, meta, ErrMatchingUnavailable
+			}
+			// Deterministic and explicitly requested degradation. The resulting tour
+			// remains valid when all later stages succeed, but no 1.5 ratio is claimed.
+			if err = greedyMatchAtomic(odd, dist, mstAD); err != nil {
+				return TSResult{}, meta, err
+			}
+			meta.recordGreedyFallback()
+		} else {
+			meta.recordExactMWPM()
 		}
 
 	case GreedyMatch:
-		if err = greedyMatch(odd, dist, mstAD); err != nil {
+		if err = greedyMatchAtomic(odd, dist, mstAD); err != nil {
 			return TSResult{}, meta, err
 		}
 		meta.provenRatio = NoApproximationRatio

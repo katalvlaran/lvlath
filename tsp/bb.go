@@ -15,6 +15,8 @@
 //  2. Optional seeding of an initial upper bound (UB): Christofides (+ 2-opt)
 //     for symmetric TSP, or a deterministic trivial ring polished by 2-opt*
 //     for ATSP. A good UB dramatically strengthens pruning.
+//     UB costs are stored unrounded inside the search state; display rounding
+//     happens only when publishing TSPResult.
 //  3. Search: DFS with a degree-1 relaxation lower bound (LB):
 //     - For vertices whose outgoing edge is not yet fixed, add minOut[v].
 //     - For vertices whose incoming edge is not yet fixed, add minIn[v].
@@ -24,8 +26,9 @@
 //  4. Branching order: from the current “last”, try next vertices v in
 //     ascending w[last→v] (index tiebreak). This tightens UB early while
 //     remaining fully deterministic.
-//  5. Soft time limit: rare deadline checks (every 4096 node events) keep
-//     overhead negligible.
+//  5. Soft time limit: every DFS node checks the shared stopped flag and deadline.
+//     When the deadline expires, the whole recursion stops and a valid incumbent
+//     is returned as a governed partial result when available.
 //
 // Complexity:
 //   - Worst case exponential in n (exact search). Practical speed comes from pruning.
@@ -49,6 +52,11 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
+const (
+	// branchAndBoundNoIncumbent marks that no feasible Hamiltonian cycle has been recorded.
+	branchAndBoundNoIncumbent = -1.0
+)
+
 // bbEngine holds all search data and policies.
 // We use a dedicated engine struct (instead of anonymous closures) to keep
 // dependencies explicit, testing simpler, and hot-path state predictable.
@@ -63,10 +71,12 @@ type bbEngine struct {
 	// Time budget
 	useDeadline bool
 	deadline    time.Time
-	steps       int // sparse deadline checks counter
+	stopped     bool
+	// Search telemetry
+	nodesExpanded int
 
-	// Graph data (dense buffer): w[u*n+v]
-	w []float64
+	// Graph data (detached dense buffer): weights.at(u,v) is cost u→v.
+	weights weightBuffer
 
 	// Precomputes for bound / branching order
 	minOut []float64 // per-vertex minimal outgoing edge (excluding self)
@@ -85,42 +95,151 @@ type bbEngine struct {
 	foundAny bool
 }
 
-// at is a fast accessor into the dense weight buffer.
-func (e *bbEngine) at(u, v int) float64 { return e.w[u*e.n+v] }
+// at is a fast accessor into the detached dense weight buffer.
+func (e *bbEngine) at(u, v int) float64 { return e.weights.at(u, v) }
 
-// deadlineCheck performs a rare deadline test (every 4096 node events).
-func (e *bbEngine) deadlineCheck() bool {
-	e.steps++
-	if !e.useDeadline || (e.steps&4095) != 0 {
-		return false
-	}
-
-	return time.Now().After(e.deadline)
+// deadlineExpired reports whether the Branch-and-Bound wall-clock budget is exhausted.
+// It is intentionally checked before every node expansion so a timeout stops the whole
+// DFS tree instead of merely returning from one recursive frame.
+//
+// Implementation:
+//   - Stage 1: Return false when TimeLimit is disabled.
+//   - Stage 2: Compare current wall-clock time to the fixed deadline.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Used by dfs and finalization.
+//
+// Inputs:
+//   - None; reads engine deadline policy.
+//
+// Returns:
+//   - bool: true when the deadline has passed.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Deterministic when TimeLimit==0; wall-clock dependent only when a budget is active.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - The caller sets e.stopped when this returns true.
+//
+// AI-Hints:
+//   - Do not use sparse counters as NodesExpanded.
+//   - Do not keep searching sibling branches after this returns true.
+func (e *bbEngine) deadlineExpired() bool {
+	return e.useDeadline && time.Now().After(e.deadline)
 }
 
-// initPrefetch loads the matrix into a dense buffer and applies strict sentinels.
-// NaN and negative weights are rejected; +Inf is allowed (represents missing edges).
-func (e *bbEngine) initPrefetch(dist matrix.Matrix) error {
-	var (
-		i, j int
-		x    float64
-		err  error
-	)
-	e.w = make([]float64, e.n*e.n)
-	for i = 0; i < e.n; i++ {
-		for j = 0; j < e.n; j++ {
-			x, err = dist.At(i, j)
-			if err != nil || math.IsNaN(x) {
-				return ErrDimensionMismatch
-			}
-			if x < 0 {
-				return ErrNegativeWeight
-			}
-			e.w[i*e.n+j] = x
-		}
+// initWeights attaches a validated complete weight buffer to the search engine.
+// Branch-and-Bound consumes final solver input, so missing +Inf edges must already
+// be rejected by copyCompleteWeights before search starts.
+//
+// Implementation:
+//   - Stage 1: Verify that the buffer order matches the engine order.
+//   - Stage 2: Store the detached weight buffer for O(1) hot-loop access.
+//
+// Behavior highlights:
+//   - Does not copy weights again.
+//   - Does not mutate the source matrix.
+//   - Keeps B&B sentinel classification aligned with all final solver kernels.
+//
+// Inputs:
+//   - weights: detached complete row-major TSP weights.
+//
+// Returns:
+//   - error: nil when the buffer matches engine dimensions.
+//
+// Errors:
+//   - ErrDimensionMismatch when weights.n does not match e.n.
+//
+// Determinism:
+//   - Pure shape check and assignment.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Build weights with copyCompleteWeights, not copyClosureReadyWeights.
+//
+// AI-Hints:
+//   - Do not allow +Inf into B&B final search state.
+//   - Do not reintroduce a custom matrix.At prefetch loop here.
+func (e *bbEngine) initWeights(weights weightBuffer) error {
+	if weights.n != e.n {
+		return ErrDimensionMismatch
 	}
 
+	e.weights = weights
+
 	return nil
+}
+
+// tourCost computes an unrounded tour cost from the engine weight buffer.
+// It is used for incumbent bounds; display stabilization happens only when
+// publishing TSPResult.
+//
+// Implementation:
+//   - Stage 1: Validate closed-tour length and fixed start.
+//   - Stage 2: Scan all arcs in tour order.
+//   - Stage 3: Accumulate raw float64 cost without round1e9.
+//
+// Behavior highlights:
+//   - Does not mutate the tour.
+//   - Rejects malformed tours before they become pruning bounds.
+//   - Reads from weightBuffer, not matrix.Matrix.
+//
+// Inputs:
+//   - tour: closed Hamiltonian cycle candidate.
+//
+// Returns:
+//   - float64: raw unrounded cycle cost.
+//   - error: nil on valid finite tour.
+//
+// Errors:
+//   - ErrInvalidTour for malformed tour, out-of-range vertices, or missing closure.
+//   - ErrIncompleteGraph for impossible +Inf arc, defensive only after copyCompleteWeights.
+//
+// Determinism:
+//   - Fixed left-to-right arc scan.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - This helper intentionally does not call TourCost because TourCost rounds for public metadata.
+//
+// AI-Hints:
+//   - Do not use rounded public result costs as Branch-and-Bound UB.
+func (e *bbEngine) tourCost(tour []int) (float64, error) {
+	if err := ValidateTour(tour, e.n, e.start); err != nil {
+		return 0, err
+	}
+
+	var (
+		index int
+		from  int
+		to    int
+		cost  float64
+		sum   float64
+	)
+	for index = 0; index < e.n; index++ {
+		from = tour[index]
+		to = tour[index+1]
+		cost = e.at(from, to)
+
+		if math.IsInf(cost, 0) {
+			return 0, ErrIncompleteGraph
+		}
+
+		sum += cost
+	}
+
+	return sum, nil
 }
 
 // precomputeMinima computes per-vertex minOut/minIn excluding self-loops.
@@ -198,10 +317,13 @@ func (e *bbEngine) buildNeighborOrder() {
 	}
 }
 
-// recordUB commits a new incumbent (UB) with stabilized cost.
+// recordUB commits a new incumbent upper bound without rounding its cost.
+// The bound participates in pruning, so cost must remain the raw accumulated
+// value; round1e9 is applied only when publishing TSPResult.
 func (e *bbEngine) recordUB(tour []int, cost float64) {
 	copy(e.bestTour, tour)
-	e.bestCost = round1e9(cost)
+	e.bestCost = cost
+	e.foundAny = true
 }
 
 // seedUB optionally initializes UB via heuristics to accelerate pruning.
@@ -214,7 +336,9 @@ func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 	// Symmetric seed - Christofides; safe fallbacks are handled inside TSPApprox.
 	if opts.Symmetric {
 		if res, err := TSPApprox(dist, opts); err == nil {
-			e.recordUB(res.Tour, res.Cost)
+			if cost, costErr := e.tourCost(res.Tour); costErr == nil {
+				e.recordUB(res.Tour, cost)
+			}
 		}
 	}
 
@@ -222,11 +346,13 @@ func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 	if math.IsInf(e.bestCost, 0) {
 		base, berr := trivialRing(e.n, e.start)
 		if berr == nil {
-			if c0, cerr := TourCost(dist, base); cerr == nil {
+			if c0, cerr := e.tourCost(base); cerr == nil {
 				e.recordUB(base, c0)
 				if opts.EnableLocalSearch && e.n >= 4 {
-					if imp, ic, ierr := TwoOpt(dist, base, opts); ierr == nil {
-						e.recordUB(imp, ic) // TwoOpt already returns stabilized cost.
+					if improvedTour, _, improveErr := TwoOpt(dist, base, opts); improveErr == nil {
+						if improvedCost, improvedCostErr := e.tourCost(improvedTour); improvedCostErr == nil {
+							e.recordUB(improvedTour, improvedCost)
+						}
 					}
 				}
 			}
@@ -273,20 +399,55 @@ func (e *bbEngine) lowerBound(costSoFar float64, last int, depth int) float64 {
 	return costSoFar + extra
 }
 
-// commit writes the final start-closure and records a new incumbent (UB).
-func (e *bbEngine) commit(total float64, depth int) {
+// commit writes the final start-closure and records a new incumbent upper bound.
+// The total cost is raw search cost and must not be rounded before pruning completes.
+//
+// Implementation:
+//   - Stage 1: Close the current path with the fixed start vertex.
+//   - Stage 2: Copy the full path into bestTour.
+//   - Stage 3: Store raw bestCost and mark that an incumbent exists.
+//
+// Behavior highlights:
+//   - Does not allocate.
+//   - Does not round bestCost.
+//
+// Inputs:
+//   - total: raw complete-cycle cost.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None. Caller validates edge feasibility before commit.
+//
+// Determinism:
+//   - Copies the current deterministic DFS path.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - Publication-time rounding belongs to result().
+//
+// AI-Hints:
+//   - Do not call round1e9 here; rounded UB can change pruning.
+func (e *bbEngine) commit(total float64) {
 	e.path[e.n] = e.start
 	copy(e.bestTour, e.path)
-	e.bestCost = round1e9(total)
+	e.bestCost = total
 	e.foundAny = true
 }
 
 // dfs performs the core search: deterministic branching + pruning by LB ≥ UB − eps.
 func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
-	// Sparse time check (practically free).
-	if e.deadlineCheck() {
+	if e.stopped {
 		return
 	}
+	if e.deadlineExpired() {
+		e.stopped = true
+		return
+	}
+	e.nodesExpanded++
 
 	// Prune by lower bound.
 	if lb := e.lowerBound(costSoFar, last, depth); lb >= e.bestCost-e.eps {
@@ -301,7 +462,7 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 		}
 		total := costSoFar + c
 		if total < e.bestCost-e.eps {
-			e.commit(total, depth)
+			e.commit(total)
 		}
 
 		return
@@ -313,6 +474,9 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 		c float64
 	)
 	for _, v = range e.order[last] {
+		if e.stopped {
+			return
+		}
 		if e.visited[v] {
 			continue
 		}
@@ -324,6 +488,10 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 		e.path[depth] = v
 		e.dfs(v, depth+1, costSoFar+c)
 		e.visited[v] = false
+
+		if e.stopped {
+			return
+		}
 	}
 }
 
@@ -353,20 +521,60 @@ func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
 		Exact:         true,
 		Optimal:       optimal,
 		TimedOut:      timedOut,
-		NodesExpanded: e.steps,
+		NodesExpanded: e.nodesExpanded,
 		Symmetric:     e.symmetric,
 	}
 }
 
-// TSPBranchAndBound is the public entrypoint for exact BnB search.
-// It prepares the engine, runs the search, and returns the optimal tour/cost.
+// BranchAndBoundSolve runs exact Branch-and-Bound search and publishes TSPResult directly.
+// It is the canonical BnB entrypoint for callers that need timeout, exactness, and
+// search telemetry metadata without going through SolveMatrix.
+//
+// Implementation:
+//   - Stage 1: Delegate to the result-native Branch-and-Bound engine.
+//   - Stage 2: Return the canonical result unchanged.
+//
+// Behavior highlights:
+//   - Full completion returns Exact=true and Optimal=true.
+//   - Timeout with a feasible incumbent returns a non-nil partial result and ErrTimeLimit.
+//   - Timeout without an incumbent returns nil and ErrTimeLimit.
+//
+// Inputs:
+//   - dist: final complete TSP/ATSP distance matrix.
+//   - opts: finalized or caller-provided BnB policy.
+//
+// Returns:
+//   - *TSPResult: optimal or partial result.
+//   - error: nil on full completion, ErrTimeLimit for partial timeout, or validation sentinel.
 //
 // Errors:
 //   - ErrTimeLimit if a positive time budget is exceeded.
 //   - ErrIncompleteGraph if no Hamiltonian cycle exists (or all closures are +Inf).
 //   - Strict validation sentinels for malformed inputs (see types.go).
+//
+// Determinism:
+//   - Branching order is sorted by edge weight and vertex index.
+//
+// Complexity:
+//   - Worst-case exponential time, O(n^2) precompute space plus O(n) search state.
+//
+// Notes:
+//   - Use SolveMatrix when IDs or metric closure must be attached by the facade.
+//
+// AI-Hints:
+//   - Do not project this result to TSResult before checking TimedOut and NodesExpanded.
+//   - Do not mark timed-out partial results as Optimal.
+func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	return runBranchAndBoundResult(dist, opts)
+}
+
+// TSPBranchAndBound is the legacy entrypoint for exact BnB search.
+// It returns only the minimal TSResult projection and therefore discards partial-result
+// metadata such as TimedOut and NodesExpanded.
+//
+// Deprecated: use BranchAndBoundSolve or SolveMatrix.
 func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
-	result, err := runBranchAndBoundResult(dist, opts)
+	result, err := BranchAndBoundSolve(dist, opts)
 	if err != nil {
 		return TSResult{}, err
 	}
@@ -421,10 +629,11 @@ func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, erro
 		return nil, err
 	}
 
-	n, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	weights, err := copyCompleteWeights(dist, opts.Symmetric)
 	if err != nil {
 		return nil, err
 	}
+	n := weights.n
 	if err = validateStartVertex(n, opts.StartVertex); err != nil {
 		return nil, err
 	}
@@ -443,8 +652,8 @@ func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, erro
 		engine.deadline = time.Now().Add(opts.TimeLimit)
 	}
 
-	// Prefetch and precomputes.
-	if err = engine.initPrefetch(dist); err != nil {
+	// Attach already validated final solver weights.
+	if err = engine.initWeights(weights); err != nil {
 		return nil, err
 	}
 	if err = engine.precomputeMinima(); err != nil {
@@ -458,8 +667,25 @@ func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, erro
 	engine.path[0] = engine.start
 	engine.visited[engine.start] = true
 
+	if engine.deadlineExpired() {
+		engine.stopped = true
+		return nil, ErrTimeLimit
+	}
+
 	// Optional UB seeding (greatly helps pruning, correctness unaffected).
 	engine.seedUB(dist, opts)
+
+	if engine.deadlineExpired() {
+		engine.stopped = true
+		if engine.foundAny && !math.IsInf(engine.bestCost, 0) {
+			_ = CanonicalizeOrientationInPlace(engine.bestTour)
+			if err = ValidateTour(engine.bestTour, n, engine.start); err != nil {
+				return nil, err
+			}
+			return engine.result(false, true), ErrTimeLimit
+		}
+		return nil, ErrTimeLimit
+	}
 
 	// Optional: root-only 1-tree (Held–Karp) lower bound to tighten pruning
 	// before entering DFS. Safe for symmetric instances; correctness unaffected.
@@ -487,7 +713,8 @@ func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, erro
 	engine.dfs(engine.start, 1, 0)
 
 	// Finalization.
-	if engine.useDeadline && time.Now().After(engine.deadline) {
+	if engine.stopped || engine.deadlineExpired() {
+		engine.stopped = true
 		if engine.foundAny && !math.IsInf(engine.bestCost, 0) {
 			_ = CanonicalizeOrientationInPlace(engine.bestTour)
 			if err = ValidateTour(engine.bestTour, n, engine.start); err != nil {

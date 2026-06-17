@@ -7,6 +7,7 @@
 // Policies:
 //   - First-improvement (default): apply the first strictly improving move.
 //   - Best-improvement (opt-in via Options.BestImprovement): scan whole neighborhood and pick the best.
+//   - Options.ThreeOptMaxMoves bounds accepted 3-opt moves independently from 2-opt.
 //
 // Neighborhood order:
 //   - If Options.ShuffleNeighborhood == true, triples (i,j,k) are scanned in a randomized,
@@ -26,7 +27,6 @@
 package tsp
 
 import (
-	"errors"
 	"math"
 	"math/rand"
 	"time"
@@ -34,15 +34,40 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// segKind enumerates segment variants for symmetric 3-opt.
-type segKind uint8
+// segmentID identifies one of the two movable middle segments in a 3-opt cut.
+type segmentID uint8
 
 const (
-	segS1  segKind = iota // segment S1 = T[i..j-1] in forward order
-	segS1R                // reversed S1
-	segS2                 // segment S2 = T[j..k-1] in forward order
-	segS2R                // reversed S2
+	// segmentS1 is the segment tour[i:j].
+	segmentS1 segmentID = iota
+
+	// segmentS2 is the segment tour[j:k].
+	segmentS2
 )
+
+// orientedSegment selects a segment and orientation for explicit 3-opt assembly.
+type orientedSegment struct {
+	id      segmentID
+	reverse bool
+}
+
+// threeOptMove names one symmetric 3-opt reconnection case.
+// The identity move is intentionally absent from symmetricThreeOptMoves.
+type threeOptMove struct {
+	name string
+	x    orientedSegment
+	y    orientedSegment
+}
+
+var symmetricThreeOptMoves = [...]threeOptMove{
+	{name: "reverse_s1", x: orientedSegment{id: segmentS1, reverse: true}, y: orientedSegment{id: segmentS2, reverse: false}},
+	{name: "reverse_s2", x: orientedSegment{id: segmentS1, reverse: false}, y: orientedSegment{id: segmentS2, reverse: true}},
+	{name: "reverse_both", x: orientedSegment{id: segmentS1, reverse: true}, y: orientedSegment{id: segmentS2, reverse: true}},
+	{name: "swap_s1_s2", x: orientedSegment{id: segmentS2, reverse: false}, y: orientedSegment{id: segmentS1, reverse: false}},
+	{name: "swap_s1_reverse", x: orientedSegment{id: segmentS2, reverse: false}, y: orientedSegment{id: segmentS1, reverse: true}},
+	{name: "swap_s2_reverse", x: orientedSegment{id: segmentS2, reverse: true}, y: orientedSegment{id: segmentS1, reverse: false}},
+	{name: "swap_reverse_both", x: orientedSegment{id: segmentS2, reverse: true}, y: orientedSegment{id: segmentS1, reverse: true}},
+}
 
 // defaultRNGSeed is the fixed “zero” seed used when callers pass seed==0.
 // The value is arbitrary but stable to keep reproducible defaults.
@@ -51,82 +76,106 @@ const defaultRNGSeed int64 = 1
 // ThreeOpt returns an improved tour and its stabilized cost.
 // Policy is taken from opts.BestImprovement; ATSP uses 3-opt* (tail-swap).
 func ThreeOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	return threeOptCore(dist, initTour, opts, opts.BestImprovement)
+	local, err := threeOptKernel(dist, initTour, opts, opts.BestImprovement)
+	if local.hasTour() {
+		return append([]int(nil), local.tour...), local.cost, err
+	}
+	return nil, 0, err
 }
 
 // ThreeOptBest - explicit best-improvement entrypoint (policy forced to best).
 func ThreeOptBest(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	return threeOptCore(dist, initTour, opts, true /*bestImprovement*/)
+	local, err := threeOptKernel(dist, initTour, opts, true)
+	if local.hasTour() {
+		return append([]int(nil), local.tour...), local.cost, err
+	}
+	return nil, 0, err
 }
 
-// threeOptCore contains the shared engine. No logs/panics; strict sentinels only.
-func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovement bool) ([]int, float64, error) {
+// threeOptKernel runs 3-opt / restricted ATSP 3-opt* and returns structured local-search metadata.
+//
+// Implementation:
+//   - Stage 1: Validate options, input tour, complete weights, and fixed-start tour invariants.
+//   - Stage 2: Copy the working tour and compute baseline cost.
+//   - Stage 3: Enumerate triples i<j<k in deterministic or seed-controlled cyclic order.
+//   - Stage 4: Evaluate explicit symmetric move table or ATSP tail-swap candidate.
+//   - Stage 5: Validate every accepted move and publish success or partial-timeout result.
+//
+// Behavior highlights:
+//   - Symmetric mode evaluates exactly seven named non-identity reconnections.
+//   - ATSP mode uses a restricted orientation-preserving tail-swap neighborhood.
+//   - Timeout returns a valid current tour when one exists.
+//
+// Inputs:
+//   - dist: complete final distance matrix.
+//   - initTour: closed Hamiltonian tour starting and ending at opts.StartVertex.
+//   - opts: local-search policy.
+//   - bestImprovement: true to apply the best candidate per sweep.
+//
+// Returns:
+//   - localSearchResult: finalized local result when a current tour exists.
+//   - error: nil or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions, ErrNilTour, ErrInvalidTour, ErrDimensionMismatch.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph.
+//   - ErrTimeLimit with non-empty localSearchResult when a valid current tour exists.
+//
+// Determinism:
+//   - Without ShuffleNeighborhood, triples and moves are scanned in fixed table order.
+//   - With ShuffleNeighborhood, cyclic offsets are seed-controlled.
+//
+// Complexity:
+//   - Time O(iter*n^3), Space O(n) plus the shared O(n^2) weight buffer.
+//   - Accepted symmetric and ATSP moves assemble O(n) output tours.
+//
+// Notes:
+//   - iterations counts accepted moves, not candidate evaluations.
+//   - The accepted-move ValidateTour postcheck is intentionally compiled into normal builds.
+//
+// AI-Hints:
+//   - Do not replace the explicit move table with opaque X/Y arrays.
+//   - Do not skip ValidateTour after accepted 3-opt moves.
+func threeOptKernel(dist matrix.Matrix, initTour []int, opts Options, bestImprovement bool) (localSearchResult, error) {
 	// Tour shape & invariants (the dispatcher already validated matrix shape).
 	if err := validateOptionsStandalone(opts); err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
 	if initTour == nil {
-		return nil, 0, ErrNilTour
+		return localSearchResult{}, ErrNilTour
 	}
 	if len(initTour) < 2 {
-		return nil, 0, ErrInvalidTour
+		return localSearchResult{}, ErrInvalidTour
 	}
 
 	n := len(initTour) - 1
 	if n < 2 {
-		return nil, 0, ErrInvalidTour
+		return localSearchResult{}, ErrInvalidTour
 	}
-	matrixOrder, err := validateSolverDistanceMatrix(dist, opts.Symmetric, true, symTol)
+	weights, err := copyCompleteWeights(dist, opts.Symmetric)
 	if err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
-	if matrixOrder != n {
-		return nil, 0, ErrDimensionMismatch
+	if weights.n != n {
+		return localSearchResult{}, ErrDimensionMismatch
 	}
 
 	// Validate the cycle invariants: closure, unique vertices, fixed start.
 	if err = ValidateTour(initTour, n, opts.StartVertex); err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
-
-	// Prefetch weights into a dense buffer to eliminate interface overhead in hot loops.
-	w := make([]float64, n*n)
-	var (
-		i, j int     // matrix indices reused across loops
-		x    float64 // temporary weight holder
-	)
-	for i = 0; i < n; i++ {
-		for j = 0; j < n; j++ {
-			x, err = dist.At(i, j)
-			if err != nil {
-				return nil, 0, errors.Join(ErrDimensionMismatch, err)
-			}
-			if math.IsNaN(x) || math.IsInf(x, -1) {
-				return nil, 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
-			}
-			if math.IsInf(x, 1) {
-				return nil, 0, ErrIncompleteGraph
-			}
-			if x < 0 {
-				return nil, 0, ErrNegativeWeight
-			}
-
-			w[i*n+j] = x // linearized index; avoids [][] bounds/indirection in hot path
-		}
-	}
-	at := func(u, v int) float64 { return w[u*n+v] } // fast weight accessor
 
 	// Working copy and baseline tour cost (strict validation of current edges).
 	cur := make([]int, n+1)
 	copy(cur, initTour)              // keep caller’s slice immutable
 	cost, err := TourCost(dist, cur) // verifies no NaN/+Inf on existing arcs
 	if err != nil {
-		return nil, 0, err
+		return localSearchResult{}, err
 	}
 
 	// Policy knobs.
-	eps := opts.Eps                 // accept only Δ < −eps (eps≥0 validated beforehand)
-	maxMoves := opts.TwoOptMaxIters // 0 ⇒ unlimited number of accepted moves
+	eps := opts.Eps                   // accept only Δ < −eps (eps≥0 validated beforehand)
+	maxMoves := opts.ThreeOptMaxMoves // 0 ⇒ unlimited number of accepted moves
 
 	// RNG for randomized triple order: enabled only when ShuffleNeighborhood is set.
 	var rng randLite // tiny shim interface with Intn(int)
@@ -142,35 +191,29 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 	)
 	if opts.TimeLimit > 0 {
 		useDeadline = true
-		deadline = time.Now().Add(opts.TimeLimit)
+		deadline = localSearchNow().Add(opts.TimeLimit)
 	}
 	// Check every 4096 Δ evaluations; this keeps the check overhead tiny.
 	checkDeadline := func() bool {
 		steps++
-		if !useDeadline || (steps&4095) != 0 { // every 4096 Δ-evals
+		if (steps & threeOptDeadlineCheckMask) != 0 { // every 4096 Δ-evals
 			return false
 		}
 
-		return time.Now().After(deadline)
+		return localSearchDeadlineExpired(useDeadline, deadline)
 	}
-
-	// Neighborhood templates.
-	// Symmetric: the 7 distinct reconnections (X,Y) with X,Y ∈ {S1,S1R,S2,S2R}\{identity}.
-	tryXSym := [...]segKind{segS1R, segS1, segS2R, segS1R, segS2, segS2R, segS2}
-	tryYSym := [...]segKind{segS2, segS2R, segS1R, segS2R, segS1R, segS1, segS1}
-	// ATSP (3-opt*): single orientation-preserving reconnection under fixed-tail model.
-	const tryXATSP = segS2 // X=S2
-	const tryYATSP = segS1 // Y=S1
 
 	// Main improvement loop.
 	accepted := 0
+	var i, j int // matrix indices reused across loops
 	for {
 		found := false // did we discover an improving candidate in this sweep?
 
 		// Best-improvement bookkeeping for a single sweep.
 		bestDelta := 0.0            // most negative Δ seen so far
 		var bestI, bestJ, bestK int // triple indices for the best move
-		var bestX, bestY segKind    // segment choices for symmetric case
+		var bestMove threeOptMove   // symmetric move selected by best-improvement
+		var bestIsATSPTailSwap bool // whether best move is the ATSP tail swap
 
 		// Randomized cyclic offset for the outermost index i (optional when rng!=nil).
 		offI := 0
@@ -180,15 +223,12 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 
 		// Enumerate all triples 1≤i<j<k≤n−1 with optional cyclic offsets to reduce structure bias.
 		var (
-			k                            int     // k index
-			ii, jj, kk, m                int     // loop counters
-			spanJ, spanK, offJ, offK     int     // per-level spans and offsets
-			a, b, c, d, e, f             int     // boundary vertices around (i,j,k)
-			xFirst, xLast, yFirst, yLast int     // boundary endpoints for X and Y
-			xk, yk                       segKind // chosen segment kinds
-			w1, w2, w3                   float64 // new boundary arc weights
-			removed                      float64 // weight of removed arcs
-			delta                        float64 // candidate improvement (negative is good)
+			k                        int     // k index
+			ii, jj, kk               int     // loop counters
+			spanJ, spanK, offJ, offK int     // per-level spans and offsets
+			moveIndex                int     // symmetric move-table index
+			feasible                 bool    // candidate feasibility under missing-edge policy
+			delta                    float64 // candidate improvement (negative is good)
 		)
 		for ii = 0; ii < n-3; ii++ {
 			i = 1 + ((ii + offI) % (n - 3)) // ensure i ∈ [1..n-3] with cyclic shift
@@ -217,79 +257,78 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 				for kk = 0; kk < spanK; kk++ {
 					k = j + 1 + ((kk + offK) % spanK) // k ∈ [j+1..n-1]
 
-					// Boundary vertices around the three cuts:
-					a, b = cur[i-1], cur[i]
-					c, d = cur[j-1], cur[j]
-					e, f = cur[k-1], cur[k]
-					removed = at(a, b) + at(c, d) + at(e, f)
-
 					if opts.Symmetric {
-						// Evaluate 7 symmetric reconnections (X,Y).
-						for m = 0; m < 7; m++ {
+						for moveIndex = 0; moveIndex < len(symmetricThreeOptMoves); moveIndex++ {
 							if checkDeadline() {
-								return nil, 0, ErrTimeLimit
-							}
-							xk = tryXSym[m]
-							yk = tryYSym[m]
+								local, finishErr := finishLocalSearchCurrent(cur, cost, accepted, true, n, opts.StartVertex)
+								if finishErr != nil {
+									return localSearchResult{}, finishErr
+								}
 
-							// Determine boundary endpoints for X and Y under the chosen orientation.
-							xFirst, xLast = segFirstLast(xk, b, c, d, e)
-							yFirst, yLast = segFirstLast(yk, b, c, d, e)
-
-							// New boundary arcs: (a→first(X)), (last(X)→first(Y)), (last(Y)→f).
-							w1 = at(a, xFirst)
-							w2 = at(xLast, yFirst)
-							w3 = at(yLast, f)
-							if math.IsInf(w1, 0) || math.IsInf(w2, 0) || math.IsInf(w3, 0) {
-								continue // would introduce missing arc(s)
+								return local, ErrTimeLimit
 							}
-							delta = (w1 + w2 + w3) - removed
-							if delta >= -eps {
-								continue // not strictly improving under tolerance
+
+							move := symmetricThreeOptMoves[moveIndex]
+							if err = validateThreeOptMove(move); err != nil {
+								return localSearchResult{}, err
+							}
+
+							delta, feasible = threeOptDeltaSymmetric(weights.at, cur, i, j, k, move)
+							if !feasible || delta >= -eps {
+								continue
 							}
 
 							if !bestImprovement {
-								// First-improvement: apply immediately and restart sweep.
-								cur = apply3OptSym(cur, i, j, k, xk, yk)
+								next := applyThreeOptSymmetric(cur, i, j, k, move)
+								if err = ValidateTour(next, n, opts.StartVertex); err != nil {
+									return localSearchResult{}, err
+								}
+
+								cur = next
 								cost += delta
 								accepted++
 								found = true
 							} else if delta < bestDelta {
-								// Best-improvement: remember the best move within this sweep.
-								bestDelta, bestI, bestJ, bestK, bestX, bestY = delta, i, j, k, xk, yk
+								bestDelta = delta
+								bestI, bestJ, bestK = i, j, k
+								bestMove = move
+								bestIsATSPTailSwap = false
 								found = true
 							}
+
 							if found && !bestImprovement {
-								break // restart after an accepted first-improvement move
+								break
 							}
 						}
 					} else {
-						// ATSP - 3-opt* tail-swap (orientation-preserving, no reversals).
 						if checkDeadline() {
-							return nil, 0, ErrTimeLimit
-						}
-						// Boundary endpoints for X=S2 and Y=S1.
-						xFirst, xLast = segFirstLast(tryXATSP, b, c, d, e) // (d,e)
-						yFirst, yLast = segFirstLast(tryYATSP, b, c, d, e) // (b,c)
+							local, finishErr := finishLocalSearchCurrent(cur, cost, accepted, true, n, opts.StartVertex)
+							if finishErr != nil {
+								return localSearchResult{}, finishErr
+							}
 
-						w1 = at(a, xFirst)     // a→d
-						w2 = at(xLast, yFirst) // e→b
-						w3 = at(yLast, f)      // c→f
-						if math.IsInf(w1, 0) || math.IsInf(w2, 0) || math.IsInf(w3, 0) {
-							continue // would introduce missing arc(s)
+							return local, ErrTimeLimit
 						}
-						delta = (w1 + w2 + w3) - removed
-						if delta >= -eps {
-							continue // not improving
+
+						delta, feasible = threeOptDeltaATSPTailSwap(weights.at, cur, i, j, k)
+						if !feasible || delta >= -eps {
+							continue
 						}
 
 						if !bestImprovement {
-							cur = apply3OptATSP(cur, i, j, k) // out = P + S2 + S1 + S3
+							next := applyThreeOptATSPTailSwap(cur, i, j, k)
+							if err = ValidateTour(next, n, opts.StartVertex); err != nil {
+								return localSearchResult{}, err
+							}
+
+							cur = next
 							cost += delta
 							accepted++
 							found = true
 						} else if delta < bestDelta {
-							bestDelta, bestI, bestJ, bestK, bestX, bestY = delta, i, j, k, tryXATSP, tryYATSP
+							bestDelta = delta
+							bestI, bestJ, bestK = i, j, k
+							bestIsATSPTailSwap = true
 							found = true
 						}
 					}
@@ -310,11 +349,16 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 
 		// Best-improvement: apply the remembered best move once per sweep.
 		if bestImprovement && found {
-			if opts.Symmetric {
-				cur = apply3OptSym(cur, bestI, bestJ, bestK, bestX, bestY)
+			var next []int
+			if bestIsATSPTailSwap {
+				next = applyThreeOptATSPTailSwap(cur, bestI, bestJ, bestK)
 			} else {
-				cur = apply3OptATSP(cur, bestI, bestJ, bestK)
+				next = applyThreeOptSymmetric(cur, bestI, bestJ, bestK, bestMove)
 			}
+			if err = ValidateTour(next, n, opts.StartVertex); err != nil {
+				return localSearchResult{}, err
+			}
+			cur = next
 			cost += bestDelta
 			accepted++
 		}
@@ -328,91 +372,399 @@ func threeOptCore(dist matrix.Matrix, initTour []int, opts Options, bestImprovem
 		}
 	}
 
-	_ = CanonicalizeOrientationInPlace(cur)
-	if verr := ValidateTour(cur, n, opts.StartVertex); verr != nil {
-		return nil, 0, verr
-	}
-
-	return cur, round1e9(cost), nil
+	return finishLocalSearchCurrent(cur, cost, accepted, false, n, opts.StartVertex)
 }
 
-// segFirstLast maps a segment kind to its first/last vertex endpoints
-// given boundary markers: b=T[i], c=T[j-1], d=T[j], e=T[k-1].
-// For reversed segments, endpoints swap as expected.
-func segFirstLast(kind segKind, b, c, d, e int) (first, last int) {
-	switch kind {
-	case segS1:
+// validateThreeOptMove verifies that a symmetric 3-opt move uses S1 and S2 exactly once.
+// It protects the move table from invalid edits that would duplicate or drop a segment.
+//
+// Implementation:
+//   - Stage 1: Reject moves that use the same segment twice.
+//   - Stage 2: Reject unknown segment IDs.
+//   - Stage 3: Return nil for a structurally valid table entry.
+//
+// Behavior highlights:
+//   - No allocation.
+//   - Designed for normal build checks and internal tests.
+//
+// Inputs:
+//   - move: symmetric 3-opt move table entry.
+//
+// Returns:
+//   - error: nil for valid move.
+//
+// Errors:
+//   - ErrInvalidTour when the move duplicates one segment.
+//   - ErrInvalidOptions when a segment ID is outside the known domain.
+//
+// Determinism:
+//   - Pure structural check.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - The identity move is absent by construction and should remain absent.
+//
+// AI-Hints:
+//   - Do not add a new move without updating invariant and delta tests.
+func validateThreeOptMove(move threeOptMove) error {
+	if move.x.id == move.y.id {
+		return ErrInvalidTour
+	}
+	if (move.x.id != segmentS1 && move.x.id != segmentS2) ||
+		(move.y.id != segmentS1 && move.y.id != segmentS2) {
+		return ErrInvalidOptions
+	}
+
+	return nil
+}
+
+// segmentEndpoints maps an oriented segment to its first and last boundary vertices.
+// For S1 the forward endpoints are b,c; for S2 the forward endpoints are d,e.
+//
+// Implementation:
+//   - Stage 1: Select the segment by ID.
+//   - Stage 2: Swap endpoints when reverse=true.
+//   - Stage 3: Return sentinel endpoints for invalid IDs; validation should prevent them.
+//
+// Behavior highlights:
+//   - No allocation.
+//   - Used by delta calculation only.
+//
+// Inputs:
+//   - seg: oriented segment descriptor.
+//   - b,c,d,e: cut boundary vertices.
+//
+// Returns:
+//   - first: first vertex of the oriented segment.
+//   - last: last vertex of the oriented segment.
+//
+// Errors:
+//   - None. validateThreeOptMove owns structural errors.
+//
+// Determinism:
+//   - Pure switch over segment ID.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Invalid endpoints are defensive only and should be unreachable after validation.
+//
+// AI-Hints:
+//   - Do not interpret reverse as reversing the whole tour; it reverses only one segment.
+func segmentEndpoints(seg orientedSegment, b, c, d, e int) (first int, last int) {
+	switch seg.id {
+	case segmentS1:
+		if seg.reverse {
+			return c, b
+		}
+
 		return b, c
-	case segS1R:
-		return c, b
-	case segS2:
+
+	case segmentS2:
+		if seg.reverse {
+			return e, d
+		}
+
 		return d, e
-	default: // segS2R
-		return e, d
+
+	default:
+		return -1, -1
 	}
 }
 
-// apply3OptSym assembles out = P + X + Y + S3 (then closes with start).
-// P=T[:i], S1=T[i:j], S2=T[j:k], S3=T[k:n].
-func apply3OptSym(tour []int, i, j, k int, X, Y segKind) []int {
+// threeOptDeltaSymmetric computes the boundary-edge delta for one symmetric 3-opt move.
+// Internal segment edges cancel under symmetric distances, so only three removed and
+// three added boundary edges are needed.
+//
+// Implementation:
+//   - Stage 1: Read the six boundary vertices around cuts i,j,k.
+//   - Stage 2: Resolve oriented endpoints for X and Y.
+//   - Stage 3: Compute added-minus-removed boundary cost.
+//   - Stage 4: Reject candidates that would introduce missing edges.
+//
+// Behavior highlights:
+//   - Does not allocate.
+//   - Does not mutate the tour.
+//   - Returns feasible=false for +Inf candidate edges.
+//
+// Inputs:
+//   - at: O(1) weight accessor.
+//   - tour: closed Hamiltonian tour.
+//   - i,j,k: cut indices with 1 <= i < j < k <= n-1.
+//   - move: validated symmetric move descriptor.
+//
+// Returns:
+//   - float64: candidate delta, negative means improvement.
+//   - bool: false when the move would introduce a missing edge.
+//
+// Errors:
+//   - None. Shape validation belongs to the caller and tests.
+//
+// Determinism:
+//   - Fixed boundary reads and fixed arithmetic order.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This formula is valid for symmetric TSP because reversed segment internals keep cost.
+//   - ATSP uses a separate restricted tail-swap delta helper.
+//
+// AI-Hints:
+//   - Do not reuse this symmetric delta for ATSP reversed segments.
+func threeOptDeltaSymmetric(
+	at func(int, int) float64,
+	tour []int,
+	i int,
+	j int,
+	k int,
+	move threeOptMove,
+) (float64, bool) {
+	a, b := tour[i-1], tour[i]
+	c, d := tour[j-1], tour[j]
+	e, f := tour[k-1], tour[k]
+
+	xFirst, xLast := segmentEndpoints(move.x, b, c, d, e)
+	yFirst, yLast := segmentEndpoints(move.y, b, c, d, e)
+
+	w1 := at(a, xFirst)
+	w2 := at(xLast, yFirst)
+	w3 := at(yLast, f)
+
+	if math.IsInf(w1, 0) || math.IsInf(w2, 0) || math.IsInf(w3, 0) {
+		return 0, false
+	}
+
+	removed := at(a, b) + at(c, d) + at(e, f)
+	added := w1 + w2 + w3
+
+	return added - removed, true
+}
+
+// threeOptDeltaATSPTailSwap computes the restricted ATSP 3-opt* tail-swap delta.
+// The move keeps segment orientations and swaps S1/S2: P + S2 + S1 + S3.
+//
+// Implementation:
+//   - Stage 1: Read the six boundary vertices around cuts i,j,k.
+//   - Stage 2: Compute added arcs a->d, e->b, c->f.
+//   - Stage 3: Subtract removed arcs a->b, c->d, e->f.
+//   - Stage 4: Reject missing added arcs.
+//
+// Behavior highlights:
+//   - Does not reverse directed arcs.
+//   - Does not mutate the tour.
+//   - No allocation.
+//
+// Inputs:
+//   - at: O(1) weight accessor.
+//   - tour: closed Hamiltonian tour.
+//   - i,j,k: cut indices.
+//
+// Returns:
+//   - float64: candidate delta.
+//   - bool: false when an added arc is missing.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Fixed boundary reads and arithmetic order.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This is not full ATSP 3-opt; it is a restricted orientation-preserving 3-opt* move.
+//
+// AI-Hints:
+//   - Do not call this “full ATSP 3-opt”.
+func threeOptDeltaATSPTailSwap(
+	at func(int, int) float64,
+	tour []int,
+	i int,
+	j int,
+	k int,
+) (float64, bool) {
+	a, b := tour[i-1], tour[i]
+	c, d := tour[j-1], tour[j]
+	e, f := tour[k-1], tour[k]
+
+	w1 := at(a, d)
+	w2 := at(e, b)
+	w3 := at(c, f)
+
+	if math.IsInf(w1, 0) || math.IsInf(w2, 0) || math.IsInf(w3, 0) {
+		return 0, false
+	}
+
+	removed := at(a, b) + at(c, d) + at(e, f)
+	added := w1 + w2 + w3
+
+	return added - removed, true
+}
+
+// appendOrientedSegment appends S1 or S2 to out in the requested orientation.
+// It is the only segment-emission helper used by symmetric 3-opt assembly.
+//
+// Implementation:
+//   - Stage 1: Select S1 or S2 by segment ID.
+//   - Stage 2: Append forward order directly or reverse order manually.
+//   - Stage 3: Leave invalid segment IDs as no-op; validation prevents them.
+//
+// Behavior highlights:
+//   - Mutates only the output slice pointed to by out.
+//   - Does not allocate beyond append growth already reserved by the caller.
+//
+// Inputs:
+//   - out: destination tour builder.
+//   - s1: first middle segment.
+//   - s2: second middle segment.
+//   - seg: segment and orientation descriptor.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None. validateThreeOptMove owns segment validity.
+//
+// Determinism:
+//   - Fixed left-to-right or right-to-left append order.
+//
+// Complexity:
+//   - Time O(len(segment)), Space amortized O(1) beyond out capacity.
+//
+// Notes:
+//   - Caller preallocates n+1 capacity to avoid repeated growth.
+//
+// AI-Hints:
+//   - Do not append S3 here; S3 is anchored by applyThreeOptSymmetric.
+func appendOrientedSegment(out *[]int, s1 []int, s2 []int, seg orientedSegment) {
+	var source []int
+
+	switch seg.id {
+	case segmentS1:
+		source = s1
+	case segmentS2:
+		source = s2
+	default:
+		return
+	}
+
+	if !seg.reverse {
+		*out = append(*out, source...)
+		return
+	}
+
+	for index := len(source) - 1; index >= 0; index-- {
+		*out = append(*out, source[index])
+	}
+}
+
+// applyThreeOptSymmetric builds P + X + Y + S3 + start for a validated symmetric move.
+// It preserves start position and uses S1/S2 exactly once according to the move table.
+//
+// Implementation:
+//   - Stage 1: Slice tour into P, S1, S2, and S3.
+//   - Stage 2: Append P, oriented X, oriented Y, and fixed tail S3.
+//   - Stage 3: Close the tour with the original start.
+//
+// Behavior highlights:
+//   - Returns a fresh slice.
+//   - Does not mutate the input tour.
+//   - Keeps S3 anchored as the tail.
+//
+// Inputs:
+//   - tour: closed Hamiltonian tour.
+//   - i,j,k: cut indices.
+//   - move: validated symmetric move descriptor.
+//
+// Returns:
+//   - []int: fresh closed candidate tour.
+//
+// Errors:
+//   - None. The caller validates the result with ValidateTour.
+//
+// Determinism:
+//   - Fixed append order from the named move.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - Accepted moves must be postchecked with ValidateTour in normal builds.
+//
+// AI-Hints:
+//   - Do not skip the postcheck after this helper returns.
+func applyThreeOptSymmetric(tour []int, i int, j int, k int, move threeOptMove) []int {
 	n := len(tour) - 1
-	P, S1, S2, S3 := tour[:i], tour[i:j], tour[j:k], tour[k:n]
+
+	prefix := tour[:i]
+	s1 := tour[i:j]
+	s2 := tour[j:k]
+	tail := tour[k:n]
 
 	out := make([]int, 0, n+1)
-	out = append(out, P...)
+	out = append(out, prefix...)
 
-	emit := func(seg []int, reverse bool) {
-		if !reverse {
-			out = append(out, seg...)
-			return
-		}
+	appendOrientedSegment(&out, s1, s2, move.x)
+	appendOrientedSegment(&out, s1, s2, move.y)
 
-		var t = len(seg) - 1
-		for ; t >= 0; t-- {
-			out = append(out, seg[t])
-		}
-	}
-
-	// Emit X then Y according to selected orientations.
-	switch X {
-	case segS1:
-		emit(S1, false)
-	case segS1R:
-		emit(S1, true)
-	case segS2:
-		emit(S2, false)
-	default:
-		emit(S2, true)
-	}
-
-	// Emit Y.
-	switch Y {
-	case segS1:
-		emit(S1, false)
-	case segS1R:
-		emit(S1, true)
-	case segS2:
-		emit(S2, false)
-	default:
-		emit(S2, true)
-	}
-
-	// Tail unchanged and closure by start.
-	out = append(out, S3...)
+	out = append(out, tail...)
 	out = append(out, tour[0])
+
 	return out
 }
 
-// apply3OptATSP assembles the tail-swap out = P + S2 + S1 + S3 (no reversals).
-func apply3OptATSP(tour []int, i, j, k int) []int {
+// applyThreeOptATSPTailSwap builds P + S2 + S1 + S3 + start.
+// It is a restricted orientation-preserving ATSP 3-opt* move, not full ATSP 3-opt.
+//
+// Implementation:
+//   - Stage 1: Slice tour into P, S1, S2, and S3.
+//   - Stage 2: Append P, S2, S1, S3 in forward orientation.
+//   - Stage 3: Close with the original start.
+//
+// Behavior highlights:
+//   - Returns a fresh slice.
+//   - Does not reverse any directed segment.
+//   - Does not mutate the input tour.
+//
+// Inputs:
+//   - tour: closed Hamiltonian tour.
+//   - i,j,k: cut indices.
+//
+// Returns:
+//   - []int: fresh closed candidate tour.
+//
+// Errors:
+//   - None. The caller validates the result with ValidateTour.
+//
+// Determinism:
+//   - Fixed append order.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - This helper name intentionally states “TailSwap” to avoid overclaiming full ATSP 3-opt.
+//
+// AI-Hints:
+//   - Do not replace this with symmetric reversal logic for ATSP.
+func applyThreeOptATSPTailSwap(tour []int, i int, j int, k int) []int {
 	n := len(tour) - 1
-	P, S1, S2, S3 := tour[:i], tour[i:j], tour[j:k], tour[k:n]
+
+	prefix := tour[:i]
+	s1 := tour[i:j]
+	s2 := tour[j:k]
+	tail := tour[k:n]
 
 	out := make([]int, 0, n+1)
-	out = append(out, P...)
-	out = append(out, S2...)
-	out = append(out, S1...)
-	out = append(out, S3...)
+	out = append(out, prefix...)
+	out = append(out, s2...)
+	out = append(out, s1...)
+	out = append(out, tail...)
 	out = append(out, tour[0])
 
 	return out

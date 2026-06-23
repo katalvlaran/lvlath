@@ -1,17 +1,14 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - validation utilities shared by exact/heuristic solvers.
-//
-// This file contains small, tight, and well-documented helpers that:
-//  1. Validate Options combinations (algo ↔ symmetric, bounds, limits).
-//  2. Validate distance matrices (shape, diagonal, negativity, ∞, symmetry).
-//  3. Validate/normalize auxiliary inputs (IDs, start vertex).
+// Package tsp validates solver policy, distance matrices, and auxiliary TSP inputs.
+// Validation helpers are deterministic firewalls: they reject invalid public input
+// before expensive solver allocation and preserve sentinel error identity for callers.
 //
 // Design principles:
-//   - Deterministic, side-effect free functions.
-//   - No logging, no panics on user input - only sentinel errors from types.go.
-//   - O(n²) worst-case where n is the matrix size; no hidden allocations.
+//   - Deterministic, side-effect-free functions.
+//   - No logging and no panics on user input; failures are classified by sentinels from errors.go.
+//   - Matrix validation is O(n^2) worst-case and uses no hidden heap allocation.
 package tsp
 
 import (
@@ -27,6 +24,7 @@ import (
 const symTol = 1e-12
 
 // validateOptionsStandalone checks solver policy without matrix-size-dependent finalization.
+//
 // Implementation:
 //   - Stage 1: Validate numeric knobs.
 //   - Stage 2: Validate enum domains.
@@ -36,9 +34,8 @@ const symTol = 1e-12
 // Behavior highlights:
 //   - No allocations.
 //   - Auto is valid here, but must be finalized after matrix order is known.
-//   - No hidden fallback occurs unless opts.Algo == Auto.
+//   - No hidden matching-substitution policy is accepted.
 //   - No silent normalization of invalid public options.
-//   - Zero TimeLimit remains the documented "unlimited" mode.
 //
 // Inputs:
 //   - opts: solver configuration assembled by the caller.
@@ -61,7 +58,7 @@ const symTol = 1e-12
 //   - This function does not normalize options; it only rejects invalid public input.
 //
 // AI-Hints:
-//   - Do not reintroduce silent clamps for Eps, TimeLimit, or iteration caps.
+//   - Do not add hidden matching-substitution policy.
 //   - Tests must classify invalid options with errors.Is(err, ErrInvalidOptions).
 func validateOptionsStandalone(opts Options) error {
 	// TimeLimit must be non-negative (negative durations are undefined).
@@ -82,12 +79,6 @@ func validateOptionsStandalone(opts Options) error {
 		return ErrInvalidOptions
 	}
 	if opts.MaxExactN < 0 {
-		return ErrInvalidOptions
-	}
-
-	switch opts.MatchingFallbackPolicy {
-	case MatchingFallbackReject, MatchingFallbackGreedy:
-	default:
 		return ErrInvalidOptions
 	}
 

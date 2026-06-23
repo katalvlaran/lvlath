@@ -38,9 +38,9 @@
 //   - No RNG. Prim and r-edge selection break ties by vertex index.
 //   - The subgradient schedule is purely arithmetic and reproducible.
 //
-// Integration notes:
-//   - To expose this as a dispatcher choice, add OneTreeBound to BoundAlgo
-//     and route Branch-and-Bound to use OneTreeLowerBound when selected.
+// Integration:
+//   - Options.BoundAlgo==OneTreeBound lets Branch-and-Bound use this bound at the root.
+//   - The bound is symmetric-only and must be gated before use on ATSP instances.
 package tsp
 
 import (

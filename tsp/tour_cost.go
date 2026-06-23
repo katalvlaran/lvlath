@@ -1,28 +1,39 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - tour utilities shared by exact/heuristic solvers.
+// Package tsp defines tour validation, canonicalization, construction, and cost helpers.
 //
-// This file contains compact, allocation-conscious utilities that operate purely
-// on tour structure (index sequences), without depending on distance matrices.
-// Provided helpers:
-//   - ValidatePermutation: verify a permutation over {0..n-1}.
-//   - MakeTourFromPermutation: build a closed tour from a permutation, rotated to a start.
-//   - ValidateTour: enforce Hamiltonian cycle invariants.
-//   - RotateTourToStart: cyclic shift so the tour starts/ends at a given vertex.
-//   - CanonicalizeOrientationInPlace: canonical direction w.r.t. neighbors of start.
-//   - reverseArcInPlace: in-place segment reversal (2-opt core).
-//   - IndexOfStart: locate start in [0..n-1] prefix.
-//   - CopyTour: independent shallow copy of a tour slice.
-//   - EqualToursModuloRotation: equality under rotation (fixed start, same direction).
-//   - DebugString: compact printable representation for tests/debug.
-//   - ShortcutEulerianToHamiltonian: skip revisits in an Eulerian sequence to form a tour.
+// A tour is represented as a closed vertex-index sequence of length n+1:
+// tour[0] == tour[n] == start, and every vertex in [0,n) appears exactly once
+// before the closing start vertex.
 //
-// Design:
-//   - No logging, no panics on user input - only sentinel errors from types.go.
-//   - O(n) time for most helpers; in-place mutations avoid extra allocations.
-//   - Deterministic behavior with clear pre/post-conditions.
+// Contracts:
+//   - ValidateTour checks closed Hamiltonian cycle shape.
+//   - ValidatePermutation checks open permutation shape without a closing vertex.
+//   - TourCost computes the sum of directed arc costs in tour order.
+//   - Dense and generic cost paths must preserve the same sentinel behavior.
+//
+// Complexity:
+//   - Tour validation is O(n) time and O(n) memory.
+//   - Tour cost is O(n) time and O(1) memory, excluding matrix access cost.
+//   - Canonical rotation is O(n) time and O(n) memory unless performed in place.
+//
+// AI-Hints:
+//   - Do not use map iteration for tour canonicalization.
+//   - Do not treat permutation and closed-tour representations as interchangeable.
+//   - Do not let dense and generic cost paths drift in sentinel behavior.
 package tsp
+
+import (
+	"errors"
+	"math"
+
+	"github.com/katalvlaran/lvlath/matrix"
+)
+
+// roundScale controls final cost stabilization precision (1e-9).
+// Avoids tiny FP drifts across platforms/opt levels without affecting optimality.
+const roundScale = 1e9
 
 // ValidatePermutation checks that perm is a permutation of {0..n-1} of length n.
 // It does not allocate besides a single O(n) boolean marker slice.
@@ -271,83 +282,216 @@ func reverseArcInPlace(tour []int, i, k int) error {
 	return nil
 }
 
-// ShortcutEulerianToHamiltonian converts an Eulerian vertex sequence (with revisits)
-// into a Hamiltonian cycle by skipping the first revisits and then closing the tour.
-// This is the standard “shortcutting” step in Christofides:
+// TourCost computes the total cost of a closed Hamiltonian tour.
+// Implementation:
+//   - Stage 1: validate nil matrix and nil/short tour inputs.
+//   - Stage 2: choose Dense fast-path or generic matrix.Matrix path.
+//   - Stage 3: each path validates edge indices and numeric weights.
 //
-//	Input:  euler - a vertex sequence of arbitrary length (often O(E)).
-//	        n     - number of unique vertices (0..n-1).
-//	        start - required starting vertex of the resulting tour.
+// Behavior highlights:
+//   - Does not mutate the tour or matrix.
+//   - Dense and generic paths preserve identical sentinel classification.
 //
-// Algorithm:
-//   - Maintain a visited[n] boolean array.
-//   - Scan euler left-to-right; append a vertex v the first time it is seen.
-//   - After the scan, ensure every vertex 0..n-1 was seen exactly once.
-//   - Rotate the resulting n-length cycle so it starts at `start` and close it.
-//
-// Contracts:
-//   - 0 ≤ v < n for every v ∈ euler; otherwise ErrDimensionMismatch.
-//   - start ∈ [0..n-1].
+// Inputs:
+//   - dist: square distance matrix.
+//   - tour: closed cycle of vertex indices.
 //
 // Returns:
-//   - tour of length n+1 with tour[0]==tour[n]==start,
-//   - ErrDimensionMismatch if euler misses some vertices or has out-of-range entries,
-//   - ErrStartOutOfRange if start is invalid.
+//   - float64: rounded total cost.
+//   - error: sentinel-classified failure.
 //
-// Complexity: O(len(euler) + n) time, O(n) space.
-func ShortcutEulerianToHamiltonian(euler []int, n int, start int) ([]int, error) {
-	if n <= 0 {
-		return nil, ErrDimensionMismatch
+// Errors:
+//   - ErrNilDistanceMatrix joined with matrix nil sentinels.
+//   - ErrNilTour for nil tour.
+//   - ErrInvalidTour for malformed non-nil tour.
+//   - ErrNonSquare for bad matrix shape.
+//   - ErrNaNInf for NaN/-Inf.
+//   - ErrIncompleteGraph for +Inf tour edges.
+//   - ErrNegativeWeight for negative finite weights.
+//
+// Determinism:
+//   - Fixed tour order scan from index 0 to len(tour)-2.
+//
+// Complexity:
+//   - Time O(len(tour)), Space O(1).
+//
+// AI-Hints:
+//   - Do not classify NaN as ErrDimensionMismatch.
+//   - Keep Dense and generic path error classes equivalent.
+func TourCost(dist matrix.Matrix, tour []int) (float64, error) {
+	if err := matrix.ValidateNotNil(dist); err != nil {
+		return 0, errors.Join(ErrNilDistanceMatrix, err)
 	}
-	if start < 0 || start >= n {
-		return nil, ErrStartOutOfRange
+	if tour == nil {
+		return 0, ErrNilTour
+	}
+	if len(tour) < 2 {
+		return 0, ErrInvalidTour
 	}
 
-	visited := make([]bool, n)
-	cycle := make([]int, 0, n) // collect first occurrences
+	if d, ok := dist.(*matrix.Dense); ok {
+		return tourCostDense(d, tour)
+	}
+
+	return tourCostGeneric(dist, tour)
+}
+
+// tourCostDense sums costs along the cycle edges tour[i]→tour[i+1] using *matrix.Dense.
+//
+// Checks performed per edge:
+//   - indices in range,
+//   - weight finite (no NaN), not ±Inf (⇒ ErrIncompleteGraph),
+//   - non-negative (⇒ ErrNegativeWeight).
+//
+// Complexity: O(n).
+func tourCostDense(d *matrix.Dense, tour []int) (float64, error) {
+	// Shape guard.
+	var (
+		nr = d.Rows()
+		nc = d.Cols()
+	)
+	if nr != nc || nr <= 0 {
+		return 0, ErrNonSquare
+	}
+
+	// Main accumulation.
+	var (
+		sum float64
+		i   int
+		u   int
+		v   int
+		w   float64
+		err error
+		n   = nr
+		L   = len(tour) - 1 // last index used as closing
+	)
+
+	for i = 0; i < L; i++ {
+		u = tour[i]
+		v = tour[i+1]
+
+		// Index range checks.
+		if u < 0 || u >= n || v < 0 || v >= n {
+			return 0, ErrInvalidTour
+		}
+
+		// Fetch weight and validate.
+		w, err = d.At(u, v)
+		if err != nil {
+			// Dense.At should only fail on OOB; map to shape sentinel.
+			return 0, ErrDimensionMismatch
+		}
+		if math.IsNaN(w) {
+			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+		}
+		if math.IsInf(w, 0) {
+			return 0, ErrIncompleteGraph
+		}
+		if w < 0 {
+			return 0, ErrNegativeWeight
+		}
+
+		sum += w
+	}
+
+	return round1e9(sum), nil
+}
+
+// tourCostGeneric sums costs using the matrix.Matrix interface.
+//
+// Same checks as tourCostDense; slightly higher call overhead.
+// Kept lean to avoid hidden allocations.
+//
+// Complexity: O(n).
+func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
+	// Shape guard.
+	var (
+		nr = m.Rows()
+		nc = m.Cols()
+	)
+	if nr != nc || nr <= 0 {
+		return 0, ErrNonSquare
+	}
 
 	var (
-		idx int
+		sum float64
+		i   int
+		u   int
 		v   int
+		w   float64
+		err error
+		n   = nr
+		L   = len(tour) - 1
 	)
-	for idx = 0; idx < len(euler); idx++ {
-		v = euler[idx]
-		if v < 0 || v >= n {
-			return nil, ErrDimensionMismatch
+
+	for i = 0; i < L; i++ {
+		u = tour[i]
+		v = tour[i+1]
+
+		if u < 0 || u >= n || v < 0 || v >= n {
+			return 0, ErrInvalidTour
 		}
-		if !visited[v] {
-			visited[v] = true
-			cycle = append(cycle, v)
+
+		w, err = m.At(u, v)
+		if err != nil {
+			return 0, ErrDimensionMismatch
 		}
+		if math.IsNaN(w) {
+			return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+		}
+		if math.IsInf(w, 0) {
+			return 0, ErrIncompleteGraph
+		}
+		if w < 0 {
+			return 0, ErrNegativeWeight
+		}
+
+		sum += w
 	}
 
-	// Ensure all vertices were seen exactly once.
-	if len(cycle) != n {
-		return nil, ErrDimensionMismatch
-	}
-	var i int
-	for i = 0; i < n; i++ {
-		if !visited[i] {
-			return nil, ErrDimensionMismatch
-		}
+	return round1e9(sum), nil
+}
+
+// edgeCost fetches the weight for a single directed edge u→v with strict validation.
+// Useful for local-search deltas (2-opt/3-opt) to keep sentinel semantics centralized.
+//
+// Complexity: O(1).
+func edgeCost(m matrix.Matrix, u, v int) (float64, error) {
+	if err := matrix.ValidateNotNil(m); err != nil {
+		return 0, errors.Join(ErrNilDistanceMatrix, err)
 	}
 
-	// Rotate to start and close.
-	var p = -1
-	for i = 0; i < n; i++ {
-		if cycle[i] == start {
-			p = i
-			break
-		}
+	nr := m.Rows()
+	nc := m.Cols()
+
+	if nr != nc || nr <= 0 {
+		return 0, ErrNonSquare
 	}
-	if p == -1 {
-		return nil, ErrDimensionMismatch
+	if u < 0 || u >= nr || v < 0 || v >= nr {
+		return 0, ErrInvalidTour
 	}
 
-	tour := make([]int, n+1)
-	for i = 0; i < n; i++ {
-		tour[i] = cycle[(p+i)%n]
+	w, err := m.At(u, v)
+	if err != nil {
+		return 0, errors.Join(ErrDimensionMismatch, err)
 	}
-	tour[n] = start
-	return tour, nil
+	if math.IsNaN(w) || math.IsInf(w, -1) {
+		return 0, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
+	}
+	if math.IsInf(w, 1) {
+		return 0, ErrIncompleteGraph
+	}
+	if w < 0 {
+		return 0, ErrNegativeWeight
+	}
+
+	return w, nil
+}
+
+// round1e9 returns x rounded to 1e-9 absolute precision.
+// This keeps costs stable across platforms without affecting algorithmic correctness.
+//
+// Complexity: O(1).
+func round1e9(x float64) float64 {
+	return math.Round(x*roundScale) / roundScale
 }

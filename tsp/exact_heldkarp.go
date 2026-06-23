@@ -1,11 +1,11 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - Held–Karp exact solver (DP O(n²·2ⁿ)) for TSP/ATSP.
+// Package tsp implements the Held-Karp exact dynamic program for TSP and ATSP.
 //
-// TSPExact computes an optimal Hamiltonian cycle using the Held–Karp dynamic
-// programming algorithm. Symmetry is NOT required here (ATSP is allowed);
-// Christofides-specific symmetry checks are enforced by the dispatcher.
+// The solver computes an optimal Hamiltonian cycle over a complete finite
+// distance matrix. Symmetry is not required, so asymmetric TSP instances are
+// valid when the matrix itself satisfies the package numeric contract.
 //
 // Contracts:
 //   - dist is a complete finite square n×n final solver matrix.
@@ -23,7 +23,7 @@
 //   - Memory: O(n·2ⁿ) for DP and parent tables.
 //
 // Returns:
-//   - TSResult{Tour, Cost} with tour invariants (len==n+1, start==end==opts.StartVertex).
+//   - A canonical TSPResult through public facades; the private kernel computes the same optimal tour.
 package tsp
 
 import (
@@ -41,104 +41,136 @@ const MaxExactN = 16
 // ErrSizeTooLarge signals that n exceeds MaxExactN (pragmatic resource limit).
 var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices")
 
-// HeldKarp solves a complete TSP/ATSP instance with the Held-Karp dynamic program.
-// It is the canonical exact DP entrypoint and publishes TSPResult metadata directly.
+// heldKarp solves a complete TSP or ATSP instance with Held-Karp DP.
 //
 // Implementation:
-//   - Stage 1: Validate options, final solver matrix shape, and StartVertex.
-//   - Stage 2: Execute the existing flat-array Held-Karp DP without changing mathematics.
-//   - Stage 3: Publish a detached TSPResult with Exact=true and Optimal=true.
+//   - Stage 1: Validate standalone options and copy the complete distance matrix.
+//   - Stage 2: Enforce MaxExactN and StartVertex.
+//   - Stage 3: Run heldKarpDP over the immutable weight buffer.
+//   - Stage 4: Publish a detached exact optimal TSPResult.
 //
 // Behavior highlights:
-//   - Supports symmetric TSP and asymmetric TSP.
-//   - Returns no partial result on timeout.
-//   - Preserves the existing deterministic parent reconstruction law.
+//   - Supports asymmetric distances.
+//   - Requires complete finite matrix input.
+//   - Does not run metric closure.
+//   - Returns nil + ErrTimeLimit when the DP deadline expires before completion.
 //
 // Inputs:
-//   - dist: complete finite square distance matrix.
-//   - opts: solver policy; MaxExactN bounds exact DP size.
+//   - dist: complete finite square matrix.
+//   - opts: ExactHeldKarp policy with StartVertex, MaxExactN, Eps, and TimeLimit.
 //
 // Returns:
-//   - *TSPResult: exact optimal tour result on success.
-//   - error: nil on success or a sentinel-classified failure.
+//   - *TSPResult: exact optimal result on completion.
+//   - error: nil or sentinel-classified failure.
 //
 // Errors:
-//   - ErrInvalidOptions from option validation.
-//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch from matrix validation.
-//   - ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph from final solver matrix checks.
-//   - ErrStartOutOfRange for invalid StartVertex.
-//   - ErrSizeTooLarge when n exceeds the exact DP guard.
-//   - ErrTimeLimit when a positive wall-clock budget is exhausted.
+//   - ErrInvalidOptions.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch.
+//   - ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph.
+//   - ErrStartOutOfRange.
+//   - ErrSizeTooLarge.
+//   - ErrTimeLimit.
 //
 // Determinism:
-//   - Fixed subset-size order, mask order, endpoint order, and predecessor tie policy.
+//   - DP state iteration and predecessor reconstruction follow fixed scan order.
 //
 // Complexity:
 //   - Time O(n^2 * 2^n), Space O(n * 2^n).
 //
 // Notes:
-//   - Use SolveMatrix for facade-level ID attachment and optional metric closure.
-//   - This function intentionally does not fall back to heuristics when size limits fail.
+//   - This function owns exact/optimal metadata.
+//   - It does not attach IDs; facade publication does that.
 //
 // AI-Hints:
-//   - Do not silently replace Held-Karp with heuristic output on ErrSizeTooLarge.
-//   - Do not mark a timed-out result as Optimal unless incumbent support is implemented.
-func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
-	minimal, err := heldKarpMinimal(dist, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	meta := newSolveMeta(ExactHeldKarp)
-	meta.exact = true
-	meta.optimal = true
-
-	result := publishTSPResult(minimal, nil, opts, meta, false)
-	result.Algorithm = ExactHeldKarp
-
-	return result, nil
-}
-
-// TSPExact runs the Held-Karp DP over any matrix.Matrix and returns the legacy
-// minimal TSResult projection.
-//
-// Deprecated: use HeldKarp or SolveMatrix.
-func TSPExact(dist matrix.Matrix, opts Options) (TSResult, error) {
-	result, err := HeldKarp(dist, opts)
-	if result == nil {
-		return TSResult{}, err
-	}
-
-	return result.Minimal(), err
-}
-
-// heldKarpMinimal contains the existing Held-Karp DP implementation.
-// It remains private so canonical public code can publish TSPResult while the
-// compatibility wrapper can still project the same mathematics to TSResult.
-func heldKarpMinimal(dist matrix.Matrix, opts Options) (TSResult, error) {
+//   - Do not return heuristic fallback on ErrSizeTooLarge.
+//   - Do not mark timeout as partial unless an incumbent DP implementation exists.
+func heldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
-		return TSResult{}, err
+		return nil, err
 	}
 
 	weights, err := copyCompleteWeights(dist, false)
 	if err != nil {
-		return TSResult{}, err
+		return nil, err
 	}
-	n := weights.n
+
 	maxExactN := opts.MaxExactN
 	if maxExactN == 0 {
 		maxExactN = DefaultMaxExactN
 	}
-	if n > maxExactN {
-		return TSResult{}, ErrSizeTooLarge
+	if weights.n > maxExactN {
+		return nil, ErrSizeTooLarge
 	}
-	if err = validateStartVertex(n, opts.StartVertex); err != nil {
-		return TSResult{}, err
+
+	if err = validateStartVertex(weights.n, opts.StartVertex); err != nil {
+		return nil, err
 	}
+
+	tour, cost, err := heldKarpDP(weights, opts)
+	if err != nil {
+		return nil, err
+	}
+
+	return &TSPResult{
+		Tour:               append([]int(nil), tour...),
+		Cost:               round1e9(cost),
+		Algorithm:          ExactHeldKarp,
+		Exact:              true,
+		Optimal:            true,
+		TimedOut:           false,
+		Symmetric:          opts.Symmetric,
+		ApproximationRatio: NoApproximationRatio,
+	}, nil
+}
+
+// heldKarpDP computes an optimal closed Hamiltonian cycle with Held-Karp DP.
+//
+// Implementation:
+//   - Stage 1: Copy the final complete matrix into a dense weight buffer.
+//   - Stage 2: Fill subset DP tables in deterministic subset-size and mask order.
+//   - Stage 3: Reconstruct one optimal tour through the parent table.
+//   - Stage 4: Return a private route/cost payload for canonical publication.
+//
+// Behavior highlights:
+//   - Supports asymmetric distances.
+//   - Returns no partial result on timeout.
+//   - Does not attach IDs or facade metadata.
+//   - Rounds the final cost through round1e9.
+//
+// Inputs:
+//   - dist: complete finite square matrix.
+//   - opts: exact-solver policy with StartVertex, MaxExactN, Eps, and TimeLimit.
+//
+// Returns:
+//   - kernelTour: optimal route/cost payload.
+//   - error: nil on success or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch.
+//   - ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph.
+//   - ErrStartOutOfRange.
+//   - ErrSizeTooLarge.
+//   - ErrTimeLimit.
+//
+// Determinism:
+//   - Fixed subset cardinality, mask, endpoint, and predecessor scan order.
+//
+// Complexity:
+//   - Time O(n^2 * 2^n), Space O(n * 2^n).
+//
+// Notes:
+//   - The public wrapper attaches Exact=true and Optimal=true after success.
+//
+// AI-Hints:
+//   - Do not replace this with exhaustive permutation enumeration.
+//   - Do not mutate opts or caller-owned matrix data.
+func heldKarpDP(weights weightBuffer, opts Options) ([]int, float64, error) {
 
 	// Use the shared detached weight buffer so exact DP preserves the same
 	// numeric and sentinel policy as local search and Branch-and-Bound.
 	w := weights.w
+	n := weights.n
 
 	// Soft time budget: cheap deadline checks at a low fixed cadence.
 	var (
@@ -240,7 +272,7 @@ func heldKarpMinimal(dist matrix.Matrix, opts Options) (TSResult, error) {
 				}
 
 				if checkDeadline() {
-					return TSResult{}, ErrTimeLimit
+					return nil, 0, ErrTimeLimit
 				}
 			}
 		}
@@ -271,7 +303,7 @@ func heldKarpMinimal(dist matrix.Matrix, opts Options) (TSResult, error) {
 		}
 	}
 	if last < 0 || math.IsInf(bestCost, 1) {
-		return TSResult{}, ErrIncompleteGraph
+		return nil, 0, ErrIncompleteGraph
 	}
 
 	// Reconstruct the optimal tour by walking parents backward from (mask=all, j=last).
@@ -289,13 +321,13 @@ func heldKarpMinimal(dist matrix.Matrix, opts Options) (TSResult, error) {
 	}
 
 	// Canonicalize direction (fixed start) and enforce final tour invariants.
-	_ = CanonicalizeOrientationInPlace(tour)
-	if verr := ValidateTour(tour, n, start); verr != nil {
-		return TSResult{}, verr
+	err := CanonicalizeOrientationInPlace(tour)
+	if err != nil {
+		return nil, 0, err
+	}
+	if err = ValidateTour(tour, n, start); err != nil {
+		return nil, 0, err
 	}
 
-	return TSResult{
-		Tour: tour,
-		Cost: round1e9(bestCost),
-	}, nil
+	return tour, bestCost, nil
 }

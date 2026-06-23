@@ -1,22 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - unified dispatcher for TSP solvers.
-//
-// This file provides the canonical entry points to run TSP algorithms:
-//
-//   - SolveWithGraph: accept *core.Graph, build an adjacency matrix (optionally
-//     with metric closure), derive stable vertex IDs, then delegate to SolveWithMatrix.
-//   - SolveWithMatrix: accept a distance matrix + optional IDs and route to the
-//     requested algorithm (Christofides / Held–Karp / TwoOptOnly / ThreeOptOnly / …),
-//     applying strict validation and optional local-search post-passes.
-//
-// Design principles:
-//   - Deterministic: seed routing to heuristics; no time-based randomness.
-//   - Strict sentinels: only errors from types.go; no fmt.Errorf where a sentinel suffices.
-//   - Hot-path discipline: no hidden allocations; preallocate slices where needed.
-//   - Algorithmic clarity: doc strings with complexity and contracts.
-//   - Stable cost: all returned costs are rounded to 1e−9 to prevent FP drift.
+// Package tsp coordinates validated TSP solver dispatch.
+// The solver layer prepares matrices, finalizes explicit options, dispatches one
+// selected algorithm, and publishes detached canonical result metadata.
 package tsp
 
 import (
@@ -26,121 +13,111 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// solveMeta carries kernel-origin facts from solver dispatch to the canonical TSPResult.
-// It prevents facades from inferring algorithmic state from Options alone.
+// preparedMatrix stores the final solver matrix and preparation metadata.
 //
 // Implementation:
-//   - Stage 1: Each dispatch branch initializes metadata from the selected algorithm.
-//   - Stage 2: Kernels attach additional facts such as matching fallback or B&B counters.
-//   - Stage 3: SolveMatrix publishes metadata into TSPResult.
+//   - Stage 1: prepareSolverDistanceMatrix validates or copies the input matrix.
+//   - Stage 2: Optional metric closure produces a detached dense matrix.
+//   - Stage 3: The dispatcher consumes this immutable-by-convention preparation payload.
 //
 // Behavior highlights:
-//   - Private type; public callers consume TSPResult.
-//   - Keeps SolveWithMatrix as a pure compatibility projection.
-//   - Allows partial-result metadata without changing TSResult.
+//   - dist is the final matrix consumed by solver kernels.
+//   - n is cached to avoid repeated Rows calls across dispatcher policy.
+//   - metricClosureApplied is published into TSPResult.
 //
 // Inputs:
-//   - Produced by solvePreparedMatrix.
+//   - Produced only by prepareSolverDistanceMatrix.
 //
 // Returns:
-//   - Applied to TSPResult in publishTSPResult.
+//   - Consumed by solvePreparedMatrix.
 //
 // Errors:
-//   - None.
+//   - None; construction errors are returned by prepareSolverDistanceMatrix.
 //
 // Determinism:
-//   - Metadata mirrors deterministic dispatch branches.
+//   - Preserves matrix row/column order.
 //
 // Complexity:
-//   - Time O(1), Space O(len(Warnings)) when copied.
+//   - Storage O(1) plus referenced matrix memory.
+//
+// Notes:
+//   - This type does not own direct caller matrices unless metric closure created a copy.
 //
 // AI-Hints:
-//   - Do not duplicate this metadata assembly in SolveMatrix.
-//   - Do not infer MatchingFallback from Options.
-type solveMeta struct {
-	algorithm          Algorithm
-	exact              bool
-	optimal            bool
-	timedOut           bool
-	approximationRatio float64
-	matchingFallback   bool
-	iterations         int
-	nodesExpanded      int
-	warnings           []error
+//   - Do not store IDs here; ID validation belongs to the facade boundary.
+type preparedMatrix struct {
+	// dist is the final matrix consumed by solver kernels.
+	// It is either the original caller matrix or a detached metric-closure dense matrix.
+	dist matrix.Matrix
+
+	// n is the validated square matrix order.
+	// It is cached to avoid repeated Rows calls and argument drift.
+	n int
+
+	// metricClosureApplied records whether APSP closure produced dist.
+	// The facade publishes this value into TSPResult.
+	metricClosureApplied bool
 }
 
-// newSolveMeta returns conservative metadata for the selected final algorithm.
+// publishKernelResult attaches facade-owned metadata to a result-native solver output.
+// It is the only solver-level publisher used after kernels return canonical TSPResult.
+//
 // Implementation:
-//   - Stage 1: Record the final algorithm after Auto selection.
-//   - Stage 2: Mark exact algorithms.
-//   - Stage 3: Mark optimal only for exact algorithms on successful completion.
+//   - Stage 1: Return nil when the selected kernel returned nil.
+//   - Stage 2: Clone the kernel result to preserve ownership boundaries.
+//   - Stage 3: Attach stable matrix-index IDs.
+//   - Stage 4: Attach finalized facade policy and metric-closure metadata.
+//
+// Behavior highlights:
+//   - Does not recompute cost.
+//   - Does not canonicalize tour.
+//   - Preserves Exact, Optimal, TimedOut, ApproximationRatio, Iterations, and NodesExpanded.
+//   - Overrides Algorithm, Symmetric, MetricClosureApplied, and IDs at the facade boundary.
+//
+// Inputs:
+//   - result: result-native solver output.
+//   - ids: optional stable matrix-index labels validated by SolveMatrix.
+//   - opts: finalized solver options after Auto resolution.
+//   - metricClosureApplied: true when APSP closure was applied before solving.
+//
+// Returns:
+//   - *TSPResult: detached canonical facade result.
+//
+// Errors:
+//   - None. Inputs are assumed validated by caller-owned facade stages.
+//
+// Determinism:
+//   - Preserves Tour order exactly.
+//   - Preserves IDs order exactly.
 //
 // Complexity:
-//   - Time O(1), Space O(1).
-func newSolveMeta(algo Algorithm) solveMeta {
-	meta := solveMeta{
-		algorithm:          algo,
-		approximationRatio: NoApproximationRatio,
-	}
-
-	if algo == ExactHeldKarp || algo == BranchAndBound {
-		meta.exact = true
-		meta.optimal = true
-	}
-
-	return meta
-}
-
-// applyApprox attaches Christofides metadata observed by tspApproxWithMeta.
-// Implementation:
-//   - Stage 1: Copy proven approximation ratio.
-//   - Stage 2: Copy matching fallback flag.
-//   - Stage 3: Append warnings in stable order.
+//   - Time O(len(result.Tour)+len(ids)), Space O(len(result.Tour)+len(ids)).
 //
-// Complexity:
-//   - Time O(len(approx.warnings)), Space O(len(approx.warnings)).
-func (m *solveMeta) applyApprox(approx approxMeta) {
-	m.approximationRatio = approx.provenRatio
-	m.matchingFallback = approx.matchingFallback
-	m.warnings = append(m.warnings, approx.warnings...)
-}
-
-// trivialRing returns a canonical Hamiltonian cycle [start, start+1, …, n−1, 0, …, start]
-// with closure; it allocates exactly n+1 integers and performs no matrix lookups.
+// Notes:
+//   - This helper is a publishing boundary, not an algorithm.
+//   - Kernel metadata remains authoritative for exactness, optimality, timeout, ratio, and counters.
 //
-// Contracts:
-//   - 0 ≤ start < n; n ≥ 2.
-//
-// Complexity: O(n) time, O(n) space.
-func trivialRing(n int, start int) ([]int, error) {
-	if n < 2 {
-		return nil, ErrDimensionMismatch
-	}
-	if start < 0 || start >= n {
-		return nil, ErrStartOutOfRange
-	}
-	out := make([]int, n+1)
-
-	var (
-		i   int // loop iterator
-		pos = 0 // independent index of the entry into the resulting slice.
-	)
-
-	// Fill from start to n-1.
-	for i = start; i < n; i++ {
-		out[pos] = i
-		pos++
-	}
-	// Then wrap from 0 to start-1.
-	for i = 0; i < start; i++ {
-		out[pos] = i
-		pos++
+// AI-Hints:
+//   - Do not infer Optimal from Cost.
+//   - Do not clear timeout or search telemetry fields.
+//   - Do not attach live matrix, graph, or engine references to TSPResult.
+func publishKernelResult(result *TSPResult, ids []string, opts Options, metricClosureApplied bool) *TSPResult {
+	if result == nil {
+		return nil
 	}
 
-	// Close the cycle by returning to start.
-	out[n] = start
+	published := result.Clone()
+	published.Algorithm = opts.Algo
+	published.Symmetric = opts.Symmetric
+	published.MetricClosureApplied = metricClosureApplied
 
-	return out, nil
+	if ids != nil {
+		published.IDs = append([]string(nil), ids...)
+	} else {
+		published.IDs = nil
+	}
+
+	return published
 }
 
 // prepareSolverDistanceMatrix prepares direct matrix input for final TSP solver kernels.
@@ -188,32 +165,32 @@ func trivialRing(n int, start int) ([]int, error) {
 //     RunMetricClosure before delegating to direct matrix solving to avoid double closure.
 //
 // AI-Hints:
-//   - Do not replace this with “allow +Inf in validateAll”; that lets incomplete
-//     final TSP instances reach kernels.
-//   - Do not call matrix.InitDistancesInPlace here; direct matrix input already uses
-//     +Inf as the missing-edge sentinel, not raw 0-as-no-edge adjacency.
-func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matrix, bool, int, error) {
+//
+//	  final TSP instances reach kernels.
+//	- Do not call matrix.InitDistancesInPlace here; direct matrix input already uses
+//	  +Inf as the missing-edge sentinel, not raw 0-as-no-edge adjacency.
+func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (preparedMatrix, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
-		return nil, false, 0, err
+		return preparedMatrix{}, err
 	}
 
 	n, err := validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), false, symTol)
 	if err != nil {
-		return nil, false, 0, err
+		return preparedMatrix{}, err
 	}
 
 	if !opts.RunMetricClosure {
 		n, err = validateSolverDistanceMatrix(dist, mustEnforceSymmetry(opts), true, symTol)
 		if err != nil {
-			return nil, false, 0, err
+			return preparedMatrix{}, err
 		}
 
-		return dist, false, n, nil
+		return preparedMatrix{dist, n, false}, nil
 	}
 
 	closed, err := matrix.NewPreparedDense(n, n, matrix.WithAllowInfDistances())
 	if err != nil {
-		return nil, false, 0, errors.Join(ErrDimensionMismatch, err)
+		return preparedMatrix{}, errors.Join(ErrDimensionMismatch, err)
 	}
 
 	var (
@@ -225,7 +202,7 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 		for col = 0; col < n; col++ {
 			value, readErr = dist.At(row, col)
 			if readErr != nil {
-				return nil, false, 0, errors.Join(ErrDimensionMismatch, readErr)
+				return preparedMatrix{}, errors.Join(ErrDimensionMismatch, readErr)
 			}
 
 			if row == col {
@@ -233,28 +210,28 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 			}
 
 			if err = closed.Set(row, col, value); err != nil {
-				return nil, false, 0, errors.Join(ErrNaNInf, err)
+				return preparedMatrix{}, errors.Join(ErrNaNInf, err)
 			}
 		}
 	}
 
 	if err = matrix.APSPInPlace(closed); err != nil {
 		if errors.Is(err, matrix.ErrNegativeCycle) {
-			return nil, false, 0, errors.Join(ErrNegativeWeight, err)
+			return preparedMatrix{}, errors.Join(ErrNegativeWeight, err)
 		}
 		if errors.Is(err, matrix.ErrNaNInf) {
-			return nil, false, 0, errors.Join(ErrNaNInf, err)
+			return preparedMatrix{}, errors.Join(ErrNaNInf, err)
 		}
 
-		return nil, false, 0, err
+		return preparedMatrix{}, err
 	}
 
 	n, err = validateSolverDistanceMatrix(closed, mustEnforceSymmetry(opts), true, symTol)
 	if err != nil {
-		return nil, false, 0, err
+		return preparedMatrix{}, err
 	}
 
-	return closed, true, n, nil
+	return preparedMatrix{closed, n, true}, nil
 }
 
 // solvePreparedMatrix routes an already validated final distance matrix to one solver branch.
@@ -264,14 +241,14 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 //   - Stage 1: Dispatch by opts.Algo.
 //   - Stage 2: Run the chosen kernel.
 //   - Stage 3: Apply local-search post-pass where the selected policy permits it.
-//   - Stage 4: Canonicalize and validate the final tour.
+//   - Stage 4: Attach facade metadata to the result-native solver output.
 //   - Stage 5: Publish a detached TSPResult with canonical metadata.
 //
 // Behavior highlights:
 //   - Assumes prepareSolverDistanceMatrix and validateIDs already ran.
 //   - Does not run metric closure.
 //   - Does not mutate caller-owned matrix data.
-//   - Does not expose TSResult on the internal dispatcher boundary.
+//   - Does not expose reduced result projections on the internal dispatcher boundary.
 //
 // Inputs:
 //   - dist: final complete solver matrix.
@@ -285,7 +262,7 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 //   - error: sentinel-classified failure.
 //
 // Errors:
-//   - Kernel-specific sentinels from TSPApprox, TSPExact, TwoOpt, ThreeOpt, TSPBranchAndBound.
+//   - Kernel-specific sentinels from Christofides, Held-Karp, local search, and Branch-and-Bound.
 //   - ErrUnsupportedAlgorithm for unknown algorithm.
 //
 // Determinism:
@@ -298,107 +275,76 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (matrix.Matri
 // AI-Hints:
 //   - Do not call this from public code.
 //   - Do not add validation here except final invariant checks; public facades own validation.
-func solvePreparedMatrix(
-	dist matrix.Matrix,
-	ids []string,
-	opts Options,
-	n int,
-	metricClosureApplied bool,
-) (*TSPResult, error) {
-	meta := newSolveMeta(opts.Algo)
-
+func solvePreparedMatrix(prepared preparedMatrix, ids []string, opts Options) (*TSPResult, error) {
 	switch opts.Algo {
 	case Christofides:
-		// Christofides requires symmetric metric; validated in validateAll.
-		// 1) Build a feasible tour via tspApprox.
-		minimal, approx, err := tspApprox(dist, opts)
-		if err != nil {
+		result, err := christofides(prepared.dist, opts)
+		if result == nil {
 			return nil, err
 		}
-		meta.applyApprox(approx)
 
-		result := publishTSPResult(minimal, ids, opts, meta, metricClosureApplied)
-
-		if opts.EnableLocalSearch && n >= 4 {
-			local, localErr := twoOptKernel(dist, result.Tour, opts)
+		if opts.EnableLocalSearch && prepared.n >= 4 {
+			local, localErr := twoOptKernel(prepared.dist, result.Tour, opts)
 			if localErr != nil && !errors.Is(localErr, ErrTimeLimit) {
 				return nil, localErr
 			}
 			attachLocalSearchProgress(result, local)
 			if errors.Is(localErr, ErrTimeLimit) {
-				return result, ErrTimeLimit
+				return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), ErrTimeLimit
 			}
 
 			if opts.BestImprovement {
-				local, localErr = threeOptKernel(dist, result.Tour, opts, true)
+				local, localErr = threeOptKernel(prepared.dist, result.Tour, opts, true)
 				if localErr != nil && !errors.Is(localErr, ErrTimeLimit) {
 					return nil, localErr
 				}
 				attachLocalSearchProgress(result, local)
 				if errors.Is(localErr, ErrTimeLimit) {
-					return result, ErrTimeLimit
+					return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), ErrTimeLimit
 				}
 
-				local, localErr = twoOptKernel(dist, result.Tour, opts)
+				local, localErr = twoOptKernel(prepared.dist, result.Tour, opts)
 				if localErr != nil && !errors.Is(localErr, ErrTimeLimit) {
 					return nil, localErr
 				}
 				attachLocalSearchProgress(result, local)
 				if errors.Is(localErr, ErrTimeLimit) {
-					return result, ErrTimeLimit
+					return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), ErrTimeLimit
 				}
 			}
 		}
 
-		return result, nil
+		return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), nil
 
 	case ExactHeldKarp:
-		// Exact DP; no post-pass needed.
-		result, err := TSPExact(dist, opts)
-		if err != nil {
+		result, err := heldKarp(prepared.dist, opts)
+		if result == nil {
 			return nil, err
-
 		}
-		// Stabilize cost for cross-platform consistency.
-		result.Cost = round1e9(result.Cost)
 
-		return publishTSPResult(result, ids, opts, meta, metricClosureApplied), nil
+		return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), err
 
 	case TwoOptOnly:
-		// Build a canonical initial tour (deterministic), then run TwoOpt.
-		meta.optimal = false
-		base, err := trivialRing(n, opts.StartVertex)
+		base, err := trivialRing(prepared.n, opts.StartVertex)
 		if err != nil {
 			return nil, err
 		}
 
-		local, err := twoOptKernel(dist, base, opts)
-		if err != nil && !errors.Is(err, ErrTimeLimit) {
+		result, err := twoOptSearch(prepared.dist, base, opts)
+		if result == nil {
 			return nil, err
 		}
 
-		if !local.hasTour() {
-			return nil, err
-		}
-
-		result := publishLocalSearchResult(local, ids, opts, TwoOptOnly, metricClosureApplied)
-		if errors.Is(err, ErrTimeLimit) {
-			return result, ErrTimeLimit
-		}
-
-		return result, nil
+		return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), err
 
 	case ThreeOptOnly:
-		// Canonical initial tour; deterministic seed.
-		meta.optimal = false
-		base, err := trivialRing(n, opts.StartVertex)
+		base, err := trivialRing(prepared.n, opts.StartVertex)
 		if err != nil {
 			return nil, err
 		}
 
-		// Optional warm-up 2-opt pass (fast).
-		if opts.EnableLocalSearch && n >= 4 {
-			local, localErr := twoOptKernel(dist, base, opts)
+		if opts.EnableLocalSearch && prepared.n >= 4 {
+			local, localErr := twoOptKernel(prepared.dist, base, opts)
 			if localErr != nil && !errors.Is(localErr, ErrTimeLimit) {
 				return nil, localErr
 			}
@@ -406,112 +352,41 @@ func solvePreparedMatrix(
 				base = local.tour
 			}
 			if errors.Is(localErr, ErrTimeLimit) {
-				return publishLocalSearchResult(local, ids, opts, ThreeOptOnly, metricClosureApplied), ErrTimeLimit
-			}
-		}
-
-		// 3-opt with user-selected policy (first/best) and optional shuffle.
-		local, err := threeOptKernel(dist, base, opts, opts.BestImprovement)
-		if err != nil && !errors.Is(err, ErrTimeLimit) {
-			return nil, err
-		}
-		if !local.hasTour() {
-			return nil, err
-		}
-		result := publishLocalSearchResult(local, ids, opts, ThreeOptOnly, metricClosureApplied)
-		if errors.Is(err, ErrTimeLimit) {
-			return result, ErrTimeLimit
-		}
-
-		// Optional final 2-opt polish (cheap).
-		if opts.EnableLocalSearch && n >= 4 {
-			local, err = twoOptKernel(dist, result.Tour, opts)
-			if err != nil && !errors.Is(err, ErrTimeLimit) {
-				return nil, err
-			}
-
-			attachLocalSearchProgress(result, local)
-			if errors.Is(err, ErrTimeLimit) {
+				result := publishLocalSearchResult(local, ids, opts, ThreeOptOnly, prepared.metricClosureApplied)
 				return result, ErrTimeLimit
 			}
 		}
 
-		return result, nil
-
-	case BranchAndBound:
-		result, err := runBranchAndBoundResult(dist, opts)
+		result, err := threeOptSearch(prepared.dist, base, opts)
 		if result == nil {
 			return nil, err
 		}
 
-		return attachFacadeMetadata(result, ids, opts, metricClosureApplied), err
+		if opts.EnableLocalSearch && prepared.n >= 4 && !errors.Is(err, ErrTimeLimit) {
+			local, localErr := twoOptKernel(prepared.dist, result.Tour, opts)
+			if localErr != nil && !errors.Is(localErr, ErrTimeLimit) {
+				return nil, localErr
+			}
+
+			attachLocalSearchProgress(result, local)
+			if errors.Is(localErr, ErrTimeLimit) {
+				return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), ErrTimeLimit
+			}
+		}
+
+		return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), err
+
+	case BranchAndBound:
+		result, err := branchAndBound(prepared.dist, opts)
+		if result == nil {
+			return nil, err
+		}
+
+		return publishKernelResult(result, ids, opts, prepared.metricClosureApplied), err
 
 	default:
 		return nil, ErrUnsupportedAlgorithm
 	}
-}
-
-// attachFacadeMetadata returns a detached result enriched with facade-level metadata.
-// It is used when a lower-level kernel already publishes TSPResult directly, such as
-// Branch-and-Bound partial-result paths, and the facade still needs to attach IDs and
-// metric-closure facts.
-//
-// Implementation:
-//   - Stage 1: Return nil for a nil result.
-//   - Stage 2: Clone the kernel result to avoid mutating caller-visible state.
-//   - Stage 3: Attach matrix-index ordered IDs and finalized facade policy fields.
-//
-// Behavior highlights:
-//   - Preserves kernel-origin fields such as Optimal, TimedOut, and NodesExpanded.
-//   - Does not recompute cost or tour.
-//   - Does not clear warnings published by the kernel.
-//
-// Inputs:
-//   - result: kernel-published result.
-//   - ids: optional matrix-index ordered vertex IDs.
-//   - opts: finalized solver options used by the facade.
-//   - metricClosureApplied: true when APSP closure was applied before solving.
-//
-// Returns:
-//   - *TSPResult: detached enriched result, or nil when result is nil.
-//
-// Errors:
-//   - None. Inputs are assumed validated by the caller.
-//
-// Determinism:
-//   - Preserves Tour, Warnings, and IDs order exactly.
-//
-// Complexity:
-//   - Time O(len(Tour)+len(IDs)+len(Warnings)).
-//   - Space O(len(Tour)+len(IDs)+len(Warnings)).
-//
-// Notes:
-//   - This helper exists only for kernels that already return TSPResult.
-//   - Minimal TSResult projection must not be used to enrich partial results.
-//
-// AI-Hints:
-//   - Do not call Minimal here; partial-result metadata would be lost.
-//   - Do not mutate result in place; Clone preserves result ownership boundaries.
-func attachFacadeMetadata(
-	result *TSPResult,
-	ids []string,
-	opts Options,
-	metricClosureApplied bool,
-) *TSPResult {
-	if result == nil {
-		return nil
-	}
-
-	enriched := result.Clone()
-	enriched.Algorithm = opts.Algo
-	enriched.MetricClosureApplied = metricClosureApplied
-	enriched.Symmetric = opts.Symmetric
-
-	if ids != nil {
-		enriched.IDs = append([]string(nil), ids...)
-	}
-
-	return enriched
 }
 
 // finalizeSolverOptions resolves size-dependent solver policy after matrix validation.
@@ -523,7 +398,7 @@ func attachFacadeMetadata(
 // Behavior highlights:
 //   - Auto is explicit and opt-in.
 //   - Exact algorithms still keep their resource guards.
-//   - No hidden fallback happens when opts.Algo is not Auto.
+//   - No hidden algorithm substitution happens when opts.Algo is not Auto.
 //
 // Inputs:
 //   - n: validated matrix order.
@@ -687,12 +562,49 @@ func solveDegenerateIfAny(dist matrix.Matrix, ids []string, opts Options) (*TSPR
 		Cost:                 0,
 		IDs:                  append([]string(nil), ids...),
 		Algorithm:            finalOptions.Algo,
-		Optimal:              true,
 		Exact:                true,
+		Optimal:              true,
 		TimedOut:             false,
 		MetricClosureApplied: false,
 		Symmetric:            finalOptions.Symmetric,
 		ApproximationRatio:   NoApproximationRatio,
-		MatchingFallback:     false,
 	}, true, nil
+}
+
+// trivialRing returns a canonical Hamiltonian cycle [start, start+1, …, n−1, 0, …, start]
+// with closure; it allocates exactly n+1 integers and performs no matrix lookups.
+//
+// Contracts:
+//   - 0 ≤ start < n; n ≥ 2.
+//
+// Complexity: O(n) time, O(n) space.
+func trivialRing(n int, start int) ([]int, error) {
+	if n < 2 {
+		return nil, ErrDimensionMismatch
+	}
+	if start < 0 || start >= n {
+		return nil, ErrStartOutOfRange
+	}
+	out := make([]int, n+1)
+
+	var (
+		i   int // loop iterator
+		pos = 0 // independent index of the entry into the resulting slice.
+	)
+
+	// Fill from start to n-1.
+	for i = start; i < n; i++ {
+		out[pos] = i
+		pos++
+	}
+	// Then wrap from 0 to start-1.
+	for i = 0; i < start; i++ {
+		out[pos] = i
+		pos++
+	}
+
+	// Close the cycle by returning to start.
+	out[n] = start
+
+	return out, nil
 }

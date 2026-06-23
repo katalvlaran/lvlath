@@ -1,60 +1,55 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - Branch-and-Bound (exact search with admissible lower bounds).
+// Package tsp implements exact Branch-and-Bound search with admissible lower bounds.
 //
-// TSPBranchAndBound enumerates Hamiltonian cycles via a depth-first
-// Branch-and-Bound (BnB) search with deterministic branching, admissible
-// lower bounds, and a soft time budget. Both symmetric TSP and asymmetric
-// ATSP are supported.
+// Branch-and-Bound enumerates Hamiltonian cycles via deterministic depth-first
+// search, admissible pruning, and a governed soft time budget. Both symmetric TSP
+// and asymmetric TSP are supported.
 //
-// Rationale (succinct):
-//  1. Strict input shape and invariants are enforced by the dispatcher;
-//     here we prefetch the distance matrix into a dense buffer to remove
-//     interface overhead in hot loops.
-//  2. Optional seeding of an initial upper bound (UB): Christofides (+ 2-opt)
-//     for symmetric TSP, or a deterministic trivial ring polished by 2-opt*
-//     for ATSP. A good UB dramatically strengthens pruning.
+// Rationale:
+//  1. Strict input shape and invariants are enforced before search;
+//     the engine prefetches the distance matrix into a dense weightBuffer to remove
+//     matrix interface overhead from hot loops.
+//  2. Optional seeding of an initial upper bound (UB):
+//     Christofides may seed symmetric TSP; a deterministic trivial ring can seed
+//     all complete instances. A good UB strengthens pruning but never changes
+//     exactness or correctness.
 //     UB costs are stored unrounded inside the search state; display rounding
 //     happens only when publishing TSPResult.
-//  3. Search: DFS with a degree-1 relaxation lower bound (LB):
+//  3. Search uses DFS with a degree-1 relaxation lower bound:
 //     - For vertices whose outgoing edge is not yet fixed, add minOut[v].
 //     - For vertices whose incoming edge is not yet fixed, add minIn[v].
-//     - LB_extra = max( sum(minOut), sum(minIn) ).
-//     - LB = costSoFar + LB_extra. This bound is admissible (≤ OPT).
-//     Prune whenever LB ≥ UB − eps.
-//  4. Branching order: from the current “last”, try next vertices v in
-//     ascending w[last→v] (index tiebreak). This tightens UB early while
-//     remaining fully deterministic.
-//  5. Soft time limit: every DFS node checks the shared stopped flag and deadline.
-//     When the deadline expires, the whole recursion stops and a valid incumbent
-//     is returned as a governed partial result when available.
+//     - LB_extra = max(sum(minOut), sum(minIn)).
+//     - LB = costSoFar + LB_extra. This bound is admissible.
+//     The engine prunes whenever LB ≥ UB − eps.
+//  4. Branching order tries next vertices from the current last vertex in ascending
+//     edge cost with vertex-index tie-breaks. This tightens UB early while remaining
+//     fully deterministic.
+//  5. Soft time limit checks happen before DFS expansion. When the deadline expires,
+//     the engine stops the recursion and returns a valid incumbent as a governed
+//     partial result when available.
 //
 // Complexity:
-//   - Worst case exponential in n (exact search). Practical speed comes from pruning.
-//   - Per node: O(n) bound + O(1) state updates.
-//   - Memory: O(n) for the current path + O(n) for visited + O(n²) for precomputes
-//     (min-in/out, neighbor orders).
+//   - Worst-case exponential in n.
+//   - Per node: O(n) bound plus O(1) state updates.
+//   - Memory: O(n) current path + O(n) visited + O(n²) precomputes
+//     for min-in/out and neighbor orders.
 //
 // Governance:
 //   - Options.BoundAlgo:
-//     NoBound      → disables the lower bound (testing only).
-//     SimpleBound  → degree-1 relaxation (implemented here).
-//     OneTreeBound → root-only Held–Karp (1-tree) bound; see bound_onetree.go.
-
+//     NoBound      → disables the lower bound for tests and controlled benchmarks.
+//     SimpleBound  → degree-1 relaxation implemented in this file.
+//     OneTreeBound → Held-Karp 1-tree lower bound implemented in bound_onetree.go.
 package tsp
 
 import (
+	"errors"
 	"math"
 	"sort"
 	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
-)
-
-const (
-	// branchAndBoundNoIncumbent marks that no feasible Hamiltonian cycle has been recorded.
-	branchAndBoundNoIncumbent = -1.0
 )
 
 // bbEngine holds all search data and policies.
@@ -242,9 +237,36 @@ func (e *bbEngine) tourCost(tour []int) (float64, error) {
 	return sum, nil
 }
 
-// precomputeMinima computes per-vertex minOut/minIn excluding self-loops.
-// If any vertex has no finite outgoing or incoming edge to other vertices,
-// the instance is infeasible for TSP/ATSP and we return ErrIncompleteGraph.
+// precomputeMinima computes minimal incoming and outgoing edge costs for every vertex.
+// These arrays feed the degree-1 relaxation lower bound used by DFS pruning.
+//
+// Implementation:
+//   - Stage 1: Allocate minOut and minIn arrays.
+//   - Stage 2: For every vertex, scan all non-self outgoing and incoming arcs.
+//   - Stage 3: Reject the instance when any vertex has no finite in/out candidate.
+//
+// Behavior highlights:
+//   - Uses the detached weightBuffer only.
+//   - Excludes self-loops.
+//   - Stores raw costs without rounding.
+//
+// Inputs:
+//   - None; reads e.n and e.weights.
+//
+// Returns:
+//   - error: nil when every vertex has at least one finite in/out candidate.
+//
+// Errors:
+//   - ErrIncompleteGraph when a vertex cannot enter or leave any Hamiltonian cycle.
+//
+// Determinism:
+//   - Fixed vertex and neighbor scan order.
+//
+// Complexity:
+//   - Time O(n^2), Space O(n).
+//
+// AI-Hints:
+//   - Do not include self-loops in minima; they are not valid Hamiltonian edges.
 func (e *bbEngine) precomputeMinima() error {
 	var (
 		inf    = math.Inf(1)
@@ -299,8 +321,36 @@ func (no neighborOrder) Less(i, j int) bool {
 }
 func (no *neighborOrder) Swap(i, j int) { no.row[i], no.row[j] = no.row[j], no.row[i] }
 
-// buildNeighborOrder produces, for each u, the list of v≠u sorted by ascending w[u→v]
-// (and then by v). Deterministic branching reduces UB time-to-tighten and keeps runs reproducible.
+// buildNeighborOrder precomputes deterministic DFS branch order for every vertex.
+// Each row contains all non-self vertices sorted by ascending edge cost and then by
+// vertex index to make equal-cost runs reproducible.
+//
+// Implementation:
+//   - Stage 1: Allocate one neighbor row per source vertex.
+//   - Stage 2: Fill each row with all v != u.
+//   - Stage 3: Sort through neighborOrder using weight then index tie-break.
+//
+// Behavior highlights:
+//   - Does not mutate weights.
+//   - Improves time-to-tight-incumbent without changing exactness.
+//
+// Inputs:
+//   - None; reads e.n and e.weights.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Stable policy through cost comparison and vertex-index tie-break.
+//
+// Complexity:
+//   - Time O(n^2 log n), Space O(n^2).
+//
+// AI-Hints:
+//   - Do not replace this with map-based ordering.
 func (e *bbEngine) buildNeighborOrder() {
 	var u, v int
 	e.order = make([][]int, e.n)
@@ -320,44 +370,256 @@ func (e *bbEngine) buildNeighborOrder() {
 // recordUB commits a new incumbent upper bound without rounding its cost.
 // The bound participates in pruning, so cost must remain the raw accumulated
 // value; round1e9 is applied only when publishing TSPResult.
+//
+// Implementation:
+//   - Stage 1: Copy the candidate tour into the engine-owned incumbent buffer.
+//   - Stage 2: Store raw search cost as the active upper bound.
+//   - Stage 3: Mark that a feasible Hamiltonian cycle exists.
+//
+// Behavior highlights:
+//   - Does not allocate beyond the destination slice already owned by the engine.
+//   - Does not round bestCost.
+//   - Does not validate the tour; callers must validate or compute cost before committing.
+//
+// Inputs:
+//   - tour: validated closed Hamiltonian cycle.
+//   - cost: raw unrounded tour cost.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Copies the deterministic candidate order exactly.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - This is a pruning-state update, not result publication.
+//
+// AI-Hints:
+//   - Do not call round1e9 here; rounded upper bounds can change pruning decisions.
+//   - Do not store caller-owned tour slices directly.
 func (e *bbEngine) recordUB(tour []int, cost float64) {
 	copy(e.bestTour, tour)
 	e.bestCost = cost
 	e.foundAny = true
 }
 
-// seedUB optionally initializes UB via heuristics to accelerate pruning.
-// Symmetric: Christofides (+ optional 2-opt). If still no UB, fall back to a
-// canonical trivial ring with validation and optional TwoOpt(*/2-opt*) polishing.
+// tryRecordSeedTour validates a candidate seed tour and records it as incumbent.
+// It is a small guard helper used by all Branch-and-Bound seeding paths so raw
+// upper-bound semantics stay identical.
+//
+// Implementation:
+//   - Stage 1: Compute raw engine cost through e.tourCost.
+//   - Stage 2: Record the tour only when it is feasible under the engine weight buffer.
+//
+// Behavior highlights:
+//   - Non-fatal: invalid seed candidates are ignored.
+//   - Preserves raw unrounded cost.
+//   - Does not mutate the candidate tour.
+//
+// Inputs:
+//   - tour: candidate closed Hamiltonian cycle.
+//
+// Returns:
+//   - bool: true when the seed became the active incumbent.
+//
+// Errors:
+//   - None. Feasibility failures are intentionally swallowed because seeding is optional.
+//
+// Determinism:
+//   - Deterministic for a fixed tour and weight buffer.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - Search correctness never depends on this helper succeeding.
+//
+// AI-Hints:
+//   - Use this helper instead of duplicating e.tourCost + e.recordUB pairs.
+func (e *bbEngine) tryRecordSeedTour(tour []int) bool {
+	cost, err := e.tourCost(tour)
+	if err != nil {
+		return false
+	}
+
+	e.recordUB(tour, cost)
+
+	return true
+}
+
+// trySeedWithChristofides attempts a symmetric Christofides incumbent.
+// It is exact-search acceleration only: failure to seed never changes correctness,
+// exactness, or the final error returned by Branch-and-Bound.
+//
+// Implementation:
+//   - Stage 1: Reject asymmetric engines because Christofides requires symmetric input.
+//   - Stage 2: Force the seed policy to Christofides.
+//   - Stage 3: Run the result-native Christofides kernel.
+//   - Stage 4: Record the returned feasible tour as raw B&B upper bound.
+//
+// Behavior highlights:
+//   - Non-fatal.
+//   - Does not call public wrappers.
+//   - Does not use rounded public cost as UB.
+//
+// Inputs:
+//   - dist: same final complete matrix consumed by Branch-and-Bound.
+//   - opts: finalized Branch-and-Bound options.
+//
+// Returns:
+//   - bool: true when a Christofides seed was recorded.
+//
+// Errors:
+//   - None. Seed errors are intentionally ignored.
+//
+// Determinism:
+//   - Deterministic because Christofides and tour-cost validation are deterministic.
+//
+// Complexity:
+//   - Time O(n^2) plus matching complexity.
+//   - Space follows Christofides matching and Eulerian stages.
+//
+// Notes:
+//   - This helper is an incumbent initializer, not a solver fallback.
+//
+// AI-Hints:
+//   - Keep seedOptions.Algo=Christofides explicit.
+//   - Do not call greedy matching unless opts.MatchingAlgo explicitly selects it.
+func (e *bbEngine) trySeedWithChristofides(dist matrix.Matrix, opts Options) bool {
+	if !e.symmetric {
+		return false
+	}
+
+	seedOptions := opts
+	seedOptions.Algo = Christofides
+	seedOptions.Symmetric = true
+	seedOptions.RunMetricClosure = false
+
+	result, err := christofides(dist, seedOptions)
+	if err != nil || result == nil {
+		return false
+	}
+
+	return e.tryRecordSeedTour(result.Tour)
+}
+
+// trySeedWithTrivialRing records the canonical ring and optionally improves it.
+// This path works for symmetric and asymmetric complete matrices because 2-opt uses
+// symmetric reversal or ATSP 2-opt* according to opts.Symmetric.
+//
+// Implementation:
+//   - Stage 1: Build the deterministic closed ring from e.start.
+//   - Stage 2: Record the ring if feasible.
+//   - Stage 3: Optionally run twoOptKernel and record its feasible result.
+//   - Stage 4: Accept timeout-local results as seeds when they contain a valid tour.
+//
+// Behavior highlights:
+//   - Non-fatal.
+//   - Deterministic when local search uses deterministic policy.
+//   - Uses raw engine tour cost for UB even when the local-search result cost is rounded.
+//
+// Inputs:
+//   - dist: same final complete matrix consumed by Branch-and-Bound.
+//   - opts: finalized Branch-and-Bound options.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None. Seed construction/improvement failures are intentionally ignored.
+//
+// Determinism:
+//   - Trivial ring order is fixed.
+//   - 2-opt scan order is fixed unless future policy explicitly changes it.
+//
+// Complexity:
+//   - Ring seed O(n).
+//   - Optional 2-opt seed O(iter*n^2).
+//
+// Notes:
+//   - The base ring remains useful even when 2-opt fails or times out.
+//
+// AI-Hints:
+//   - Do not treat ErrTimeLimit from twoOptKernel as fatal when local.hasTour() is true.
+//   - Do not use local.cost as the B&B UB; recompute raw cost through e.tourCost.
+func (e *bbEngine) trySeedWithTrivialRing(dist matrix.Matrix, opts Options) {
+	base, err := trivialRing(e.n, e.start)
+	if err != nil {
+		return
+	}
+
+	e.tryRecordSeedTour(base)
+
+	if !opts.EnableLocalSearch || e.n < 4 {
+		return
+	}
+
+	local, improveErr := twoOptKernel(dist, base, opts)
+	if improveErr != nil && !errors.Is(improveErr, ErrTimeLimit) {
+		return
+	}
+	if !local.hasTour() {
+		return
+	}
+
+	e.tryRecordSeedTour(local.tour)
+}
+
+// seedUB initializes the incumbent upper bound used by Branch-and-Bound pruning.
+// A strong incumbent shrinks the DFS tree, but every seed path is optional and
+// cannot change the mathematical correctness of exact search.
+//
+// Implementation:
+//   - Stage 1: Reset incumbent state to no feasible tour.
+//   - Stage 2: Try a symmetric Christofides seed when mathematically allowed.
+//   - Stage 3: Fall back to the deterministic trivial ring.
+//   - Stage 4: Optionally improve the ring through result-preserving 2-opt.
+//
+// Behavior highlights:
+//   - Non-fatal by design.
+//   - Stores raw unrounded costs for pruning.
+//   - Keeps result publication separate from incumbent management.
+//
+// Inputs:
+//   - dist: final complete matrix consumed by Branch-and-Bound.
+//   - opts: finalized solver policy.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None. Seeding failures are intentionally ignored.
+//
+// Determinism:
+//   - Deterministic for TimeLimit==0 and deterministic local-search policy.
+//
+// Complexity:
+//   - Christofides seed: O(n^2) plus matching complexity.
+//   - Trivial ring: O(n).
+//   - Optional 2-opt seed: O(iter*n^2).
+//
+// Notes:
+//   - Exact search remains correct even if no seed is recorded.
+//
+// AI-Hints:
+//   - Do not let seed errors escape from this method.
+//   - Do not round incumbent costs before pruning completes.
 func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 	e.bestCost = math.Inf(1)
 	e.bestTour = make([]int, e.n+1)
+	e.foundAny = false
 
-	// Symmetric seed - Christofides; safe fallbacks are handled inside TSPApprox.
-	if opts.Symmetric {
-		if res, err := TSPApprox(dist, opts); err == nil {
-			if cost, costErr := e.tourCost(res.Tour); costErr == nil {
-				e.recordUB(res.Tour, cost)
-			}
-		}
+	if e.trySeedWithChristofides(dist, opts) {
+		return
 	}
 
-	// If UB is still +Inf, try a deterministic trivial ring (then optional 2-opt).
-	if math.IsInf(e.bestCost, 0) {
-		base, berr := trivialRing(e.n, e.start)
-		if berr == nil {
-			if c0, cerr := e.tourCost(base); cerr == nil {
-				e.recordUB(base, c0)
-				if opts.EnableLocalSearch && e.n >= 4 {
-					if improvedTour, _, improveErr := TwoOpt(dist, base, opts); improveErr == nil {
-						if improvedCost, improvedCostErr := e.tourCost(improvedTour); improvedCostErr == nil {
-							e.recordUB(improvedTour, improvedCost)
-						}
-					}
-				}
-			}
-		}
-	}
+	e.trySeedWithTrivialRing(dist, opts)
 }
 
 // lowerBound implements the degree-1 relaxation (admissible for TSP/ATSP).
@@ -368,7 +630,7 @@ func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 //	LB_extra ≥ max( sum(minOut over out-unfixed), sum(minIn over in-unfixed) )
 //
 // and LB = costSoFar + LB_extra is a valid lower bound on any completion.
-func (e *bbEngine) lowerBound(costSoFar float64, last int, depth int) float64 {
+func (e *bbEngine) lowerBound(costSoFar float64, last int) float64 {
 	if !e.useBound {
 		return costSoFar // NoBound policy (for testing/benchmarking).
 	}
@@ -438,7 +700,43 @@ func (e *bbEngine) commit(total float64) {
 	e.foundAny = true
 }
 
-// dfs performs the core search: deterministic branching + pruning by LB ≥ UB − eps.
+// dfs explores Hamiltonian path completions with deterministic Branch-and-Bound.
+// It mutates only engine-owned path and visited state and records better incumbents
+// through commit when a full cycle improves the upper bound.
+//
+// Implementation:
+//   - Stage 1: Stop immediately on global timeout state.
+//   - Stage 2: Check deadline and count the node expansion.
+//   - Stage 3: Prune when the admissible lower bound cannot beat the incumbent.
+//   - Stage 4: Close a full-depth path into a Hamiltonian cycle.
+//   - Stage 5: Recurse over precomputed neighbor order with backtracking.
+//
+// Behavior highlights:
+//   - Exact DFS enumeration with pruning.
+//   - Missing closing arcs are rejected defensively.
+//   - Backtracking restores visited state before returning.
+//
+// Inputs:
+//   - last: current path tail.
+//   - depth: number of vertices currently in path.
+//   - costSoFar: raw unrounded partial path cost.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None. Search state stores timeout and incumbents internally.
+//
+// Determinism:
+//   - Branch order is precomputed and stable.
+//
+// Complexity:
+//   - Worst-case O(n!) nodes.
+//   - Per node O(n) lower-bound work plus branching overhead.
+//
+// AI-Hints:
+//   - Do not increment NodesExpanded for pruned children that were never entered.
+//   - Do not continue sibling recursion after e.stopped becomes true.
 func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 	if e.stopped {
 		return
@@ -450,7 +748,7 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 	e.nodesExpanded++
 
 	// Prune by lower bound.
-	if lb := e.lowerBound(costSoFar, last, depth); lb >= e.bestCost-e.eps {
+	if lb := e.lowerBound(costSoFar, last); lb >= e.bestCost-e.eps {
 		return
 	}
 
@@ -526,66 +824,7 @@ func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
 	}
 }
 
-// BranchAndBoundSolve runs exact Branch-and-Bound search and publishes TSPResult directly.
-// It is the canonical BnB entrypoint for callers that need timeout, exactness, and
-// search telemetry metadata without going through SolveMatrix.
-//
-// Implementation:
-//   - Stage 1: Delegate to the result-native Branch-and-Bound engine.
-//   - Stage 2: Return the canonical result unchanged.
-//
-// Behavior highlights:
-//   - Full completion returns Exact=true and Optimal=true.
-//   - Timeout with a feasible incumbent returns a non-nil partial result and ErrTimeLimit.
-//   - Timeout without an incumbent returns nil and ErrTimeLimit.
-//
-// Inputs:
-//   - dist: final complete TSP/ATSP distance matrix.
-//   - opts: finalized or caller-provided BnB policy.
-//
-// Returns:
-//   - *TSPResult: optimal or partial result.
-//   - error: nil on full completion, ErrTimeLimit for partial timeout, or validation sentinel.
-//
-// Errors:
-//   - ErrTimeLimit if a positive time budget is exceeded.
-//   - ErrIncompleteGraph if no Hamiltonian cycle exists (or all closures are +Inf).
-//   - Strict validation sentinels for malformed inputs (see types.go).
-//
-// Determinism:
-//   - Branching order is sorted by edge weight and vertex index.
-//
-// Complexity:
-//   - Worst-case exponential time, O(n^2) precompute space plus O(n) search state.
-//
-// Notes:
-//   - Use SolveMatrix when IDs or metric closure must be attached by the facade.
-//
-// AI-Hints:
-//   - Do not project this result to TSResult before checking TimedOut and NodesExpanded.
-//   - Do not mark timed-out partial results as Optimal.
-func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
-	return runBranchAndBoundResult(dist, opts)
-}
-
-// TSPBranchAndBound is the legacy entrypoint for exact BnB search.
-// It returns only the minimal TSResult projection and therefore discards partial-result
-// metadata such as TimedOut and NodesExpanded.
-//
-// Deprecated: use BranchAndBoundSolve or SolveMatrix.
-func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
-	result, err := BranchAndBoundSolve(dist, opts)
-	if err != nil {
-		return TSResult{}, err
-	}
-	if result == nil {
-		return TSResult{}, nil
-	}
-
-	return result.Minimal(), nil
-}
-
-// runBranchAndBoundResult executes exact Branch-and-Bound and can publish partial timeout results.
+// branchAndBound executes exact Branch-and-Bound and can publish partial timeout results.
 // Implementation:
 //   - Stage 1: Validate options, matrix, and start vertex.
 //   - Stage 2: Initialize dense engine buffers and deterministic branching order.
@@ -596,7 +835,7 @@ func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
 // Behavior highlights:
 //   - Exact when completed without timeout.
 //   - On timeout, returns a partial TSPResult only if a feasible incumbent exists.
-//   - Legacy wrappers may discard partial metadata, but canonical SolveMatrix preserves it.
+//   - Canonical callers preserve timeout and search telemetry metadata.
 //
 // Inputs:
 //   - dist: final complete TSP/ATSP distance matrix.
@@ -624,7 +863,7 @@ func TSPBranchAndBound(dist matrix.Matrix, opts Options) (TSResult, error) {
 // AI-Hints:
 //   - Do not clear a valid incumbent on timeout.
 //   - Do not mark timed-out results as Optimal.
-func runBranchAndBoundResult(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func branchAndBound(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
 	}

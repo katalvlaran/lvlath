@@ -50,7 +50,12 @@ import (
 //   - Do not expose weightBuffer from public APIs.
 //   - Do not mutate w after construction; kernels treat it as read-only.
 type weightBuffer struct {
+	// n is the square matrix order.
+	// Every valid index must be in [0,n).
 	n int
+
+	// w stores detached row-major weights.
+	// w[u*n+v] is the directed distance from u to v.
 	w []float64
 }
 
@@ -244,24 +249,43 @@ func copyWeightsWithMode(dist matrix.Matrix, symmetric bool, complete bool) (wei
 		col     int
 		value   float64
 		readErr error
+		offset  int
 	)
+
 	for row = 0; row < n; row++ {
 		for col = 0; col < n; col++ {
 			value, readErr = dist.At(row, col)
 			if readErr != nil {
 				return weightBuffer{}, errors.Join(ErrDimensionMismatch, readErr)
 			}
+
 			if math.IsNaN(value) || math.IsInf(value, -1) {
 				return weightBuffer{}, errors.Join(ErrNaNInf, matrix.ErrNaNInf)
 			}
-			if complete && math.IsInf(value, 1) && row != col {
-				return weightBuffer{}, ErrIncompleteGraph
-			}
-			if row != col && value < 0 {
-				return weightBuffer{}, ErrNegativeWeight
+
+			offset = row*n + col
+
+			if row == col {
+				if math.IsInf(value, 1) {
+					return weightBuffer{}, ErrNonZeroDiagonal
+				}
+				if math.Abs(value) > symTol {
+					return weightBuffer{}, ErrNonZeroDiagonal
+				}
+
+				buffer.w[offset] = 0
+
+				continue
 			}
 
-			buffer.w[row*n+col] = value
+			if value < 0 {
+				return weightBuffer{}, ErrNegativeWeight
+			}
+			if complete && math.IsInf(value, 1) {
+				return weightBuffer{}, ErrIncompleteGraph
+			}
+
+			buffer.w[offset] = value
 		}
 	}
 

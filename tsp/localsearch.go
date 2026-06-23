@@ -58,7 +58,7 @@ var localSearchNow = time.Now
 
 // localSearchResult carries the internal result of a local-search kernel.
 // It is intentionally private because canonical public callers consume TSPResult,
-// while legacy wrappers project back to tour/cost.
+// while public callers consume canonical TSPResult metadata.
 //
 // Implementation:
 //   - Stage 1: Kernels fill tour, cost, and iteration count after successful finalization.
@@ -93,10 +93,21 @@ var localSearchNow = time.Now
 //   - Do not expose localSearchResult in public APIs.
 //   - Do not publish timedOut local results as Optimal=true.
 type localSearchResult struct {
-	tour       []int
-	cost       float64
+	// tour is a detached closed Hamiltonian cycle produced by the local-search kernel.
+	// It is empty only when no valid current result exists.
+	tour []int
+
+	// cost is the stabilized round1e9 cost of tour.
+	// It is not used to prove optimality.
+	cost float64
+
+	// iterations counts accepted improving moves.
+	// It does not count candidate evaluations.
 	iterations int
-	timedOut   bool
+
+	// timedOut reports that the local-search deadline stopped the kernel.
+	// When true and tour is non-empty, the result is a governed partial result.
+	timedOut bool
 }
 
 // hasTour reports whether the local-search result carries a usable tour snapshot.
@@ -257,7 +268,6 @@ func publishLocalSearchResult(
 		MetricClosureApplied: metricClosureApplied,
 		Symmetric:            opts.Symmetric,
 		ApproximationRatio:   NoApproximationRatio,
-		MatchingFallback:     false,
 		Iterations:           local.iterations,
 	}
 }
@@ -272,7 +282,7 @@ func publishLocalSearchResult(
 //   - Stage 3: Add iterations and propagate timeout status.
 //
 // Behavior highlights:
-//   - Preserves approximation and matching metadata unless timed out.
+//   - Preserves approximation metadata unless timed out.
 //   - On timeout, Optimal is cleared because the refinement did not complete.
 //   - Does not mutate local.tour.
 //
@@ -294,10 +304,10 @@ func publishLocalSearchResult(
 //
 // Notes:
 //   - A timed-out local refinement still owns a valid tour and cost.
-//   - ApproximationRatio remains metadata of the pre-refinement construction unless fallback rules clear it.
+//   - ApproximationRatio remains metadata of the pre-refinement construction.
 //
 // AI-Hints:
-//   - Do not clear MatchingFallback or Warnings here.
+//   - Do not clear approximation metadata here; local search improves a feasible route but does not prove a new ratio.
 //   - Do not drop partial local-search progress on ErrTimeLimit.
 func attachLocalSearchProgress(result *TSPResult, local localSearchResult) {
 	if result == nil || !local.hasTour() {

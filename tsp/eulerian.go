@@ -171,3 +171,84 @@ func packUndirectedKey(u, v int) uint64 {
 
 	return (b << 32) | a
 }
+
+// ShortcutEulerianToHamiltonian converts an Eulerian vertex sequence (with revisits)
+// into a Hamiltonian cycle by skipping the first revisits and then closing the tour.
+// This is the standard “shortcutting” step in Christofides:
+//
+//	Input:  euler - a vertex sequence of arbitrary length (often O(E)).
+//	        n     - number of unique vertices (0..n-1).
+//	        start - required starting vertex of the resulting tour.
+//
+// Algorithm:
+//   - Maintain a visited[n] boolean array.
+//   - Scan euler left-to-right; append a vertex v the first time it is seen.
+//   - After the scan, ensure every vertex 0..n-1 was seen exactly once.
+//   - Rotate the resulting n-length cycle so it starts at `start` and close it.
+//
+// Contracts:
+//   - 0 ≤ v < n for every v ∈ euler; otherwise ErrDimensionMismatch.
+//   - start ∈ [0..n-1].
+//
+// Returns:
+//   - tour of length n+1 with tour[0]==tour[n]==start,
+//   - ErrDimensionMismatch if euler misses some vertices or has out-of-range entries,
+//   - ErrStartOutOfRange if start is invalid.
+//
+// Complexity: O(len(euler) + n) time, O(n) space.
+func ShortcutEulerianToHamiltonian(euler []int, n int, start int) ([]int, error) {
+	if n <= 0 {
+		return nil, ErrDimensionMismatch
+	}
+	if start < 0 || start >= n {
+		return nil, ErrStartOutOfRange
+	}
+
+	visited := make([]bool, n)
+	cycle := make([]int, 0, n) // collect first occurrences
+
+	var (
+		idx int
+		v   int
+	)
+	for idx = 0; idx < len(euler); idx++ {
+		v = euler[idx]
+		if v < 0 || v >= n {
+			return nil, ErrDimensionMismatch
+		}
+		if !visited[v] {
+			visited[v] = true
+			cycle = append(cycle, v)
+		}
+	}
+
+	// Ensure all vertices were seen exactly once.
+	if len(cycle) != n {
+		return nil, ErrDimensionMismatch
+	}
+	var i int
+	for i = 0; i < n; i++ {
+		if !visited[i] {
+			return nil, ErrDimensionMismatch
+		}
+	}
+
+	// Rotate to start and close.
+	var p = -1
+	for i = 0; i < n; i++ {
+		if cycle[i] == start {
+			p = i
+			break
+		}
+	}
+	if p == -1 {
+		return nil, ErrDimensionMismatch
+	}
+
+	tour := make([]int, n+1)
+	for i = 0; i < n; i++ {
+		tour[i] = cycle[(p+i)%n]
+	}
+	tour[n] = start
+	return tour, nil
+}

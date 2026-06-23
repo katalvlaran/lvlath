@@ -28,21 +28,71 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// TwoOpt runs deterministic first-improvement 2-opt / 2-opt* starting from initTour.
-// It is the compatibility wrapper over twoOptKernel and returns only tour/cost.
-func TwoOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	local, err := twoOptKernel(dist, initTour, opts)
-	if local.hasTour() {
-		return append([]int(nil), local.tour...), local.cost, err
+// twoOptSearch runs 2-opt local search and publishes canonical result metadata.
+//
+// Implementation:
+//   - Stage 1: Force the internal algorithm identity to TwoOptOnly.
+//   - Stage 2: Run twoOptKernel to validate input and improve the current tour.
+//   - Stage 3: Publish localSearchResult as TSPResult without IDs or metric-closure metadata.
+//   - Stage 4: Preserve ErrTimeLimit when a valid current tour exists.
+//
+// Behavior highlights:
+//   - Never claims exactness or global optimality.
+//   - Returns a non-nil result with ErrTimeLimit when the kernel has a valid current tour.
+//   - Does not mutate initTour.
+//
+// Inputs:
+//   - dist: complete final solver matrix.
+//   - initTour: closed Hamiltonian cycle.
+//   - opts: local-search policy.
+//
+// Returns:
+//   - *TSPResult: improved or timeout-current tour result.
+//   - error: nil or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - ErrNilTour, ErrInvalidTour.
+//   - Matrix validation sentinels.
+//   - ErrTimeLimit with non-nil result when timeout happens after a valid current tour exists.
+//
+// Determinism:
+//   - Fixed candidate scan order unless the kernel explicitly supports shuffled neighborhoods.
+//
+// Complexity:
+//   - Time O(iterations*n^2), Space O(n).
+//
+// Notes:
+//   - IDs and metric closure metadata are attached only by SolveMatrix.
+//
+// AI-Hints:
+//   - Do not publish Exact=true or Optimal=true.
+//   - Do not drop timeout results when local.hasTour() is true.
+func twoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+	solverOptions := opts
+	solverOptions.Algo = TwoOptOnly
+
+	local, err := twoOptKernel(dist, initTour, solverOptions)
+	if err != nil {
+		if errors.Is(err, ErrTimeLimit) && local.hasTour() {
+			result := publishLocalSearchResult(local, nil, solverOptions, TwoOptOnly, false)
+			return result, ErrTimeLimit
+		}
+
+		return nil, err
+	}
+	if !local.hasTour() {
+		return nil, ErrInvalidTour
 	}
 
-	return nil, 0, err
+	return publishLocalSearchResult(local, nil, solverOptions, TwoOptOnly, false), nil
 }
 
 // twoOptKernel runs deterministic first-improvement 2-opt / 2-opt* and returns

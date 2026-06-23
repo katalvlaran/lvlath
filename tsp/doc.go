@@ -115,8 +115,7 @@
 // # Matching Law
 //
 //   - BlossomMatch attempts true MWPM.
-//   - If Blossom/MWPM is unavailable, Christofides returns ErrMatchingUnavailable
-//     unless Options.MatchingFallbackPolicy == MatchingFallbackGreedy.
+//   - BlossomMatch is exact MWPM; it does not use size-based refusal or hidden greedy substitution.
 //   - Greedy fallback keeps the pipeline deterministic and feasible when finite edges exist,
 //     but clears the formal 1.5 approximation guarantee.
 //   - MatchingFallback, ApproximationRatio, and fallback Warnings are populated from

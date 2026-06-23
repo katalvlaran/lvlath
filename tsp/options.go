@@ -9,54 +9,6 @@ package tsp
 
 import "time"
 
-// MatchingFallbackPolicy controls what Christofides does when the requested
-// minimum-weight perfect matching engine is unavailable.
-//
-// Implementation:
-//   - Stage 1: The Christofides kernel asks the selected MatchingAlgo for a matching.
-//   - Stage 2: If Blossom/MWPM is unavailable, this policy decides whether to fail
-//     or explicitly degrade to deterministic greedy matching.
-//   - Stage 3: When greedy fallback is used, TSPResult clears the formal ratio and
-//     records ErrMatchingFallback as a warning.
-//
-// Behavior highlights:
-//   - Fallback is explicit policy, not a hidden rescue path.
-//   - MatchingFallbackReject is the safe default.
-//   - MatchingFallbackGreedy keeps the pipeline feasible but removes the 1.5 guarantee.
-//
-// Inputs:
-//   - Used through Options.MatchingFallbackPolicy.
-//
-// Returns:
-//   - No direct return value; consumed by Christofides matching dispatch.
-//
-// Errors:
-//   - Invalid enum values are rejected by validateOptionsStandalone with ErrInvalidOptions.
-//
-// Determinism:
-//   - Policy selection is deterministic and does not depend on runtime state.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - This policy is meaningful when MatchingAlgo==BlossomMatch and exact MWPM is unavailable
-//     for the current odd-set size.
-//   - Explicit GreedyMatch is not considered a fallback; it is the selected weaker algorithm.
-//
-// AI-Hints:
-//   - Do not silently fallback from BlossomMatch to GreedyMatch without this policy.
-//   - Do not keep ChristofidesApproximationRatio when greedy fallback is used.
-type MatchingFallbackPolicy int
-
-const (
-	// MatchingFallbackReject returns ErrMatchingUnavailable when exact MWPM cannot run.
-	MatchingFallbackReject MatchingFallbackPolicy = iota
-
-	// MatchingFallbackGreedy allows deterministic greedy matching as a non-fatal degradation.
-	MatchingFallbackGreedy
-)
-
 const (
 	// DefaultEps is the minimal strictly-better improvement accepted by local search.
 	// A candidate move is accepted only when delta < -DefaultEps under default options.
@@ -75,7 +27,7 @@ const (
 	// DefaultMaxExactN is the opt-in Auto-policy cap for exact Held-Karp selection.
 	DefaultMaxExactN = MaxExactN
 
-	// NoApproximationRatio marks solvers or fallback modes with no proven ratio.
+	// NoApproximationRatio marks solvers or weaker explicit modes with no proven ratio.
 	NoApproximationRatio = 0.0
 
 	// ChristofidesApproximationRatio is the formal ratio only when true MWPM is used.
@@ -83,25 +35,25 @@ const (
 )
 
 // Options defines explicit solver policy for TSP and ATSP algorithms.
-// Use DefaultOptions and override fields; the zero value is intentionally not a
-// complete production policy because several enum fields need explicit defaults.
 //
 // Implementation:
-//   - Stage 1: DefaultOptions builds a complete safe policy.
+//   - Stage 1: DefaultOptions builds a complete deterministic policy.
 //   - Stage 2: validateOptionsStandalone rejects invalid numeric knobs and enum values.
-//   - Stage 3: finalizeSolverOptions resolves Auto and matrix-size-dependent defaults.
+//   - Stage 3: finalizeSolverOptions resolves Auto after matrix order is known.
 //
 // Behavior highlights:
-//   - No hidden exact-to-heuristic fallback unless Algo==Auto.
-//   - No hidden Blossom-to-greedy fallback unless MatchingFallbackPolicy allows it.
-//   - TimeLimit==0 means unlimited, not disabled.
-//   - Seed==0 means a fixed deterministic default RNG stream where shuffling is enabled.
+//   - No hidden exact-to-heuristic downgrade exists.
+//   - Algo==Auto is an explicit dispatcher policy, not an implicit algorithm substitution.
+//   - BlossomMatch and GreedyMatch are distinct caller-selected matching policies.
+//   - MatchingAlgo==GreedyMatch is an explicit weaker Christofides mode.
+//   - TimeLimit==0 means unlimited.
+//   - Seed==0 is interpreted by randomized kernels as a fixed deterministic stream.
 //
 // Inputs:
-//   - Passed to SolveMatrix, SolveGraph, and direct solver entrypoints.
+//   - Passed to SolveMatrix, SolveGraph, and direct solver wrappers.
 //
 // Returns:
-//   - Options is consumed by solvers; it does not own external memory.
+//   - Options is consumed by solvers and does not own external memory.
 //
 // Errors:
 //   - ErrInvalidOptions for invalid enum values, negative caps, negative TimeLimit, or invalid Eps.
@@ -109,21 +61,19 @@ const (
 //
 // Determinism:
 //   - Same options and same matrix order produce the same selected algorithm and route policy.
-//   - ShuffleNeighborhood is deterministic under Seed; Seed==0 maps to a fixed internal seed.
+//   - ShuffleNeighborhood is deterministic under Seed.
 //
 // Complexity:
-//   - Validation and finalization are O(1), except Auto selection depends only on matrix order.
+//   - Validation and finalization are O(1), except Auto selection depends on matrix order only.
 //
 // Notes:
-//   - MatchingAlgo==GreedyMatch is the safe default until unbounded polynomial MWPM is implemented.
-//   - Exact-small MWPM is available through BlossomMatch but does not make BlossomMatch safe
-//     as a large-instance default.
-//   - ThreeOptMaxMoves is independent from TwoOptMaxIters; do not reuse one cap for both kernels.
+//   - BlossomMatch is the default exact MWPM policy.
+//   - GreedyMatch remains available only as an explicit weaker heuristic mode.
 //
 // AI-Hints:
-//   - Do not silently clamp invalid options; reject them with ErrInvalidOptions.
-//   - Do not use TwoOptMaxIters as the long-term 3-opt cap.
-//   - Do not make Auto the default algorithm without an explicit compatibility decision.
+//   - Do not silently clamp invalid options.
+//   - Do not add a hidden matching-substitution policy.
+//   - Do not claim ChristofidesApproximationRatio for GreedyMatch.
 type Options struct {
 	// StartVertex selects the start/end vertex index [0..n-1].
 	StartVertex int
@@ -136,9 +86,6 @@ type Options struct {
 
 	// MatchingAlgo chooses the odd-vertex matching engine for Christofides.
 	MatchingAlgo MatchingAlgo
-
-	// MatchingFallbackPolicy controls Blossom/MWPM unavailable behavior.
-	MatchingFallbackPolicy MatchingFallbackPolicy
 
 	// BoundAlgo controls Branch-and-Bound lower-bound strategy.
 	BoundAlgo BoundAlgo
@@ -175,18 +122,17 @@ type Options struct {
 }
 
 // DefaultOptions returns a complete deterministic production policy.
-// The default path is currently Christofides with explicit GreedyMatch because
-// exact MWPM is bounded to small odd sets until a true Blossom engine is implemented.
 //
 // Implementation:
 //   - Stage 1: Select the symmetric Christofides pipeline.
-//   - Stage 2: Select deterministic greedy matching without hidden fallback.
+//   - Stage 2: Select BlossomMatch as the exact default matching policy.
 //   - Stage 3: Enable local search with bounded move counts and deterministic RNG policy.
 //
 // Behavior highlights:
 //   - Returns a fully populated Options value.
 //   - Does not enable metric closure by default.
-//   - Keeps Auto opt-in rather than silently switching algorithms by size.
+//   - Does not enable Auto by default.
+//   - Does not contain hidden Blossom-to-greedy substitution policy.
 //
 // Inputs:
 //   - None.
@@ -204,29 +150,29 @@ type Options struct {
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - Switch MatchingAlgo to BlossomMatch only after the MWPM implementation is production-ready.
-//   - MatchingFallbackReject remains the default in both current and future modes.
+//   - GreedyMatch is a selected algorithmic mode, not a side-channel downgrade.
+//   - BlossomMatch remains an explicit caller-selected policy for exact MWPM semantics.
 //
 // AI-Hints:
-//   - Do not reintroduce hidden Blossom->Greedy fallback here.
+//   - Do not add hidden heuristic substitution here.
 //   - Do not set Algo=Auto by default in a patch release.
+//   - Do not publish a 1.5 approximation ratio from the default GreedyMatch mode.
 func DefaultOptions() Options {
 	return Options{
-		StartVertex:            0,
-		Algo:                   Christofides,
-		Symmetric:              true,
-		MatchingAlgo:           GreedyMatch,
-		MatchingFallbackPolicy: MatchingFallbackReject,
-		BoundAlgo:              NoBound,
-		RunMetricClosure:       false,
-		EnableLocalSearch:      true,
-		TwoOptMaxIters:         DefaultTwoOptMaxIters,
-		ThreeOptMaxMoves:       DefaultThreeOptMaxMoves,
-		BestImprovement:        false,
-		ShuffleNeighborhood:    false,
-		Eps:                    DefaultEps,
-		TimeLimit:              0,
-		Seed:                   0,
-		MaxExactN:              DefaultMaxExactN,
+		StartVertex:         0,
+		Algo:                Christofides,
+		Symmetric:           true,
+		MatchingAlgo:        BlossomMatch,
+		BoundAlgo:           NoBound,
+		RunMetricClosure:    false,
+		EnableLocalSearch:   true,
+		TwoOptMaxIters:      DefaultTwoOptMaxIters,
+		ThreeOptMaxMoves:    DefaultThreeOptMaxMoves,
+		BestImprovement:     false,
+		ShuffleNeighborhood: false,
+		Eps:                 DefaultEps,
+		TimeLimit:           0,
+		Seed:                0,
+		MaxExactN:           DefaultMaxExactN,
 	}
 }

@@ -1,32 +1,51 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp - 3-opt local search (symmetric 3-opt and ATSP 3-opt*).
+// Package tsp implements 3-opt local search for symmetric TSP and restricted ATSP 3-opt*.
 //
-// ThreeOpt performs local search over 3-edge exchanges on a closed tour.
+// The 3-opt kernel performs local search over 3-edge exchanges on a closed tour.
+//
 // Policies:
-//   - First-improvement (default): apply the first strictly improving move.
-//   - Best-improvement (opt-in via Options.BestImprovement): scan whole neighborhood and pick the best.
+//   - First-improvement by default: apply the first strictly improving move.
+//   - Best-improvement via Options.BestImprovement: scan the whole neighborhood and pick the best.
 //   - Options.ThreeOptMaxMoves bounds accepted 3-opt moves independently from 2-opt.
 //
 // Neighborhood order:
-//   - If Options.ShuffleNeighborhood == true, triples (i,j,k) are scanned in a randomized,
-//     constraint-respecting cyclic order using rngFromSeed(opts.Seed). seed==0 ⇒ deterministic stream.
+//   - If Options.ShuffleNeighborhood is true, triples (i,j,k) are scanned in a randomized,
+//     constraint-respecting cyclic order using rngFromSeed(opts.Seed). seed==0 means deterministic stream.
 //   - If false, a canonical deterministic order is used.
 //
-// Symmetric vs Asymmetric:
-//   - Symmetric (opts.Symmetric==true): classic 3-opt over S1=T[i..j-1], S2=T[j..k-1] with tail S3=T[k..n-1] fixed.
-//     We evaluate 7 reconnections in {S1,rev(S1)}×{S2,rev(S2)} \ {identity}.
-//     Δ = (a→first(X))+(last(X)→first(Y))+(last(Y)→f) − [(a→b)+(c→d)+(e→f)],
-//     where a=T[i−1], b=T[i], c=T[j−1], d=T[j], e=T[k−1], f=T[k]. Internal arcs cancel by symmetry.
-//   - Asymmetric (ATSP): 3-opt* without reversals. With fixed tail S3, the only orientation-preserving
-//     reconnection is the tail-swap: out = P + S2 + S1 + S3. Δ uses the same three boundary arcs.
+// Symmetric vs asymmetric:
+//   - Symmetric mode evaluates classic 3-opt over S1=T[i..j-1], S2=T[j..k-1]
+//     with tail S3=T[k..n-1] fixed.
+//     It evaluates seven non-identity reconnections in
+//     {S1,rev(S1)}×{S2,rev(S2)} plus the segment-swap variants.
+//     Δ = (a→first(X))+(last(X)→first(Y))+(last(Y)→f)
+//     − [(a→b)+(c→d)+(e→f)],
+//     where a=T[i−1], b=T[i], c=T[j−1], d=T[j], e=T[k−1], f=T[k].
+//     Internal arcs cancel by symmetry.
+//   - Asymmetric mode uses restricted 3-opt* without reversals.
+//     With fixed tail S3, the orientation-preserving reconnection is the tail swap:
+//     out = prefix + S2 + S1 + S3. Δ uses the same three boundary arcs.
 //     Candidates that introduce +Inf are rejected.
 //
-// Contracts & complexity: same defensive guards as two_opt.go; cost stabilized to 1e−9.
+// Contracts:
+//   - dist is a complete final solver matrix validated through copyCompleteWeights.
+//   - initTour is a closed Hamiltonian cycle.
+//   - The kernel returns localSearchResult so facades can preserve timeout metadata.
+//
+// Complexity:
+//   - Symmetric mode: O(iter*n³) candidate checks, O(n) working memory.
+//   - Restricted asymmetric mode follows the implemented tail-swap neighborhood and keeps O(n) memory.
+//
+// AI-Hints:
+//   - Do not describe asymmetric mode as full ATSP 3-opt.
+//   - Do not reorder symmetricThreeOptMoves without updating deterministic tests.
+//   - Do not return nil tour on ErrTimeLimit after a valid current tour exists.
 package tsp
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"time"
@@ -47,16 +66,29 @@ const (
 
 // orientedSegment selects a segment and orientation for explicit 3-opt assembly.
 type orientedSegment struct {
-	id      segmentID
+	// id selects S1 or S2 from the current 3-opt cut.
+	// It must be segmentS1 or segmentS2.
+	id segmentID
+
+	// reverse tells whether this segment is emitted in reverse order.
+	// Reverse is valid only for symmetric 3-opt moves.
 	reverse bool
 }
 
 // threeOptMove names one symmetric 3-opt reconnection case.
 // The identity move is intentionally absent from symmetricThreeOptMoves.
 type threeOptMove struct {
+	// name is a stable diagnostic identifier for tests and table audits.
+	// It must not be used as algorithm control flow.
 	name string
-	x    orientedSegment
-	y    orientedSegment
+
+	// x is the first emitted movable segment in the reconnection.
+	// It may be S1 or S2 in either orientation.
+	x orientedSegment
+
+	// y is the second emitted movable segment in the reconnection.
+	// It must use the other segment exactly once.
+	y orientedSegment
 }
 
 var symmetricThreeOptMoves = [...]threeOptMove{
@@ -73,23 +105,65 @@ var symmetricThreeOptMoves = [...]threeOptMove{
 // The value is arbitrary but stable to keep reproducible defaults.
 const defaultRNGSeed int64 = 1
 
-// ThreeOpt returns an improved tour and its stabilized cost.
-// Policy is taken from opts.BestImprovement; ATSP uses 3-opt* (tail-swap).
-func ThreeOpt(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	local, err := threeOptKernel(dist, initTour, opts, opts.BestImprovement)
-	if local.hasTour() {
-		return append([]int(nil), local.tour...), local.cost, err
-	}
-	return nil, 0, err
-}
+// threeOptSearch runs 3-opt local search and publishes canonical result metadata.
+//
+// Implementation:
+//   - Stage 1: Force the internal algorithm identity to ThreeOptOnly.
+//   - Stage 2: Run threeOptKernel with opts.BestImprovement.
+//   - Stage 3: Publish localSearchResult as TSPResult without IDs or metric-closure metadata.
+//   - Stage 4: Preserve ErrTimeLimit when a valid current tour exists.
+//
+// Behavior highlights:
+//   - Symmetric mode uses the full symmetric move table.
+//   - Asymmetric mode uses restricted orientation-preserving 3-opt*.
+//   - Never claims exactness or global optimality.
+//
+// Inputs:
+//   - dist: complete final solver matrix.
+//   - initTour: closed Hamiltonian cycle.
+//   - opts: local-search policy.
+//
+// Returns:
+//   - *TSPResult: improved or timeout-current tour result.
+//   - error: nil or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - ErrNilTour, ErrInvalidTour.
+//   - Matrix validation sentinels.
+//   - ErrTimeLimit with non-nil result when timeout happens after a valid current tour exists.
+//
+// Determinism:
+//   - Canonical or seeded neighborhood scan order is governed by threeOptKernel.
+//
+// Complexity:
+//   - Symmetric mode: O(iterations*n^3), Space O(n).
+//   - Restricted asymmetric mode: governed by the tail-swap scan, Space O(n).
+//
+// Notes:
+//   - IDs and metric closure metadata are attached only by SolveMatrix.
+//
+// AI-Hints:
+//   - Do not describe asymmetric mode as full ATSP 3-opt.
+//   - Do not drop timeout results when local.hasTour() is true.
+func threeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+	solverOptions := opts
+	solverOptions.Algo = ThreeOptOnly
 
-// ThreeOptBest - explicit best-improvement entrypoint (policy forced to best).
-func ThreeOptBest(dist matrix.Matrix, initTour []int, opts Options) ([]int, float64, error) {
-	local, err := threeOptKernel(dist, initTour, opts, true)
-	if local.hasTour() {
-		return append([]int(nil), local.tour...), local.cost, err
+	local, err := threeOptKernel(dist, initTour, solverOptions, solverOptions.BestImprovement)
+	if err != nil {
+		if errors.Is(err, ErrTimeLimit) && local.hasTour() {
+			result := publishLocalSearchResult(local, nil, solverOptions, ThreeOptOnly, false)
+			return result, ErrTimeLimit
+		}
+
+		return nil, err
 	}
-	return nil, 0, err
+	if !local.hasTour() {
+		return nil, ErrInvalidTour
+	}
+
+	return publishLocalSearchResult(local, nil, solverOptions, ThreeOptOnly, false), nil
 }
 
 // threeOptKernel runs 3-opt / restricted ATSP 3-opt* and returns structured local-search metadata.
@@ -515,14 +589,7 @@ func segmentEndpoints(seg orientedSegment, b, c, d, e int) (first int, last int)
 //
 // AI-Hints:
 //   - Do not reuse this symmetric delta for ATSP reversed segments.
-func threeOptDeltaSymmetric(
-	at func(int, int) float64,
-	tour []int,
-	i int,
-	j int,
-	k int,
-	move threeOptMove,
-) (float64, bool) {
+func threeOptDeltaSymmetric(at func(int, int) float64, tour []int, i, j, k int, move threeOptMove) (float64, bool) {
 	a, b := tour[i-1], tour[i]
 	c, d := tour[j-1], tour[j]
 	e, f := tour[k-1], tour[k]
@@ -581,13 +648,7 @@ func threeOptDeltaSymmetric(
 //
 // AI-Hints:
 //   - Do not call this “full ATSP 3-opt”.
-func threeOptDeltaATSPTailSwap(
-	at func(int, int) float64,
-	tour []int,
-	i int,
-	j int,
-	k int,
-) (float64, bool) {
+func threeOptDeltaATSPTailSwap(at func(int, int) float64, tour []int, i, j, k int) (float64, bool) {
 	a, b := tour[i-1], tour[i]
 	c, d := tour[j-1], tour[j]
 	e, f := tour[k-1], tour[k]

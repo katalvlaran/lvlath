@@ -2,7 +2,8 @@
 // Copyright (C) 2025-2026 katalvlaran
 
 // Package tsp exposes canonical public facades for Traveling Salesman Problem solvers.
-// The canonical surface returns TSPResult; legacy wrappers project it into TSResult.
+// The public surface publishes TSPResult only, so exactness, optimality, timeout state,
+// approximation metadata, and ownership rules remain available to callers.
 package tsp
 
 import (
@@ -22,8 +23,8 @@ import (
 // Behavior highlights:
 //   - Does not mutate caller-owned direct matrices.
 //   - Uses matrix.APSPInPlace for metric closure.
-//   - Preserves SolveWithMatrix compatibility through Minimal projection.
-//   - Does not silently change algorithms or fallback beyond the existing explicit options.
+//   - Publishes the full canonical result contract.
+//   - Does not silently change algorithms beyond explicit options.
 //
 // Inputs:
 //   - dist: square distance matrix; +Inf may appear only before metric closure.
@@ -52,13 +53,11 @@ import (
 //   - Solver complexity depends on opts.Algo.
 //
 // Notes:
-//   - TSResult wrappers intentionally discard metadata.
-//   - This facade does not yet publish partial B&B timeout incumbents; that belongs to the next P1 substage.
+//   - Branch-and-Bound timeout incumbents remain visible through TSPResult.
 //
 // AI-Hints:
-//   - Prefer SolveMatrix over SolveWithMatrix in new code.
 //   - Do not bypass this facade in examples unless testing a specific kernel.
-//   - Do not publish TSResult from this canonical facade; TSResult is legacy projection only.
+//   - Do not publish a reduced result from this canonical facade.
 func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
@@ -68,7 +67,7 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 		return result, err
 	}
 
-	prepared, metricClosureApplied, n, err := prepareSolverDistanceMatrix(dist, opts)
+	prepared, err := prepareSolverDistanceMatrix(dist, opts)
 	if err != nil {
 		return nil, err
 	}
@@ -76,18 +75,18 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 	finalOptions := opts
 	finalOptions.RunMetricClosure = false
 
-	finalOptions, err = finalizeSolverOptions(n, finalOptions)
+	finalOptions, err = finalizeSolverOptions(prepared.n, finalOptions)
 	if err != nil {
 		return nil, err
 	}
 
 	if ids != nil {
-		if err = validateIDs(ids, n); err != nil {
+		if err = validateIDs(ids, prepared.n); err != nil {
 			return nil, err
 		}
 	}
 
-	result, err := solvePreparedMatrix(prepared, ids, finalOptions, n, metricClosureApplied)
+	result, err := solvePreparedMatrix(prepared, ids, finalOptions)
 	if result == nil {
 		return nil, err
 	}
@@ -102,7 +101,7 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 //   - Stage 1: Reject nil and currently unsupported mixed-direction graphs.
 //   - Stage 2: Build matrix adapter options from core.Graph flags.
 //   - Stage 3: Build adjacency/distance matrix through matrix.NewAdjacencyMatrix.
-//   - Stage 4: Recover stable row-index IDs from matrix.VertexIndex.
+//   - Stage 4: Recover stable row-index IDs through the matrix adapter accessor.
 //   - Stage 5: Delegate to SolveMatrix without re-running graph metric closure.
 //
 // Behavior highlights:
@@ -192,22 +191,15 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 	adjacency, err := matrix.NewAdjacencyMatrix(g, frozenMatrixOptions)
 	if err != nil {
 		// NewAdjacencyMatrix returns matrix-level errors; forward them as-is.
-		// Upstream validateAll will surface tsp sentinels when we dispatch via SolveWithMatrix.
+		// Matrix facade validation will surface tsp sentinels after adaptation.
 		return nil, err
 	}
 
-	// Recover stable vertex ordering ids[idx] = id.
-	// Map iteration order is irrelevant: we write by canonical index -> stable array.
-	vertexCount := adjacency.Mat.Rows()
-	ids := make([]string, vertexCount)
-
-	// VertexIndex is id -> index, so invert it.
-	var (
-		id    string
-		index int
-	)
-	for id, index = range adjacency.VertexIndex {
-		ids[index] = id
+	// Recover stable vertex ordering through the matrix adapter accessor.
+	// The accessor returns a detached index-to-ID slice in canonical matrix order.
+	ids, err := adjacency.VertexIDs()
+	if err != nil {
+		return nil, err
 	}
 
 	delegateOptions := opts
@@ -228,119 +220,248 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 	return result, nil
 }
 
-// SolveWithMatrix is the compatibility wrapper for the legacy TSResult surface.
-// New code should prefer SolveMatrix because it preserves metadata and result semantics.
+// HeldKarp solves a complete TSP or ATSP instance with the Held-Karp dynamic program.
+// It is the direct exact dynamic-programming entrypoint and always publishes
+// Exact=true and Optimal=true on successful completion.
 //
 // Implementation:
-//   - Stage 1: Call SolveMatrix.
-//   - Stage 2: Project TSPResult into TSResult through Minimal.
+//   - Stage 1: Force the direct solver policy to ExactHeldKarp.
+//   - Stage 2: Run the private Held-Karp kernel over the validated final matrix.
+//   - Stage 3: Publish a detached TSPResult with exact optimal metadata.
 //
 // Behavior highlights:
-//   - Does not contain alternative solver logic.
-//   - Discards metadata intentionally.
+//   - Supports asymmetric distances.
+//   - Does not perform metric closure.
+//   - Returns no partial result on timeout.
+//   - Does not depend on opts.Algo supplied by the caller.
 //
 // Inputs:
-//   - dist: square distance matrix.
-//   - ids: optional row/column labels.
-//   - opts: solver policy.
+//   - dist: complete finite square distance matrix.
+//   - opts: solver policy; StartVertex, MaxExactN, Eps, and TimeLimit are honored.
 //
 // Returns:
-//   - TSResult: legacy tour/cost projection.
-//   - error: same error as SolveMatrix.
-//
-// Determinism:
-//   - Same as SolveMatrix.
-//
-// Complexity:
-//   - Same as SolveMatrix plus O(len(Tour)) projection.
-//
-// AI-Hints:
-//   - Do not add algorithm logic here; wrappers must remain honest projections.
-//
-// Deprecated: use SolveMatrix.
-func SolveWithMatrix(dist matrix.Matrix, ids []string, opts Options) (TSResult, error) {
-	result, err := SolveMatrix(dist, ids, opts)
-	if result == nil {
-		return TSResult{}, err
-	}
-
-	return result.Minimal(), err
-}
-
-// SolveWithGraph is the compatibility wrapper for the legacy graph TSResult surface.
-// New code should prefer SolveGraph because it preserves metadata and result semantics.
-//
-// Deprecated: use SolveGraph.
-func SolveWithGraph(g *core.Graph, opts Options) (TSResult, error) {
-	result, err := SolveGraph(g, opts)
-	if result == nil {
-		return TSResult{}, err
-	}
-
-	return result.Minimal(), err
-}
-
-// publishTSPResult builds the canonical detached result artifact.
-// Implementation:
-//   - Stage 1: Copy minimal tour/cost.
-//   - Stage 2: Copy optional IDs.
-//   - Stage 3: Attach final policy and kernel-origin metadata.
-//   - Stage 4: Copy warning sentinels into caller-owned storage.
-//
-// Behavior highlights:
-//   - No live references to matrices, graphs, or mutable solver state.
-//   - Metadata comes from solveMeta, not facade inference.
-//
-// Inputs:
-//   - minimal: successful or partial tour/cost payload.
-//   - ids: optional stable row/column IDs.
-//   - opts: finalized options after Auto selection.
-//   - meta: kernel-origin metadata.
-//   - metricClosureApplied: adapter/facade policy fact.
-//
-// Returns:
-//   - *TSPResult: detached canonical result.
+//   - *TSPResult: exact optimal tour on success.
+//   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
-//   - None.
+//   - ErrInvalidOptions from option validation.
+//   - ErrNilDistanceMatrix, ErrNonSquare, ErrDimensionMismatch from matrix validation.
+//   - ErrNaNInf, ErrNegativeWeight, ErrIncompleteGraph from final matrix checks.
+//   - ErrStartOutOfRange for invalid StartVertex.
+//   - ErrSizeTooLarge when MaxExactN is exceeded.
+//   - ErrTimeLimit when the configured budget is exhausted before completion.
 //
 // Determinism:
-//   - Tour, IDs, and warnings preserve source order exactly.
+//   - Fixed subset-size, mask, endpoint, and predecessor scan order.
+//   - Equal-cost ties follow the kernel predecessor policy.
 //
 // Complexity:
-//   - Time O(len(Tour)+len(IDs)+len(Warnings)).
-//   - Space O(len(Tour)+len(IDs)+len(Warnings)).
+//   - Time O(n^2 * 2^n), Space O(n * 2^n).
+//
+// Notes:
+//   - Use SolveMatrix when IDs or metric closure are required.
+//   - This wrapper is not a dispatcher; it always selects ExactHeldKarp.
 //
 // AI-Hints:
-//   - Do not recompute costs or routes here; this is a publishing stage only.
-func publishTSPResult(
-	minimal TSResult,
-	ids []string,
-	opts Options,
-	meta solveMeta,
-	metricClosureApplied bool,
-) *TSPResult {
-	result := &TSPResult{
-		Tour:                 append([]int(nil), minimal.Tour...),
-		Cost:                 minimal.Cost,
-		Algorithm:            opts.Algo,
-		Exact:                meta.exact,
-		Optimal:              meta.optimal,
-		TimedOut:             meta.timedOut,
-		MetricClosureApplied: metricClosureApplied,
-		Symmetric:            opts.Symmetric,
-		ApproximationRatio:   meta.approximationRatio,
-		MatchingFallback:     meta.matchingFallback,
-		Iterations:           meta.iterations,
-		NodesExpanded:        meta.nodesExpanded,
-	}
+//   - Always force solverOptions.Algo=ExactHeldKarp before validation.
+//   - Do not reject ATSP because a caller accidentally passed opts.Algo=Christofides.
+func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	opts.Algo = ExactHeldKarp
 
-	if ids != nil {
-		result.IDs = append([]string(nil), ids...)
-	}
-	if meta.warnings != nil {
-		result.Warnings = append([]error(nil), meta.warnings...)
-	}
+	return heldKarp(dist, opts)
+}
 
-	return result
+// ChristofidesSolve runs the symmetric Christofides construction directly.
+// The formal 1.5 ratio is published only when the selected matching policy proves
+// exact minimum-weight perfect matching.
+//
+// Implementation:
+//   - Stage 1: Force the direct solver policy to Christofides.
+//   - Stage 2: Validate symmetric complete metric input.
+//   - Stage 3: Run MST, odd-degree matching, Eulerian circuit, and shortcutting.
+//   - Stage 4: Publish a detached TSPResult with approximation proof metadata.
+//
+// Behavior highlights:
+//   - Requires symmetric final matrix input.
+//   - GreedyMatch is explicit weaker behavior and publishes NoApproximationRatio.
+//   - BlossomMatch is exact-or-error for the currently supported matching regime.
+//   - Does not perform metric closure.
+//
+// Inputs:
+//   - dist: complete finite symmetric distance matrix.
+//   - opts: solver policy; StartVertex and MatchingAlgo are honored.
+//
+// Returns:
+//   - *TSPResult: canonical heuristic/approximation result.
+//   - error: nil on success or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions from option validation.
+//   - ErrATSPNotSupportedByAlgo when Symmetric=false.
+//   - ErrNonEulerian, ErrInvalidTour from pipeline stages.
+//   - ErrInvalidMatching for malformed matching state.
+//   - ErrIncompleteGraph when a required perfect matching cannot be formed.
+//   - Matrix validation sentinels from final matrix checks.
+//
+// Determinism:
+//   - MST scan, odd-vertex collection, matching, Eulerian traversal, and shortcutting use fixed order.
+//
+// Complexity:
+//   - Time O(n^2) plus matching complexity.
+//   - Space O(n^2) for dense graph and matching-local buffers.
+//
+// Notes:
+//   - Use SolveMatrix when IDs, metric closure, or dispatcher local-search policy are required.
+//
+// AI-Hints:
+//   - Do not infer ApproximationRatio from Options.MatchingAlgo alone.
+//   - Do not convert exact matching failures into heuristic output.
+func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	opts.Algo = Christofides
+
+	return christofides(dist, opts)
+}
+
+// BranchAndBoundSolve runs exact deterministic Branch-and-Bound search directly.
+// It preserves timeout incumbent metadata when a feasible incumbent exists before
+// the configured time budget is exhausted.
+//
+// Implementation:
+//   - Stage 1: Force the direct solver policy to BranchAndBound.
+//   - Stage 2: Copy the matrix into the solver weight buffer.
+//   - Stage 3: Seed an incumbent when possible and run deterministic DFS search.
+//   - Stage 4: Publish complete or partial TSPResult metadata.
+//
+// Behavior highlights:
+//   - Supports symmetric and asymmetric final matrices.
+//   - Exact=true because the algorithm is exact, even when timeout prevents proof.
+//   - Optimal=false on timeout incumbents.
+//   - NodesExpanded records actual DFS node expansions.
+//
+// Inputs:
+//   - dist: complete finite square distance matrix.
+//   - opts: solver policy; StartVertex, BoundAlgo, Eps, and TimeLimit are honored.
+//
+// Returns:
+//   - *TSPResult: optimal result, timeout incumbent, or nil if no incumbent exists.
+//   - error: nil on completion or ErrTimeLimit on timeout.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - Matrix validation sentinels from weight copying.
+//   - ErrTimeLimit when deadline expires.
+//   - ErrIncompleteGraph when no tour can be constructed.
+//
+// Determinism:
+//   - Branch order is sorted by cost and stable vertex tie-breaks.
+//   - DFS state transitions are deterministic.
+//
+// Complexity:
+//   - Worst-case Time O(n!), Space O(n^2) for buffers plus O(n) search state.
+//
+// Notes:
+//   - Use SolveMatrix for facade-level IDs and metric closure.
+//
+// AI-Hints:
+//   - Always force solverOptions.Algo=BranchAndBound before validation.
+//   - Do not mark timeout incumbents as Optimal.
+func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+	opts.Algo = BranchAndBound
+
+	return branchAndBound(dist, opts)
+}
+
+// TwoOptSearch runs 2-opt local search from a caller-provided initial tour.
+// It publishes canonical result metadata and never claims exactness or global optimality.
+//
+// Implementation:
+//   - Stage 1: Force the direct solver policy to TwoOptOnly.
+//   - Stage 2: Validate the initial tour through the local-search kernel.
+//   - Stage 3: Run deterministic 2-opt improvement.
+//   - Stage 4: Publish a detached TSPResult.
+//
+// Behavior highlights:
+//   - Supports symmetric and asymmetric matrices according to the 2-opt kernel policy.
+//   - Timeout may return the current feasible tour.
+//   - ApproximationRatio is not claimed.
+//
+// Inputs:
+//   - dist: complete finite final solver matrix.
+//   - initTour: closed Hamiltonian cycle used as the starting solution.
+//   - opts: local-search policy.
+//
+// Returns:
+//   - *TSPResult: improved tour result.
+//   - error: nil on success or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - ErrInvalidTour.
+//   - Matrix validation sentinels.
+//   - ErrTimeLimit when timeout occurs after a feasible current tour exists.
+//
+// Determinism:
+//   - Neighborhood scan order is fixed unless ShuffleNeighborhood is explicitly enabled.
+//
+// Complexity:
+//   - Time O(iterations*n^2), Space O(n).
+//
+// Notes:
+//   - This direct wrapper does not attach IDs.
+//
+// AI-Hints:
+//   - Do not publish exact or optimal metadata from local search.
+func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+	opts.Algo = TwoOptOnly
+
+	return twoOptSearch(dist, initTour, opts)
+}
+
+// ThreeOptSearch runs 3-opt local search from a caller-provided initial tour.
+// Symmetric mode uses the full symmetric 3-opt move set; asymmetric mode uses
+// the package restricted orientation-preserving neighborhood.
+//
+// Implementation:
+//   - Stage 1: Force the direct solver policy to ThreeOptOnly.
+//   - Stage 2: Validate the initial tour and matrix policy.
+//   - Stage 3: Run deterministic 3-opt improvement.
+//   - Stage 4: Publish a detached TSPResult.
+//
+// Behavior highlights:
+//   - Does not claim global optimality.
+//   - Timeout may return the current feasible tour.
+//   - Asymmetric mode must not be described as full ATSP 3-opt.
+//
+// Inputs:
+//   - dist: complete finite final solver matrix.
+//   - initTour: closed Hamiltonian cycle used as the starting solution.
+//   - opts: local-search policy.
+//
+// Returns:
+//   - *TSPResult: improved tour result.
+//   - error: nil on success or sentinel-classified failure.
+//
+// Errors:
+//   - ErrInvalidOptions.
+//   - ErrInvalidTour.
+//   - Matrix validation sentinels.
+//   - ErrTimeLimit when timeout occurs after a feasible current tour exists.
+//
+// Determinism:
+//   - Neighborhood scan order is fixed unless ShuffleNeighborhood is explicitly enabled.
+//
+// Complexity:
+//   - Symmetric mode: Time O(iterations*n^3), Space O(n).
+//   - Restricted asymmetric mode: depends on the implemented tail-swap scan, Space O(n).
+//
+// Notes:
+//   - This direct wrapper does not attach IDs.
+//
+// AI-Hints:
+//   - Do not call the asymmetric path full ATSP 3-opt.
+//   - Do not publish exact or optimal metadata from local search.
+func ThreeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+	opts.Algo = ThreeOptOnly
+
+	return threeOptSearch(dist, initTour, opts)
 }

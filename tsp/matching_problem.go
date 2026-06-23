@@ -1,14 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp implements the odd-degree matching stage used by Christofides.
-// The production contract is strict: GreedyMatch is deterministic but has no
-// formal Christofides ratio, while BlossomMatch must either compute exact MWPM
-// for the supported odd-set size or return ErrMatchingUnavailable.
+// Package tsp defines the local matching problem used by Christofides.
+// The model copies odd-set distances into a deterministic local complete graph
+// so matching engines do not depend on external matrix ownership or map order.
 package tsp
 
 import (
-	"errors"
 	"math"
 	"math/bits"
 
@@ -16,13 +14,13 @@ import (
 )
 
 const (
-	// maxExactMatchingOddVertices bounds the exponential exact MWPM bootstrap.
-	// The value keeps memory at 2^22 DP states and prevents accidentally treating
-	// exponential matching as an unbounded production Blossom replacement.
-	maxExactMatchingOddVertices = 22
-
 	// matchingUnmatched marks a local matching vertex that has not been paired.
 	matchingUnmatched = -1
+
+	// maxExactMatchingOddVertices bounds the internal exponential oracle.
+	// The oracle is used only for small-instance verification and optional micro-fast-paths;
+	// it must not be the general BlossomMatch engine.
+	maxExactMatchingOddVertices = 22
 )
 
 // matchingProblem stores the complete graph induced by odd-degree vertices.
@@ -61,9 +59,17 @@ const (
 //   - Do not expose matchingProblem from public APIs.
 //   - Do not reorder odd vertices unless all tie-break tests are updated.
 type matchingProblem struct {
+	// odd maps local matching indices back to original TSP matrix vertices.
+	// odd[local] is used only when appending final matching edges to Christofides adjacency.
 	odd []int
-	n   int
-	w   []float64
+
+	// n is the number of local odd-degree vertices.
+	// It must be even for a perfect matching.
+	n int
+
+	// w stores local edge costs in row-major n*n layout.
+	// w[i*n+j] is the cost between local vertices i and j.
+	w []float64
 }
 
 // at returns the local matching cost between two local odd-set vertices.
@@ -101,277 +107,60 @@ func (p matchingProblem) at(i int, j int) float64 {
 	return p.w[i*p.n+j]
 }
 
-// greedyMatch adds a deterministic greedy perfect matching over odd-degree vertices.
-// It is intentionally weaker than MWPM and therefore cannot justify the Christofides
-// 1.5 approximation ratio.
+// matchingCost computes the exact cost of a verified local perfect matching.
+// It sums every pair once, using i<match[i] to avoid double-counting symmetric pairs.
 //
 // Implementation:
-//   - Stage 1: Validate even cardinality.
-//   - Stage 2: Copy odd vertices into a local shrinkable buffer.
-//   - Stage 3: Repeatedly choose one endpoint and scan all remaining finite partners.
-//   - Stage 4: Append the selected undirected matching edge to adj.
+//   - Stage 1: Verify the local matching structure.
+//   - Stage 2: Scan local vertices in increasing order.
+//   - Stage 3: Sum problem.at(i, match[i]) only for i<match[i].
+//   - Stage 4: Stabilize the returned cost with round1e9.
 //
 // Behavior highlights:
-//   - Deterministic tie-break: lower edge cost, then smaller vertex index.
-//   - Propagates non-missing edgeCost errors.
-//   - Mutates adj as it succeeds; use greedyMatchAtomic when rollback is required.
+//   - Does not mutate problem or match.
+//   - Does not inspect adjacency.
+//   - Uses the matching-local detached cost matrix.
 //
 // Inputs:
-//   - odd: odd-degree vertices from the MST.
-//   - dist: final complete distance matrix.
-//   - adj: mutable Christofides multigraph adjacency.
+//   - problem: local complete matching instance.
+//   - match: local symmetric perfect matching array.
 //
 // Returns:
-//   - error: nil after all odd vertices are paired.
+//   - float64: rounded matching cost.
+//   - error: nil on valid perfect matching.
 //
 // Errors:
-//   - ErrInvalidMatching for odd cardinality.
-//   - ErrIncompleteGraph when no finite partner exists.
-//   - ErrInvalidTour, ErrNaNInf, ErrNegativeWeight propagated from edgeCost.
+//   - ErrInvalidMatching from verifyPerfectMatching.
 //
 // Determinism:
-//   - Takes the current endpoint from the end of the remaining slice.
-//   - Scans candidate partners in increasing remaining-slice order.
-//   - Ties are resolved by smaller original vertex index.
+//   - Fixed increasing local-index scan.
 //
 // Complexity:
-//   - Time O(k^2), Space O(k), where k=len(odd).
+//   - Time O(k), Space O(1).
 //
 // Notes:
-//   - This raw helper is not atomic by itself; Christofides should call greedyMatchAtomic.
+//   - The cost is used for verification and tests; Christofides does not need it for adjacency mutation.
 //
 // AI-Hints:
-//   - Do not use greedy matching to claim ChristofidesApproximationRatio.
-//   - Do not ignore edgeCost errors; missing edges must not be paired.
-func greedyMatch(odd []int, dist matrix.Matrix, adj [][]int) error {
-	oddCount := len(odd)
-	// oddCount==0 is a valid (degenerate) case - nothing to do.
-	if oddCount == 0 {
-		return nil
+//   - Do not sum both i→j and j→i.
+//   - Do not recompute costs from the original matrix here.
+func matchingCost(problem matchingProblem, match []int) (float64, error) {
+	if err := verifyPerfectMatching(match); err != nil {
+		return 0, err
 	}
-	if (oddCount & 1) == 1 {
-		return ErrInvalidMatching
+	if len(problem.odd) != len(match) || problem.n != len(match) {
+		return 0, ErrInvalidMatching
 	}
 
-	remaining := append([]int(nil), odd...)
+	total := 0.0
 
-	var (
-		fromVertex     int
-		toVertex       int
-		lastIndex      int
-		bestIndex      int
-		candidateIndex int
-		weight         float64
-		bestWeight     float64
-		err            error
-	)
-
-	// Main matching loop: execute O(k) iterations, matching exactly two vertices per cycle.
-	// Pops the last element from the 'remaining' buffer to serve as the baseline endpoint.
-	for len(remaining) > 1 {
-		lastIndex = len(remaining) - 1
-		fromVertex = remaining[lastIndex]
-		remaining = remaining[:lastIndex]
-
-		// Structural assertion: verify that the popped vertex fits within the global multigraph scope.
-		if fromVertex < 0 || fromVertex >= len(adj) {
-			return ErrInvalidMatching
+	for localVertex, partner := range match {
+		if localVertex < partner {
+			total += problem.at(localVertex, partner)
 		}
-
-		// Initialize local state to track the cheapest candidate partner available in the remaining pool.
-		bestIndex = matchingUnmatched
-		bestWeight = math.Inf(1)
-
-		// Linear scan over the remaining pool to discover the absolute closest available partner vertex.
-		for candidateIndex = 0; candidateIndex < len(remaining); candidateIndex++ {
-			// Bounds check: validate that the candidate vertex is safe for global adjacency mapping.
-			toVertex = remaining[candidateIndex]
-			if toVertex < 0 || toVertex >= len(adj) {
-				return ErrInvalidMatching
-			}
-
-			// Retrieve the exact cost of the edge from the underlying TSP distance matrix.
-			weight, err = edgeCost(dist, fromVertex, toVertex)
-			if err != nil {
-				// If the edge is missing (+Inf sentinel), skip it and allow closure/fallback paths to handle.
-				if errors.Is(err, ErrIncompleteGraph) {
-					continue
-				}
-
-				return err
-			}
-
-			// Deterministic tie-breaking selection: pick the cheapest weight.
-			// If costs match within tolerance, resolve ties by selecting the smaller original vertex index.
-			if bestIndex == matchingUnmatched ||
-				weight < bestWeight ||
-				(math.Abs(weight-bestWeight) <= symTol && toVertex < remaining[bestIndex]) {
-				bestIndex = candidateIndex
-				bestWeight = weight
-			}
-		}
-
-		// Graph integrity check: fail if the current vertex is completely isolated from all remaining candidates.
-		if bestIndex == matchingUnmatched || math.IsInf(bestWeight, 1) {
-			return ErrIncompleteGraph
-		}
-
-		// O(1) buffer contraction: replace the selected partner at 'bestIndex' with the element at the
-		// end of the slice, then truncate. This preserves efficiency without triggering slice shifts.
-		lastIndex = len(remaining) - 1
-		toVertex = remaining[bestIndex]
-		remaining[bestIndex] = remaining[lastIndex]
-		remaining = remaining[:lastIndex]
-
-		// Mutate the multigraph by appending the matched pair as an undirected edge.
-		adj[fromVertex] = append(adj[fromVertex], toVertex)
-		adj[toVertex] = append(adj[toVertex], fromVertex)
 	}
 
-	return nil
-}
-
-// snapshotAdjLengths records current adjacency lengths for atomic rollback.
-// It does not copy edge values because matching rollback only needs to remove
-// edges appended by the current matching attempt.
-//
-// Implementation:
-//   - Stage 1: Allocate one length slice.
-//   - Stage 2: Store len(adj[v]) for every vertex.
-//
-// Behavior highlights:
-//   - Does not mutate adj.
-//   - O(n) and allocation-light.
-//
-// Inputs:
-//   - adj: Christofides multigraph adjacency.
-//
-// Returns:
-//   - []int: per-vertex original lengths.
-//
-// Errors:
-//   - None.
-//
-// Determinism:
-//   - Fixed increasing vertex-index scan.
-//
-// Complexity:
-//   - Time O(n), Space O(n).
-//
-// Notes:
-//   - Pair with rollbackAdj in deferred failure paths.
-//
-// AI-Hints:
-//   - Do not use deep copies for rollback when only append operations are performed.
-func snapshotAdjLengths(adj [][]int) []int {
-	lengths := make([]int, len(adj))
-
-	var vertex int
-	// Capture the current edge count for each vertex before any matching pairs are appended.
-	// This creates a fast, memory-light checkpoint for transaction-like rollbacks.
-	for vertex = range adj {
-		lengths[vertex] = len(adj[vertex])
-	}
-
-	return lengths
-}
-
-// rollbackAdj removes matching edges appended after snapshotAdjLengths.
-// It restores only slice lengths and therefore preserves existing edge order.
-//
-// Implementation:
-//   - Stage 1: Scan all vertices.
-//   - Stage 2: Truncate adj[v] back to the recorded length.
-//   - Stage 3: Ignore malformed length snapshots defensively by clamping to current length.
-//
-// Behavior highlights:
-//   - Mutates adj only by truncation.
-//   - Preserves all pre-existing adjacency entries.
-//
-// Inputs:
-//   - adj: mutable adjacency to restore.
-//   - lengths: snapshot returned by snapshotAdjLengths.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - None.
-//
-// Determinism:
-//   - Fixed increasing vertex-index scan.
-//
-// Complexity:
-//   - Time O(n), Space O(1).
-//
-// Notes:
-//   - This helper is intentionally private to the matching stage.
-//
-// AI-Hints:
-//   - Do not reorder adjacency during rollback; Eulerian traversal depends on stable order.
-func rollbackAdj(adj [][]int, lengths []int) {
-	var vertex int
-	// Iterate through every vertex in the graph to safely truncate the adjacency lists.
-	for vertex = range adj {
-		if vertex >= len(lengths) {
-			continue
-		}
-		// Defensive firewall: skip processing if the recorded snapshot length is negative
-		// or somehow exceeds the current capacity, preventing runtime slice panic.
-		if lengths[vertex] < 0 || lengths[vertex] > len(adj[vertex]) {
-			continue
-		}
-
-		// Perform zero-allocation truncation using regular Go reslicing.
-		// This instantly strips away the appended matching edges while keeping underlying memory intact.
-		adj[vertex] = adj[vertex][:lengths[vertex]]
-	}
-}
-
-// greedyMatchAtomic runs greedyMatch and rolls back adjacency on failure.
-// It is the Christofides-safe wrapper for deterministic greedy matching.
-//
-// Implementation:
-//   - Stage 1: Snapshot adjacency lengths.
-//   - Stage 2: Run greedyMatch.
-//   - Stage 3: Roll back all appended edges if greedyMatch returns an error.
-//
-// Behavior highlights:
-//   - Successful execution preserves greedyMatch edge order.
-//   - Failed execution leaves adj length-equivalent to its input state.
-//   - Does not hide greedyMatch errors.
-//
-// Inputs:
-//   - odd: odd-degree MST vertices.
-//   - dist: final complete distance matrix.
-//   - adj: mutable Christofides multigraph adjacency.
-//
-// Returns:
-//   - error: nil on success or greedyMatch sentinel failure.
-//
-// Errors:
-//   - Same as greedyMatch.
-//
-// Determinism:
-//   - Same matching order as greedyMatch.
-//
-// Complexity:
-//   - Time O(k^2+n), Space O(k+n).
-//
-// Notes:
-//   - Use this wrapper in Christofides, not raw greedyMatch.
-//
-// AI-Hints:
-//   - Do not call greedyMatch directly from Christofides.
-func greedyMatchAtomic(odd []int, dist matrix.Matrix, adj [][]int) (err error) {
-	lengths := snapshotAdjLengths(adj)
-	defer func() {
-		if err != nil {
-			rollbackAdj(adj, lengths)
-		}
-	}()
-
-	return greedyMatch(odd, dist, adj)
+	return round1e9(total), nil
 }
 
 // buildMatchingProblem builds the local complete graph induced by odd vertices.
@@ -483,18 +272,19 @@ func buildMatchingProblem(odd []int, dist matrix.Matrix) (matchingProblem, error
 }
 
 // exactSmallPerfectMatching computes exact MWPM by subset dynamic programming.
-// It is a bounded bootstrap for small odd sets, not an unbounded Blossom engine.
+// It is an internal exponential oracle for tests and tiny fast-paths, not the
+// general BlossomMatch engine.
 //
 // Implementation:
-//   - Stage 1: Reject odd sets above maxExactMatchingOddVertices.
-//   - Stage 2: DP over even-cardinality masks using the first unmatched local vertex.
-//   - Stage 3: Store the selected pair for deterministic reconstruction.
+//   - Stage 1: Reject malformed local matching problems.
+//   - Stage 2: Reject inputs above maxExactMatchingOddVertices unless a caller explicitly gates them.
+//   - Stage 3: DP over even-cardinality masks using the first unmatched local vertex.
 //   - Stage 4: Reconstruct and verify the symmetric match array.
 //
 // Behavior highlights:
 //   - Exact for k <= maxExactMatchingOddVertices.
 //   - Deterministic tie behavior: first local vertex, then increasing partner.
-//   - Rejects infeasible perfect matchings with ErrIncompleteGraph.
+//   - Must not be used as the general production path for BlossomMatch.
 //
 // Inputs:
 //   - problem: local complete matching instance.
@@ -505,7 +295,6 @@ func buildMatchingProblem(odd []int, dist matrix.Matrix) (matchingProblem, error
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
-//   - ErrMatchingUnavailable when k exceeds the exact bootstrap cap.
 //   - ErrInvalidMatching for malformed local problem.
 //   - ErrIncompleteGraph when no perfect matching exists.
 //
@@ -513,12 +302,13 @@ func buildMatchingProblem(odd []int, dist matrix.Matrix) (matchingProblem, error
 //   - Fixed mask order, fixed first-unmatched search, fixed increasing partner scan.
 //
 // Complexity:
-//   - Time O(k^2 * 2^k), Space O(2^k+k), bounded by maxExactMatchingOddVertices.
+//   - Time O(k^2 * 2^k), Space O(2^k+k).
 //
 // Notes:
-//   - This function proves exactness for small k but must not be marketed as Blossom.
+//   - Production BlossomMatch must not rely on this function for large k.
 //
 // AI-Hints:
+//   - Do not advertise this function as Blossom.
 //   - Do not raise maxExactMatchingOddVertices without benchmark and memory review.
 func exactSmallPerfectMatching(problem matchingProblem) ([]int, float64, error) {
 	oddCount := problem.n
@@ -533,7 +323,7 @@ func exactSmallPerfectMatching(problem matchingProblem) ([]int, float64, error) 
 	}
 	// Safeguard firewall: prevents exponential time O(k^2 * 2^k) and memory blowup.
 	if oddCount > maxExactMatchingOddVertices {
-		return nil, 0, ErrMatchingUnavailable
+		return nil, 0, ErrInvalidMatching
 	}
 
 	// Initialize dynamic programming tables. Dimension equals 2^k subsets.
@@ -684,7 +474,7 @@ func exactSmallPerfectMatching(problem matchingProblem) ([]int, float64, error) 
 //   - Time O(k), Space O(1).
 //
 // Notes:
-//   - This is shared by exact DP and future Blossom engines.
+//   - This is shared by every exact matching engine before adjacency mutation.
 //
 // AI-Hints:
 //   - Do not append matching edges before this verification succeeds.
@@ -786,79 +576,92 @@ func appendPerfectMatching(problem matchingProblem, match []int, adj [][]int) er
 	return nil
 }
 
-// blossomMatch computes exact MWPM for small odd sets and rejects unsupported large sets.
-// The name is retained for compatibility with MatchingAlgo, but this implementation is
-// a bounded exact DP bootstrap until a true polynomial Blossom engine is added.
+// snapshotAdjLengths records current adjacency lengths for atomic rollback.
+// It does not copy edge values because matching engines only append edges.
 //
 // Implementation:
-//   - Stage 1: Validate trivial and odd-cardinality cases.
-//   - Stage 2: Snapshot adjacency lengths for atomic rollback.
-//   - Stage 3: Build a local matching problem over odd vertices.
-//   - Stage 4: Run exactSmallPerfectMatching.
-//   - Stage 5: Append verified matching pairs or roll back on any failure.
+//   - Stage 1: Allocate one length slice.
+//   - Stage 2: Store len(adj[v]) for every vertex in deterministic vertex order.
 //
 // Behavior highlights:
-//   - Exact for len(odd) <= maxExactMatchingOddVertices.
-//   - Returns ErrMatchingUnavailable for larger odd sets.
-//   - Does not silently degrade to greedy matching.
-//   - Leaves adj unchanged on failure.
+//   - Does not mutate adj.
+//   - Does not inspect edge values.
+//   - Suitable for Blossom and greedy matching append transactions.
 //
 // Inputs:
-//   - odd: odd-degree MST vertices.
-//   - dist: final symmetric complete TSP matrix.
-//   - adj: mutable Christofides multigraph adjacency.
+//   - adj: Christofides multigraph adjacency.
 //
 // Returns:
-//   - error: nil on exact matching success.
+//   - []int: per-vertex original lengths.
 //
 // Errors:
-//   - ErrInvalidMatching for malformed odd set or adjacency shape.
-//   - ErrMatchingUnavailable when the exact bootstrap cap is exceeded.
-//   - ErrIncompleteGraph when no perfect matching exists.
-//   - Matrix/TSP sentinels from buildMatchingProblem.
+//   - None.
 //
 // Determinism:
-//   - Preserves odd scan order and DP deterministic tie policy.
+//   - Fixed increasing vertex-index scan.
 //
 // Complexity:
-//   - Time O(n^2+k^2*2^k), Space O(n^2+2^k+k^2), bounded for k<=22.
+//   - Time O(n), Space O(n).
 //
 // Notes:
-//   - This is not a full Blossom implementation.
-//   - Christofides may claim 1.5 for this path because the produced matching is exact MWPM.
+//   - Pair with rollbackAdj in deferred failure paths.
 //
 // AI-Hints:
-//   - Do not return ErrMatchingNotImplemented from this production path.
-//   - Do not call greedyMatch from here; fallback belongs to the Christofides policy layer.
-func blossomMatch(odd []int, dist matrix.Matrix, adj [][]int) (err error) {
-	if len(odd) == 0 {
-		return nil
-	}
-	if (len(odd) & 1) == 1 {
-		return ErrInvalidMatching
+//   - Do not deep-copy adjacency for append-only rollback.
+//   - Do not reorder adjacency during snapshotting.
+func snapshotAdjLengths(adj [][]int) []int {
+	lengths := make([]int, len(adj))
+
+	for vertex := range adj {
+		lengths[vertex] = len(adj[vertex])
 	}
 
-	// Capture a transactional checkpoint of slice lengths before attempting graph mutation.
-	// The deferred closure guarantees a clean rollback of all appended edges if subsequent phases fail.
-	lengths := snapshotAdjLengths(adj)
-	defer func() {
-		if err != nil {
-			// Trigger state recovery: discard intermediate mutations and restore original graph layout.
-			rollbackAdj(adj, lengths)
+	return lengths
+}
+
+// rollbackAdj removes matching edges appended after snapshotAdjLengths.
+// It restores slice lengths only and therefore preserves existing edge order.
+//
+// Implementation:
+//   - Stage 1: Scan all vertices.
+//   - Stage 2: Validate snapshot bounds defensively.
+//   - Stage 3: Truncate adj[v] back to the recorded length.
+//
+// Behavior highlights:
+//   - Mutates adj only by truncation.
+//   - Preserves all pre-existing adjacency entries.
+//   - Ignores malformed snapshot entries instead of panicking.
+//
+// Inputs:
+//   - adj: mutable adjacency to restore.
+//   - lengths: snapshot returned by snapshotAdjLengths.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Fixed increasing vertex-index scan.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - This helper is intentionally private to the matching stage.
+//
+// AI-Hints:
+//   - Do not sort adjacency during rollback; Eulerian traversal depends on stable order.
+func rollbackAdj(adj [][]int, lengths []int) {
+	for vertex := range adj {
+		if vertex >= len(lengths) {
+			continue
 		}
-	}()
+		if lengths[vertex] < 0 || lengths[vertex] > len(adj[vertex]) {
+			continue
+		}
 
-	// Construct the independent, localized matching problem sub-graph induced by the odd vertices.
-	problem, err := buildMatchingProblem(odd, dist)
-	if err != nil {
-		return err
+		adj[vertex] = adj[vertex][:lengths[vertex]]
 	}
-
-	// Invoke the exact subset DP engine to resolve the absolute minimum cost perfect matching.
-	match, _, err := exactSmallPerfectMatching(problem)
-	if err != nil {
-		return err
-	}
-
-	return appendPerfectMatching(problem, match, adj)
 }

@@ -50,10 +50,26 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// OneTreeConfig controls the subgradient loop and optional wall-clock budget.
+// OneTreeConfig controls the Held-Karp 1-tree subgradient loop and optional
+// wall-clock budget. The defaults are deterministic and conservative enough for
+// branch-and-bound pruning without making lower-bound computation dominate solving.
 //
-// A compact, deterministic default works well as a drop-in bound.
-// Increasing MaxIter tightens the bound at O(n²) cost per iteration.
+// Implementation:
+//   - MaxIter bounds the number of subgradient iterations.
+//   - StepScale controls the initial subgradient step size.
+//   - MinStep stops the loop once movement becomes numerically irrelevant.
+//   - TimeLimit optionally caps wall-clock work for defensive production use.
+//
+// Behavior highlights:
+//   - Zero-value fields are normalized by DefaultOneTreeConfig.
+//   - Deterministic when TimeLimit is zero.
+//   - Increasing MaxIter usually tightens the bound at O(n^2) work per iteration.
+//
+// Notes:
+//   - This config does not validate metricity; callers still own matrix validation.
+//
+// AI-Hints:
+//   - Prefer deterministic MaxIter tuning before introducing time budgets.
 type OneTreeConfig struct {
 	// MaxIter is the maximum number of subgradient iterations (≥ 1).
 	MaxIter int
@@ -66,7 +82,37 @@ type OneTreeConfig struct {
 	TimeLimit time.Duration
 }
 
-// DefaultOneTreeConfig returns conservative, production-grade defaults.
+// DefaultOneTreeConfig returns conservative production-grade defaults for the
+// Held-Karp 1-tree lower-bound loop. The values favor deterministic useful pruning
+// over aggressive runtime spending.
+//
+// Implementation:
+//   - Stage 1: Set a bounded iteration count.
+//   - Stage 2: Set stable subgradient step parameters.
+//   - Stage 3: Leave wall-clock budget disabled by default.
+//
+// Behavior highlights:
+//   - Allocation-free.
+//   - Deterministic across runs.
+//   - Safe as a drop-in bound configuration.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - OneTreeConfig: normalized default configuration.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure constant construction.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not make TimeLimit non-zero by default; it hurts reproducibility.
 func DefaultOneTreeConfig() OneTreeConfig {
 	return OneTreeConfig{
 		MaxIter:   32,
@@ -76,19 +122,55 @@ func DefaultOneTreeConfig() OneTreeConfig {
 	}
 }
 
-// OneTreeLowerBound computes the Held–Karp 1-tree lower bound for a symmetric
-// instance using 'root' as the distinguished vertex (usually opts.StartVertex).
+// OneTreeLowerBound computes the Held-Karp 1-tree lower bound for a symmetric
+// TSP instance using root as the distinguished vertex. Each iteration builds a
+// minimum 1-tree on reduced costs c'(u,v)=c(u,v)+pi[u]+pi[v], then updates pi
+// by the degree violation deg[v]-2.
 //
-// Returned lower bound is stabilized to 1e−9 for cross-platform consistency.
-// The degree vector of the *final* 1-tree is returned for diagnostics.
+// Implementation:
+//   - Stage 1: Validate matrix shape, root, symmetry policy, and numeric weights.
+//   - Stage 2: Initialize reusable oneTreeEngine buffers.
+//   - Stage 3: Repeatedly build a reduced-cost 1-tree.
+//   - Stage 4: Convert reduced total back to an original-cost lower bound.
+//   - Stage 5: Update multipliers with a deterministic subgradient step.
+//   - Stage 6: Return the best stabilized lower bound and final degree vector.
+//
+// Behavior highlights:
+//   - Supports only symmetric instances.
+//   - Uses deterministic Prim O(n^2) over V\{root}.
+//   - Returns the final 1-tree degrees for diagnostics.
+//   - Stabilizes the returned bound for cross-platform floating-point consistency.
+//
+// Inputs:
+//   - dist: weighted matrix.
+//   - root: distinguished vertex, usually opts.StartVertex.
+//   - symmetric: caller-declared symmetry flag.
+//   - cfg: subgradient configuration.
+//
+// Returns:
+//   - lb: best lower bound found.
+//   - degrees: degree vector of the final 1-tree.
+//   - err: nil when a 1-tree can be formed.
 //
 // Errors:
-//   - ErrATSPNotSupportedByAlgo for asymmetric instances.
-//   - ErrIncompleteGraph if no 1-tree can be formed (disconnected V\{root}
-//     or fewer than two finite root edges).
-//   - Strict sentinels for NaN/negative weights or shape issues.
+//   - ErrATSPNotSupportedByAlgo for asymmetric use.
+//   - ErrIncompleteGraph when V\{root} is disconnected or root has fewer than two finite edges.
+//   - ErrDimensionMismatch, ErrInvalidVertex, ErrNaNWeight, ErrNegativeWeight,
+//     or ErrAsymmetry from validation.
 //
-// Complexity: O(cfg.MaxIter * n²) time, O(n²) memory.
+// Determinism:
+//   - Fixed vertex scans, deterministic Prim tie-breaking, deterministic step schedule.
+//
+// Complexity:
+//   - Time O(cfg.MaxIter*n^2), Space O(n^2).
+//
+// Notes:
+//   - This is a lower bound, not a tour constructor.
+//   - Metric triangle inequality is not required for the 1-tree calculation itself.
+//
+// AI-Hints:
+//   - Do not use this for ATSP.
+//   - Reuse buffers through oneTreeEngine; do not allocate per iteration.
 func OneTreeLowerBound(
 	dist matrix.Matrix,
 	root int,
@@ -230,8 +312,23 @@ func OneTreeLowerBound(
 	return round1e9(bestLB), outDeg, nil
 }
 
-// oneTreeEngine holds mutable state for building 1-trees on reduced costs.
-// Arrays are reused across iterations to avoid per-iteration allocations.
+// oneTreeEngine owns reusable mutable buffers for Held-Karp 1-tree construction.
+// It avoids per-iteration allocations while keeping reduced-cost, degree, and Prim
+// state explicit and testable.
+//
+// Implementation:
+//   - Stores the validated dense/snapshot cost representation.
+//   - Stores pi multipliers and degree vector.
+//   - Reuses Prim arrays across buildOneTreeReduced calls.
+//
+// Behavior highlights:
+//   - Internal-only.
+//   - Not concurrency-safe.
+//   - One engine instance is scoped to one lower-bound computation.
+//
+// Notes:
+//   - Keeping this as a struct is preferable to closures because branch-and-bound
+//     may later reuse or inspect bound state.
 type oneTreeEngine struct {
 	n    int       // number of vertices
 	root int       // distinguished root vertex r
@@ -247,12 +344,62 @@ type oneTreeEngine struct {
 	key    []float64
 }
 
-// reduced returns c'_{uv} = c_{uv} + π_u + π_v (symmetric case).
+// reduced returns the symmetric reduced cost c'(u,v)=c(u,v)+pi[u]+pi[v].
+// The caller must pass valid distinct local vertices.
+//
+// Implementation:
+//   - Stage 1: Fetch original cost.
+//   - Stage 2: Add both endpoint multipliers.
+//   - Stage 3: Return the reduced edge cost.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Symmetric by construction when the original matrix is symmetric.
+//
+// Inputs:
+//   - u: first local vertex.
+//   - v: second local vertex.
+//
+// Returns:
+//   - float64: reduced symmetric edge cost.
+//
+// Errors:
+//   - None. Caller owns bounds validation.
+//
+// Determinism:
+//   - Pure indexed arithmetic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (e *oneTreeEngine) reduced(u, v int) float64 {
 	return e.w[u*e.n+v] + e.pi[u] + e.pi[v]
 }
 
-// zeroDegrees clears the degree vector (O(n)).
+// zeroDegrees clears the reusable degree vector before building the next 1-tree.
+//
+// Implementation:
+//   - Stage 1: Scan the full degree slice.
+//   - Stage 2: Set every degree entry to zero.
+//
+// Behavior highlights:
+//   - Mutates only e.deg.
+//   - Allocation-free.
+//   - Called once per subgradient iteration.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Fixed index-order clear.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
 func (e *oneTreeEngine) zeroDegrees() {
 	var i int
 	for i = 0; i < e.n; i++ {
@@ -260,14 +407,42 @@ func (e *oneTreeEngine) zeroDegrees() {
 	}
 }
 
-// buildOneTreeReduced builds a minimum 1-tree on reduced costs:
-//   - MST over V\{root} via Prim in O(n²);
-//   - two cheapest root edges (w.r.t. reduced costs) then added.
+// buildOneTreeReduced builds a minimum 1-tree under current reduced costs.
+// It first computes an MST over V\{root} with deterministic O(n^2) Prim, then
+// adds the two cheapest reduced-cost edges incident to root.
 //
-// It fills e.deg and returns the *reduced-cost* total.
+// Implementation:
+//   - Stage 1: Clear degrees and Prim state.
+//   - Stage 2: Run Prim on all vertices except root.
+//   - Stage 3: Reject disconnected V\{root}.
+//   - Stage 4: Add the two cheapest finite root edges.
+//   - Stage 5: Fill degree counts and return the reduced total.
 //
-// If the 1-tree cannot be formed (disconnected V\{root} or <2 finite root edges),
-// ErrIncompleteGraph is returned.
+// Behavior highlights:
+//   - Mutates reusable degree and Prim buffers.
+//   - Does not mutate multipliers pi.
+//   - Deterministic under equal reduced costs.
+//   - Returns reduced-cost total; caller converts to original lower bound.
+//
+// Inputs:
+//   - None; reads engine root, costs, and multipliers.
+//
+// Returns:
+//   - float64: total reduced cost of the constructed 1-tree.
+//   - error: nil when a complete 1-tree exists.
+//
+// Errors:
+//   - ErrIncompleteGraph when V\{root} is disconnected or fewer than two root edges are finite.
+//
+// Determinism:
+//   - Fixed vertex scans and stable tie-breaking.
+//
+// Complexity:
+//   - Time O(n^2), Space O(n).
+//
+// AI-Hints:
+//   - Do not include root in the MST phase.
+//   - Do not forget to add exactly two root edges.
 func (e *oneTreeEngine) buildOneTreeReduced() (float64, error) {
 	var inf = math.Inf(1)
 	e.zeroDegrees()

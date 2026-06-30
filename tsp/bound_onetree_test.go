@@ -13,7 +13,6 @@ package tsp_test
 import (
 	"errors"
 	"math"
-	"strings"
 	"testing"
 
 	"github.com/katalvlaran/lvlath/matrix"
@@ -86,8 +85,8 @@ func TestOneTree_Errors_StrictSentinels(t *testing.T) {
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkTriangle() // n = 3
 		_, _, err = tsp.OneTreeLowerBound(m, 9, true, cfg)
-		if !(errors.Is(err, tsp.ErrDimensionMismatch) || strings.Contains(err.Error(), "start vertex out of range")) {
-			t.Fatalf("want ErrDimensionMismatch (or 'start vertex out of range'), got %v", err)
+		if !errors.Is(err, tsp.ErrStartOutOfRange) {
+			t.Fatalf("want ErrStartOutOfRange, got %v", err)
 		}
 	})
 
@@ -95,8 +94,8 @@ func TestOneTree_Errors_StrictSentinels(t *testing.T) {
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkBad(0, 1, math.NaN())
 		_, _, err = tsp.OneTreeLowerBound(m, 0, true, cfg)
-		if !errors.Is(err, tsp.ErrDimensionMismatch) {
-			t.Fatalf("want ErrDimensionMismatch, got %v", err)
+		if !errors.Is(err, tsp.ErrNaNInf) {
+			t.Fatalf("want ErrNaNInf, got %v", err)
 		}
 	})
 

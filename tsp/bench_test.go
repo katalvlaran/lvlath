@@ -25,6 +25,21 @@ import (
 	"github.com/katalvlaran/lvlath/tsp"
 )
 
+func benchmarkPoints(n int, ripple float64) [][2]float64 {
+	points := make([][2]float64, n)
+
+	for vertex := 0; vertex < n; vertex++ {
+		theta := 2 * math.Pi * float64(vertex) / float64(n)
+		radius := 1.0 + ripple*math.Sin(float64((vertex*7)%13))
+		points[vertex] = [2]float64{
+			radius * math.Cos(theta),
+			radius * math.Sin(theta),
+		}
+	}
+
+	return points
+}
+
 // deepCopyAdj performs a deep copy of an adjacency list (each row cloned).
 // Time: O(E). Memory: O(E). Needed when the callee mutates adjacency in-place.
 func deepCopyAdj(adj [][]int) [][]int {
@@ -81,8 +96,8 @@ func BenchmarkBB_SimpleBound_n9(b *testing.B) {
 	var it int                   // iteration counter
 	for it = 0; it < b.N; it++ { // repeat per the harness
 		// Solve the instance end-to-end via dispatcher.
-		var _, err = tsp.SolveWithMatrix(m, nil, opt) // run exact BnB
-		if err != nil {                               // exact solve should not fail on this instance
+		var _, err = tsp.SolveMatrix(m, nil, opt) // run exact BnB
+		if err != nil {                           // exact solve should not fail on this instance
 			b.Fatalf("BranchAndBound(SimpleBound) failed: %v", err)
 		}
 	}
@@ -119,9 +134,30 @@ func BenchmarkBB_OneTreeRoot_n9(b *testing.B) {
 	b.ResetTimer()               // reset timer
 	var it int                   // iteration counter
 	for it = 0; it < b.N; it++ { // harness-driven repetitions
-		var _, err = tsp.SolveWithMatrix(m, nil, opt) // run BnB with OneTree
+		var _, err = tsp.SolveMatrix(m, nil, opt) // run BnB with OneTree
 		if err != nil {
 			b.Fatalf("BranchAndBound(OneTree) failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkBranchAndBoundSimple_n9(b *testing.B) {
+	dist := euclid(benchmarkPoints(9, 0.02))
+
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.BranchAndBound
+	opts.Symmetric = true
+	opts.StartVertex = startV
+	opts.BoundAlgo = tsp.SimpleBound
+	opts.EnableLocalSearch = false
+	opts.Eps = epsTiny
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := tsp.SolveMatrix(dist, nil, opts); err != nil {
+			b.Fatalf("BranchAndBound SimpleBound failed: %v", err)
 		}
 	}
 }
@@ -163,8 +199,8 @@ func BenchmarkTwoOpt_Symmetric_n200(b *testing.B) {
 	b.ResetTimer()               // reset timer
 	var it int                   // loop counter
 	for it = 0; it < b.N; it++ { // repeat
-		var _, err = tsp.SolveWithMatrix(m, nil, opt) // run 2-opt
-		if err != nil {                               // heuristic solve should not fail
+		var _, err = tsp.SolveMatrix(m, nil, opt) // run 2-opt
+		if err != nil {                           // heuristic solve should not fail
 			b.Fatalf("TwoOptOnly (symmetric) failed: %v", err)
 		}
 	}
@@ -200,7 +236,7 @@ func BenchmarkTwoOpt_ATSP_n150(b *testing.B) {
 	b.ResetTimer()               // reset timer
 	var it int                   // iteration counter
 	for it = 0; it < b.N; it++ { // repeat
-		var _, err = tsp.SolveWithMatrix(m, nil, opt) // run 2-opt ATSP
+		var _, err = tsp.SolveMatrix(m, nil, opt) // run 2-opt ATSP
 		if err != nil {
 			b.Fatalf("TwoOptOnly (ATSP) failed: %v", err)
 		}
@@ -242,7 +278,7 @@ func BenchmarkAuto_SymmetricChristofides_n200(b *testing.B) {
 	b.ResetTimer()               // reset timer
 	var it int                   // iteration counter
 	for it = 0; it < b.N; it++ { // repeat
-		var _, err = tsp.SolveWithMatrix(m, nil, opt) // run Auto
+		var _, err = tsp.SolveMatrix(m, nil, opt) // run Auto
 		if err != nil {
 			b.Fatalf("Auto (symmetric) failed: %v", err)
 		}
@@ -349,6 +385,48 @@ func BenchmarkTourCost_n200(b *testing.B) {
 		var _, err = tsp.TourCost(m, tour) // compute total cost
 		if err != nil {
 			b.Fatalf("TourCost failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkChristofidesBlossom_n64(b *testing.B) {
+	dist := euclid(benchmarkPoints(64, 0.02))
+
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.Christofides
+	opts.Symmetric = true
+	opts.StartVertex = startV
+	opts.MatchingAlgo = tsp.BlossomMatch
+	opts.EnableLocalSearch = false
+	opts.Eps = epsTiny
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := tsp.SolveMatrix(dist, nil, opts); err != nil {
+			b.Fatalf("Christofides Blossom failed: %v", err)
+		}
+	}
+}
+
+func BenchmarkChristofidesGreedy_n200(b *testing.B) {
+	dist := euclid(benchmarkPoints(200, 0.02))
+
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.Christofides
+	opts.Symmetric = true
+	opts.StartVertex = startV
+	opts.MatchingAlgo = tsp.GreedyMatch
+	opts.EnableLocalSearch = false
+	opts.Eps = epsTiny
+
+	b.ReportAllocs()
+	b.ResetTimer()
+
+	for iteration := 0; iteration < b.N; iteration++ {
+		if _, err := tsp.SolveMatrix(dist, nil, opts); err != nil {
+			b.Fatalf("Christofides Greedy failed: %v", err)
 		}
 	}
 }

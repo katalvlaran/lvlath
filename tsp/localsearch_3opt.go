@@ -831,7 +831,31 @@ func applyThreeOptATSPTailSwap(tour []int, i int, j int, k int) []int {
 	return out
 }
 
-// maxi returns the maximum of two ints.
+// maxi returns the larger of two ints.
+//
+// Implementation:
+//   - Stage 1: Compare a and b.
+//   - Stage 2: Return a when a>=b, otherwise b.
+//
+// Behavior highlights:
+//   - Allocation-free.
+//   - Kept local to avoid importing generic helpers into hot local-search code.
+//
+// Inputs:
+//   - a: first integer.
+//   - b: second integer.
+//
+// Returns:
+//   - int: maximum value.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure comparison.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func maxi(a, b int) int {
 	if a > b {
 		return a
@@ -840,16 +864,53 @@ func maxi(a, b int) int {
 	return b
 }
 
-// randLite is a tiny shim: any RNG that implements Intn(int) (e.g., *rand.Rand).
-// The actual instance comes from rngFromSeed(opts.Seed); seed==0 ⇒ deterministic stream.
+// randLite is the minimal RNG interface required by randomized local-search moves.
+// It is satisfied by *rand.Rand and by deterministic test doubles that implement Intn.
+//
+// Implementation:
+//   - Single-method interface: Intn(int) int.
+//
+// Behavior highlights:
+//   - Keeps local-search code decoupled from concrete RNG types.
+//   - Enables deterministic tests.
+//   - Avoids package-level random state.
+//
+// Notes:
+//   - Instances are created by rngFromSeed.
 type randLite interface {
 	Intn(n int) int
 }
 
-// rngFromSeed returns a deterministic *rand.Rand.
-// Policy: seed==0 ⇒ use defaultRNGSeed; otherwise use the provided seed verbatim.
+// rngFromSeed returns a deterministic *rand.Rand for local-search perturbation choices.
+// seed==0 maps to defaultRNGSeed so the zero Options value remains reproducible.
 //
-// Complexity: O(1).
+// Implementation:
+//   - Stage 1: Replace zero seed with defaultRNGSeed.
+//   - Stage 2: Create a new rand.Source.
+//   - Stage 3: Return rand.New(source).
+//
+// Behavior highlights:
+//   - Does not use global math/rand state.
+//   - Deterministic for the same seed.
+//   - Allocation is limited to RNG construction.
+//
+// Inputs:
+//   - seed: caller-provided seed; zero means package default.
+//
+// Returns:
+//   - *rand.Rand: deterministic RNG stream.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Same effective seed produces the same sequence.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not use rand.Seed or package-level rand.Intn here.
 func rngFromSeed(seed int64) *rand.Rand {
 	if seed == 0 {
 		seed = defaultRNGSeed

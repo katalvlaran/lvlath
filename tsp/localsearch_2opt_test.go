@@ -23,17 +23,23 @@ import (
 
 // run2opt configures Options for TwoOptOnly and executes SolveWithMatrix.
 // Returns the final solver result (TSResult).
-func run2opt(m matrix.Matrix, eps float64, symmetric bool, seed int64, start int, timeLimit time.Duration) (tsp.TSResult, error) {
-	opt := tsp.DefaultOptions()
-	opt.Algo = tsp.TwoOptOnly
-	opt.Symmetric = symmetric
-	opt.EnableLocalSearch = true
-	opt.Eps = eps
-	opt.Seed = seed
-	opt.StartVertex = start
-	opt.TimeLimit = timeLimit
+func run2opt(
+	dist matrix.Matrix,
+	eps float64,
+	symmetric bool,
+	seed int64,
+	start int,
+	timeLimit time.Duration,
+) (*tsp.TSPResult, error) {
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.TwoOptOnly
+	opts.Symmetric = symmetric
+	opts.Eps = eps
+	opts.Seed = seed
+	opts.StartVertex = start
+	opts.TimeLimit = timeLimit
 
-	return tsp.SolveWithMatrix(m, nil, opt)
+	return tsp.SolveMatrix(dist, nil, opts)
 }
 
 // sameCycleEitherDir checks whether two tours represent the same cycle when both
@@ -84,9 +90,7 @@ func TestTwoOpt_TSP_ImprovesConvexHexagon(t *testing.T) {
 		if !sameCycleEitherDir(rot, want) {
 			t.Fatalf("unexpected tour:\n got:  %v\n want: %v (either direction, start=0)", rot, want)
 		}
-		if round1e9(res.Cost) <= 0 {
-			t.Fatalf("non-positive cost: %.12f", res.Cost)
-		}
+		mustValidTSPResult(t, res, n, startV, tsp.TwoOptOnly)
 	})
 }
 

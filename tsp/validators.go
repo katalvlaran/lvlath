@@ -113,15 +113,43 @@ func validateOptionsStandalone(opts Options) error {
 	}
 }
 
-// mustEnforceSymmetry tells whether the chosen algorithm *requires* symmetry.
+// mustEnforceSymmetry reports whether the selected algorithm requires a symmetric
+// distance matrix at validation time. It centralizes algorithm-specific symmetry policy
+// so solver entry points do not drift apart.
 //
-// Rationale:
-//   - Christofides: strictly symmetric (and metric).
-//   - ExactHeldKarp: supports both symmetric/ATSP.
-//   - TwoOptOnly: supports both; no hard mathematical restriction.
-//   - ThreeOptOnly/BranchAndBound: permissive for now.
+// Implementation:
+//   - Stage 1: Inspect opts.Algo and related algorithm flags.
+//   - Stage 2: Return true for algorithms with a mathematical symmetry requirement.
+//   - Stage 3: Return false for algorithms that support directed/asymmetric costs.
 //
-// Complexity: O(1).
+// Behavior highlights:
+//   - Does not inspect matrix values.
+//   - Does not validate metric triangle inequality.
+//   - Keeps Christofides strictly symmetric.
+//   - Keeps Held-Karp and local-search-only paths permissive when supported.
+//
+// Inputs:
+//   - opts: solver options after defaulting.
+//
+// Returns:
+//   - bool: true when matrix symmetry must be enforced.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure switch over options.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Christofides still needs metric assumptions for the 1.5 guarantee;
+//     this helper only controls symmetry validation.
+//
+// AI-Hints:
+//   - Do not weaken Christofides symmetry here.
+//   - Do not add O(n^2) matrix checks to this predicate.
 func mustEnforceSymmetry(opts Options) bool {
 	if opts.Algo == Christofides {
 		return true
@@ -130,9 +158,40 @@ func mustEnforceSymmetry(opts Options) bool {
 	return opts.Symmetric
 }
 
-// validateStartVertex verifies that start∈[0..n-1].
+// validateStartVertex verifies that start is a valid local vertex in [0,n).
+// It is shared by solvers, tour normalization, and graph traversal entry points.
 //
-// Complexity: O(1).
+// Implementation:
+//   - Stage 1: Validate positive dimension.
+//   - Stage 2: Check lower and upper bounds for start.
+//
+// Behavior highlights:
+//   - Does not inspect the distance matrix.
+//   - Does not rewrite invalid starts.
+//   - Preserves sentinel error semantics for public APIs.
+//
+// Inputs:
+//   - n: number of local vertices.
+//   - start: requested local start vertex.
+//
+// Returns:
+//   - error: nil when start is in range.
+//
+// Errors:
+//   - ErrDimensionMismatch for n <= 0.
+//   - ErrInvalidVertex for start outside [0,n).
+//
+// Determinism:
+//   - Pure bounds check.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Call after matrix dimension validation when possible.
+//
+// AI-Hints:
+//   - Do not silently clamp start to zero.
 func validateStartVertex(n int, start int) error {
 	if start < 0 || start >= n {
 		return ErrStartOutOfRange

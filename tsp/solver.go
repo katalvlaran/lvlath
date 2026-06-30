@@ -571,13 +571,44 @@ func solveDegenerateIfAny(dist matrix.Matrix, ids []string, opts Options) (*TSPR
 	}, true, nil
 }
 
-// trivialRing returns a canonical Hamiltonian cycle [start, start+1, …, n−1, 0, …, start]
-// with closure; it allocates exactly n+1 integers and performs no matrix lookups.
+// trivialRing returns the canonical Hamiltonian cycle that walks vertices in increasing
+// modular order from start and appends the closing start vertex. It is used for tiny
+// or degenerate solver paths that do not need matrix inspection.
 //
-// Contracts:
-//   - 0 ≤ start < n; n ≥ 2.
+// Implementation:
+//   - Stage 1: Validate n and start bounds.
+//   - Stage 2: Allocate exactly n+1 integers.
+//   - Stage 3: Fill vertices start,start+1,...,n-1,0,...,start-1.
+//   - Stage 4: Append start as the closing vertex.
 //
-// Complexity: O(n) time, O(n) space.
+// Behavior highlights:
+//   - Performs no matrix lookups.
+//   - Does not compute cost.
+//   - Produces deterministic output for a fixed n/start.
+//
+// Inputs:
+//   - n: number of local vertices, requiring n >= 2.
+//   - start: local start vertex, requiring 0 <= start < n.
+//
+// Returns:
+//   - []int: closed Hamiltonian cycle of length n+1.
+//   - error: nil when inputs are valid.
+//
+// Errors:
+//   - ErrDimensionMismatch for n < 2.
+//   - ErrInvalidVertex for invalid start.
+//
+// Determinism:
+//   - Fixed increasing modular order.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - Caller must compute cost separately if needed.
+//
+// AI-Hints:
+//   - Do not inspect the distance matrix here; this is a structural helper only.
 func trivialRing(n int, start int) ([]int, error) {
 	if n < 2 {
 		return nil, ErrDimensionMismatch

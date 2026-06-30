@@ -35,10 +35,44 @@ import (
 // Avoids tiny FP drifts across platforms/opt levels without affecting optimality.
 const roundScale = 1e9
 
-// ValidatePermutation checks that perm is a permutation of {0..n-1} of length n.
-// It does not allocate besides a single O(n) boolean marker slice.
+// ValidatePermutation checks that perm is a complete permutation of local vertices [0,n).
+// It rejects length mismatches, out-of-range vertices, and duplicate vertices before
+// downstream tour-cost or local-search code can observe corrupt cyclic state.
 //
-// Complexity: O(n) time, O(n) space.
+// Implementation:
+//   - Stage 1: Validate the permutation length.
+//   - Stage 2: Allocate one O(n) marker slice.
+//   - Stage 3: Scan vertices, checking bounds and duplicates.
+//   - Stage 4: Mark each seen vertex exactly once.
+//
+// Behavior highlights:
+//   - Does not mutate perm.
+//   - Does not accept partial paths.
+//   - Uses sentinel errors so callers can preserve API-level validation semantics.
+//
+// Inputs:
+//   - perm: candidate vertex order without the closing duplicate.
+//   - n: expected number of local vertices.
+//
+// Returns:
+//   - error: nil when perm contains every vertex in [0,n) exactly once.
+//
+// Errors:
+//   - ErrDimensionMismatch for wrong length.
+//   - ErrInvalidVertex for out-of-range vertices.
+//   - ErrDuplicateVertex for repeated vertices.
+//
+// Determinism:
+//   - Fixed left-to-right scan.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - Closed tours should pass only their first n vertices to this function.
+//
+// AI-Hints:
+//   - Do not replace this with sorting; order must be preserved for tour semantics.
 func ValidatePermutation(perm []int, n int) error {
 	if len(perm) != n {
 		return ErrDimensionMismatch
@@ -174,15 +208,45 @@ func ValidateTour(tour []int, n int, start int) error {
 	return nil
 }
 
-// RotateTourToStart returns a fresh copy of the tour shifted so that
-// out[0] == start and out[n] == start. The input may be either a closed tour
-// (len==n+1) or a raw path (len==n, no closing vertex). In the raw-path case,
-// the function appends the closing start.
+// RotateTourToStart returns a fresh closed tour whose first and last vertex are start.
+// It accepts either a closed tour of length n+1 or a raw Hamiltonian path of length n,
+// then rotates the cyclic order without changing orientation.
 //
-// Pre-conditions:
-//   - start must appear in tour at least once within the first n elements.
+// Implementation:
+//   - Stage 1: Validate input shape as closed tour or raw path.
+//   - Stage 2: Search start in the first n positions.
+//   - Stage 3: Copy vertices from start to end, then prefix to start.
+//   - Stage 4: Append the closing start vertex.
 //
-// Complexity: O(n) time, O(n) space.
+// Behavior highlights:
+//   - Does not mutate the input tour.
+//   - Preserves cyclic order and orientation.
+//   - Normalizes raw paths into closed tours.
+//   - Allocates exactly one output slice.
+//
+// Inputs:
+//   - tour: closed cycle len n+1 or raw path len n.
+//   - start: local vertex that must become out[0] and out[n].
+//
+// Returns:
+//   - []int: fresh closed tour rotated to start.
+//   - error: nil when start is present and shape is valid.
+//
+// Errors:
+//   - ErrDimensionMismatch for empty or malformed tour shape.
+//   - ErrInvalidVertex when start does not appear in the first n vertices.
+//
+// Determinism:
+//   - Uses the first occurrence of start in the permutation prefix.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - This helper does not validate full permutation uniqueness.
+//
+// AI-Hints:
+//   - Do not rotate over the duplicated closing vertex; search only the first n entries.
 func RotateTourToStart(tour []int, start int) ([]int, error) {
 	if len(tour) == 0 {
 		return nil, ErrDimensionMismatch
@@ -230,16 +294,43 @@ func RotateTourToStart(tour []int, start int) ([]int, error) {
 	return out, nil
 }
 
-// CanonicalizeOrientationInPlace fixes the tour direction under a fixed start.
-// If the right neighbor tour[1] is lexicographically “worse” than the left
-// neighbor tour[n-1], the interior segment [1..n-1] is reversed in place.
-// This yields a unique canonical orientation for the same cyclic order.
+// CanonicalizeOrientationInPlace chooses a deterministic direction for a closed tour
+// whose start vertex is already fixed. It compares the right neighbor tour[1] and
+// left neighbor tour[n-1], then reverses the interior when the reversed orientation
+// is lexicographically preferred.
 //
-// Requirements:
-//   - len(tour) == n+1 and tour[0]==tour[n] (already closed).
-//   - The permutation part is assumed valid.
+// Implementation:
+//   - Stage 1: Validate closed-tour shape.
+//   - Stage 2: Keep tours with fewer than three distinct vertices unchanged.
+//   - Stage 3: Compare the two neighbors adjacent to the fixed start.
+//   - Stage 4: Reverse the interior segment [1,n-1] when needed.
 //
-// Complexity: O(n) time, O(1) space.
+// Behavior highlights:
+//   - Mutates the supplied tour in place.
+//   - Keeps tour[0] and tour[n] fixed.
+//   - Produces stable output for the same cyclic order.
+//   - Does not recompute cost.
+//
+// Inputs:
+//   - tour: closed tour with len n+1 and tour[0]==tour[n].
+//
+// Returns:
+//   - error: nil after orientation is canonicalized.
+//
+// Errors:
+//   - ErrDimensionMismatch for malformed or non-closed tours.
+//
+// Determinism:
+//   - Fixed neighbor comparison under a fixed start.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - The permutation part is assumed already valid.
+//
+// AI-Hints:
+//   - Do not reverse the duplicated closing vertex.
 func CanonicalizeOrientationInPlace(tour []int) error {
 	if len(tour) < 3 {
 		return ErrDimensionMismatch
@@ -255,14 +346,44 @@ func CanonicalizeOrientationInPlace(tour []int) error {
 	return nil
 }
 
-// reverseArcInPlace reverses the inclusive segment tour[i..k] in place,
-// keeping the closing vertex intact. This is the primitive used by 2-opt.
+// reverseArcInPlace reverses the inclusive interior segment tour[i:k] of a closed tour.
+// It preserves the duplicated closing vertex and is the primitive mutation used by
+// 2-opt and related local-search moves.
 //
-// Contracts:
-//   - The tour is closed: len(tour)==n+1 and tour[0]==tour[n].
-//   - Indices satisfy: 1 ≤ i < k ≤ n-1.
+// Implementation:
+//   - Stage 1: Validate closed-tour shape.
+//   - Stage 2: Validate interior arc bounds.
+//   - Stage 3: Swap endpoints inward until the segment is reversed.
 //
-// Complexity: O(k-i) time, O(1) space.
+// Behavior highlights:
+//   - Mutates tour in place.
+//   - Never moves tour[0] or tour[n].
+//   - Keeps the tour closed.
+//   - Performs no cost lookup.
+//
+// Inputs:
+//   - tour: closed tour with len n+1 and tour[0]==tour[n].
+//   - i: first interior index, requiring 1 <= i.
+//   - k: last interior index, requiring i < k <= n-1.
+//
+// Returns:
+//   - error: nil after the segment is reversed.
+//
+// Errors:
+//   - ErrDimensionMismatch for malformed tours.
+//   - ErrInvalidVertex for invalid arc indices.
+//
+// Determinism:
+//   - Fixed symmetric swaps.
+//
+// Complexity:
+//   - Time O(k-i), Space O(1).
+//
+// Notes:
+//   - Caller is responsible for recomputing or delta-updating tour cost.
+//
+// AI-Hints:
+//   - Do not allow k==n, because that would move the closing duplicate.
 func reverseArcInPlace(tour []int, i, k int) error {
 	var n = len(tour) - 1
 	if n < 2 {
@@ -336,14 +457,49 @@ func TourCost(dist matrix.Matrix, tour []int) (float64, error) {
 	return tourCostGeneric(dist, tour)
 }
 
-// tourCostDense sums costs along the cycle edges tour[i]→tour[i+1] using *matrix.Dense.
+// tourCostDense sums directed edge weights along a closed tour using the *matrix.Dense
+// fast path. It centralizes strict edge validation while avoiding interface-call overhead
+// for the common dense TSP representation.
 //
-// Checks performed per edge:
-//   - indices in range,
-//   - weight finite (no NaN), not ±Inf (⇒ ErrIncompleteGraph),
-//   - non-negative (⇒ ErrNegativeWeight).
+// Implementation:
+//   - Stage 1: Validate non-nil dense matrix and tour shape.
+//   - Stage 2: Validate every directed edge endpoint.
+//   - Stage 3: Read weights directly from the dense matrix.
+//   - Stage 4: Reject NaN, infinity, and negative weights.
+//   - Stage 5: Accumulate the total cost.
 //
-// Complexity: O(n).
+// Behavior highlights:
+//   - Does not mutate the tour or matrix.
+//   - Uses the same sentinel semantics as generic cost evaluation.
+//   - Treats ±Inf as incomplete graph edges.
+//   - Keeps dense fast path allocation-free.
+//
+// Inputs:
+//   - d: dense weighted adjacency matrix.
+//   - tour: closed tour, normally len n+1.
+//
+// Returns:
+//   - float64: total directed cycle cost.
+//   - error: nil when all edges are valid.
+//
+// Errors:
+//   - ErrDimensionMismatch for malformed matrix/tour shape.
+//   - ErrInvalidVertex for out-of-range endpoints.
+//   - ErrIncompleteGraph for infinite weights.
+//   - ErrNaNWeight for NaN weights.
+//   - ErrNegativeWeight for negative weights.
+//
+// Determinism:
+//   - Fixed left-to-right edge scan.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - This function does not enforce symmetry.
+//
+// AI-Hints:
+//   - Prefer this path for *matrix.Dense to avoid interface overhead.
 func tourCostDense(d *matrix.Dense, tour []int) (float64, error) {
 	// Shape guard.
 	var (
@@ -397,12 +553,49 @@ func tourCostDense(d *matrix.Dense, tour []int) (float64, error) {
 	return round1e9(sum), nil
 }
 
-// tourCostGeneric sums costs using the matrix.Matrix interface.
+// tourCostGeneric sums directed edge weights along a closed tour through the matrix.Matrix
+// interface. It mirrors tourCostDense validation semantics while supporting any compatible
+// matrix backend.
 //
-// Same checks as tourCostDense; slightly higher call overhead.
-// Kept lean to avoid hidden allocations.
+// Implementation:
+//   - Stage 1: Validate non-nil matrix and tour shape.
+//   - Stage 2: Validate every directed edge endpoint.
+//   - Stage 3: Read edge weights through At(i,j).
+//   - Stage 4: Reject NaN, infinity, and negative weights.
+//   - Stage 5: Accumulate the total cost.
 //
-// Complexity: O(n).
+// Behavior highlights:
+//   - Does not mutate the tour or matrix.
+//   - Keeps sentinel errors aligned with the dense fast path.
+//   - Avoids hidden allocations.
+//   - Supports asymmetric directed costs when the chosen algorithm allows them.
+//
+// Inputs:
+//   - m: matrix backend implementing matrix.Matrix.
+//   - tour: closed tour, normally len n+1.
+//
+// Returns:
+//   - float64: total directed cycle cost.
+//   - error: nil when all edges are valid.
+//
+// Errors:
+//   - ErrDimensionMismatch for malformed matrix/tour shape.
+//   - ErrInvalidVertex for out-of-range endpoints.
+//   - ErrIncompleteGraph for infinite weights.
+//   - ErrNaNWeight for NaN weights.
+//   - ErrNegativeWeight for negative weights.
+//
+// Determinism:
+//   - Fixed left-to-right edge scan.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - This path has higher call overhead than tourCostDense.
+//
+// AI-Hints:
+//   - Keep this lean; backend-specific acceleration belongs in dedicated fast paths.
 func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
 	// Shape guard.
 	var (
@@ -452,10 +645,48 @@ func tourCostGeneric(m matrix.Matrix, tour []int) (float64, error) {
 	return round1e9(sum), nil
 }
 
-// edgeCost fetches the weight for a single directed edge u→v with strict validation.
-// Useful for local-search deltas (2-opt/3-opt) to keep sentinel semantics centralized.
+// edgeCost fetches and validates one directed edge weight u->v through matrix.Matrix.
+// Local-search deltas use this helper so sentinel error behavior remains centralized
+// across 2-opt, 3-opt, and candidate move evaluation.
 //
-// Complexity: O(1).
+// Implementation:
+//   - Stage 1: Validate endpoint bounds against matrix dimensions.
+//   - Stage 2: Fetch weight through At(u,v).
+//   - Stage 3: Reject NaN, infinity, and negative weights.
+//   - Stage 4: Return the validated finite cost.
+//
+// Behavior highlights:
+//   - Does not mutate the matrix.
+//   - Works for symmetric and asymmetric matrices.
+//   - Preserves strict validation even in local-search fast paths.
+//
+// Inputs:
+//   - m: matrix backend.
+//   - u: source local vertex.
+//   - v: target local vertex.
+//
+// Returns:
+//   - float64: finite non-negative directed edge weight.
+//   - error: nil when the edge is valid.
+//
+// Errors:
+//   - ErrDimensionMismatch for nil or malformed matrix.
+//   - ErrInvalidVertex for out-of-range endpoints.
+//   - ErrIncompleteGraph for infinite weights.
+//   - ErrNaNWeight for NaN weights.
+//   - ErrNegativeWeight for negative weights.
+//
+// Determinism:
+//   - Pure indexed edge lookup.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This helper intentionally does not check u==v; algorithm-level validation owns that policy.
+//
+// AI-Hints:
+//   - Do not duplicate weight validation in local-search code; call this helper.
 func edgeCost(m matrix.Matrix, u, v int) (float64, error) {
 	if err := matrix.ValidateNotNil(m); err != nil {
 		return 0, errors.Join(ErrNilDistanceMatrix, err)

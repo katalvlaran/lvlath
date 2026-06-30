@@ -52,9 +52,24 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// bbEngine holds all search data and policies.
-// We use a dedicated engine struct (instead of anonymous closures) to keep
-// dependencies explicit, testing simpler, and hot-path state predictable.
+// bbEngine owns branch-and-bound search state, matrix snapshots, incumbent policy,
+// lower-bound buffers, and deterministic neighbor ordering. A dedicated struct keeps
+// hot-path dependencies explicit and avoids closure capture surprises.
+//
+// Implementation:
+//   - Stores validated distance access.
+//   - Stores current path, visited flags, and incumbent tour.
+//   - Stores min-in/min-out arrays for admissible degree-1 lower bounds.
+//   - Stores deterministic neighbor order per vertex.
+//
+// Behavior highlights:
+//   - Internal-only.
+//   - Not concurrency-safe.
+//   - One engine is scoped to one Solve call.
+//   - Keeps allocations predictable across recursive search.
+//
+// Notes:
+//   - Public API policy belongs in Options validation, not in this engine.
 type bbEngine struct {
 	// Configuration / policy
 	n         int
@@ -302,14 +317,39 @@ func (e *bbEngine) precomputeMinima() error {
 	return nil
 }
 
-// neighborOrder implements sort.Interface for a row of neighbors ordered by weight.
+// neighborOrder implements sort.Interface for one row of candidate neighbors ordered
+// by edge weight and then by vertex ID. Stable deterministic ordering improves pruning
+// reproducibility and makes tests independent of map or heap iteration.
+//
+// Implementation:
+//   - Len reports candidate count.
+//   - Less compares edge cost, then vertex ID.
+//   - Swap exchanges candidate entries in place.
+//
+// Behavior highlights:
+//   - Internal sort adapter.
+//   - Does not inspect global solver state after construction.
+//   - Keeps equal-weight behavior deterministic.
+//
+// Notes:
+//   - The backing slices are intentionally mutated by sort.Sort.
 type neighborOrder struct {
 	u   int
 	row []int
 	e   *bbEngine
 }
 
+// Len returns the number of neighbor candidates.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (no neighborOrder) Len() int { return len(no.row) }
+
+// Less reports whether candidate i should be explored before candidate j.
+// It orders by lower edge weight first and vertex ID second for deterministic ties.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (no neighborOrder) Less(i, j int) bool {
 	vi, vj := no.row[i], no.row[j]
 	wi, wj := no.e.at(no.u, vi), no.e.at(no.u, vj)
@@ -319,6 +359,11 @@ func (no neighborOrder) Less(i, j int) bool {
 
 	return wi < wj
 }
+
+// Swap exchanges two neighbor candidates in place.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
 func (no *neighborOrder) Swap(i, j int) { no.row[i], no.row[j] = no.row[j], no.row[i] }
 
 // buildNeighborOrder precomputes deterministic DFS branch order for every vertex.
@@ -622,14 +667,45 @@ func (e *bbEngine) seedUB(dist matrix.Matrix, opts Options) {
 	e.trySeedWithTrivialRing(dist, opts)
 }
 
-// lowerBound implements the degree-1 relaxation (admissible for TSP/ATSP).
-// In a Hamiltonian cycle each vertex has out-degree 1 and in-degree 1. For vertices
-// where outgoing/incoming is not yet fixed by the partial path, the eventual edge
-// cost is ≥ minOut[v] / ≥ minIn[v]. Therefore:
+// lowerBound computes the admissible degree-1 relaxation for the current partial path.
+// Any Hamiltonian cycle must give every vertex one outgoing and one incoming edge;
+// for still-unfixed endpoints, the completion cost is at least the cheapest available
+// outgoing/incoming edge contribution.
 //
-//	LB_extra ≥ max( sum(minOut over out-unfixed), sum(minIn over in-unfixed) )
+// Implementation:
+//   - Stage 1: Start from costSoFar.
+//   - Stage 2: Sum minOut for vertices whose outgoing edge is not fixed.
+//   - Stage 3: Sum minIn for vertices whose incoming edge is not fixed.
+//   - Stage 4: Add max(outRelaxation,inRelaxation) as the remaining-cost lower bound.
 //
-// and LB = costSoFar + LB_extra is a valid lower bound on any completion.
+// Behavior highlights:
+//   - Admissible for TSP and ATSP.
+//   - Does not mutate search state.
+//   - Cheap enough for recursive branch pruning.
+//   - Deterministic and allocation-free.
+//
+// Inputs:
+//   - costSoFar: exact cost of the current partial path.
+//   - last: last vertex in the partial path.
+//
+// Returns:
+//   - float64: lower bound on any completion of the current branch.
+//
+// Errors:
+//   - None. Invalid precomputed min arrays should already have been caught by validation.
+//
+// Determinism:
+//   - Fixed vertex scans.
+//
+// Complexity:
+//   - Time O(n), Space O(1).
+//
+// Notes:
+//   - Bound strength is modest but safe.
+//   - Held-Karp/1-tree bounds can be layered later for symmetric instances.
+//
+// AI-Hints:
+//   - Never overestimate here; branch-and-bound correctness depends on admissibility.
 func (e *bbEngine) lowerBound(costSoFar float64, last int) float64 {
 	if !e.useBound {
 		return costSoFar // NoBound policy (for testing/benchmarking).

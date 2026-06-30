@@ -9,6 +9,7 @@ package tsp_test
 import (
 	"errors"
 	"math"
+	"math/rand"
 	"slices"
 	"testing"
 	"time"
@@ -125,6 +126,57 @@ func (m altDense) Clone() matrix.Matrix {
 	return altDense{a: cp}
 }
 
+func denseFromRows(rows [][]float64) matrix.Matrix {
+	cp := make([][]float64, len(rows))
+	for i := range rows {
+		cp[i] = append([]float64(nil), rows[i]...)
+	}
+	return testDense{a: cp}
+}
+
+func denseWithNaN(n int) matrix.Matrix {
+	rows := completeUnitRows(n)
+	if n > 1 {
+		rows[0][1] = math.NaN()
+		rows[1][0] = math.NaN()
+	}
+	return testDense{a: rows}
+}
+
+func denseWithInf(n int, i int, j int) matrix.Matrix {
+	rows := completeUnitRows(n)
+	rows[i][j] = math.Inf(1)
+	rows[j][i] = math.Inf(1)
+	return testDense{a: rows}
+}
+
+func denseWithNegative(n int, i int, j int) matrix.Matrix {
+	rows := completeUnitRows(n)
+	rows[i][j] = -1
+	rows[j][i] = -1
+	return testDense{a: rows}
+}
+
+func denseNonZeroDiagonal(n int) matrix.Matrix {
+	rows := completeUnitRows(n)
+	rows[0][0] = 1
+	return testDense{a: rows}
+}
+
+func completeUnitRows(n int) [][]float64 {
+	rows := make([][]float64, n)
+	for i := 0; i < n; i++ {
+		rows[i] = make([]float64, n)
+		for j := 0; j < n; j++ {
+			if i == j {
+				continue
+			}
+			rows[i][j] = 1
+		}
+	}
+	return rows
+}
+
 // -----------------------------------------------------------------------------
 // Generic helpers (repeaters, assertions, numeric closeness)
 // -----------------------------------------------------------------------------
@@ -138,12 +190,10 @@ func Repeat(t *testing.T, n int, fn func(t *testing.T)) {
 	}
 }
 
-// mustEqualInts asserts exact equality of two integer slices (length & values).
-// Prefer slices.Equal over reflect.DeepEqual for slices of basic types.
-func mustEqualInts(t *testing.T, got, want []int) {
+func mustNoError(t *testing.T, err error) {
 	t.Helper()
-	if !slices.Equal(got, want) {
-		t.Fatalf("mismatch:\n got:  %v\n want: %v", got, want)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }
 
@@ -153,6 +203,22 @@ func mustErrIs(t *testing.T, err, target error) {
 	t.Helper()
 	if !errors.Is(err, target) {
 		t.Fatalf("want %v, got %v", target, err)
+	}
+}
+
+func mustEqualInt(t *testing.T, got int, want int, op string) {
+	t.Helper()
+	if got != want {
+		t.Fatalf("%s: got %d, want %d", op, got, want)
+	}
+}
+
+// mustEqualInts asserts exact equality of two integer slices (length & values).
+// Prefer slices.Equal over reflect.DeepEqual for slices of basic types.
+func mustEqualInts(t *testing.T, got, want []int) {
+	t.Helper()
+	if !slices.Equal(got, want) {
+		t.Fatalf("mismatch:\n got:  %v\n want: %v", got, want)
 	}
 }
 
@@ -181,6 +247,107 @@ func mustFloatClose(t *testing.T, got, want, rel, abs float64) {
 	t.Helper()
 	if !floatsClose(got, want, rel, abs) {
 		t.Fatalf("float mismatch: got=%.17g want=%.17g (rel=%.1e abs=%.1e)", got, want, rel, abs)
+	}
+}
+
+func mustEqualFloat(t *testing.T, got float64, want float64, eps float64, op string) {
+	t.Helper()
+	if math.IsNaN(got) || math.IsNaN(want) {
+		t.Fatalf("%s: NaN comparison got=%v want=%v", op, got, want)
+	}
+	if math.Abs(got-want) > eps {
+		t.Fatalf("%s: got %.17g, want %.17g, eps %.3g", op, got, want, eps)
+	}
+}
+
+// mustEqualStrings asserts exact equality of two string slices with a domain-specific
+// operation label. It avoids reflect.DeepEqual so result-projection failures are easier
+// to diagnose.
+func mustEqualStrings(t *testing.T, got []string, want []string, op string) {
+	t.Helper()
+
+	if len(got) != len(want) {
+		t.Fatalf("%s: len mismatch: got=%d want=%d; got=%v want=%v", op, len(got), len(want), got, want)
+	}
+
+	var index int
+	for index = 0; index < len(got); index++ {
+		if got[index] != want[index] {
+			t.Fatalf("%s: value mismatch at %d: got=%q want=%q; got=%v want=%v",
+				op, index, got[index], want[index], got, want)
+		}
+	}
+}
+
+func mustAdjEqual(t *testing.T, got [][]int, want [][]int) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("adj rows: got %d, want %d", len(got), len(want))
+	}
+	for row := range got {
+		if !slices.Equal(got[row], want[row]) {
+			t.Fatalf("adj[%d]: got %v, want %v", row, got[row], want[row])
+		}
+	}
+}
+
+// mustValidTSPResult verifies the public TSPResult contract shared by solver tests.
+// It checks shape, metadata, finite cost, algorithm identity, and Hamiltonian tour validity.
+//
+// Implementation:
+//   - Stage 1: Reject nil result.
+//   - Stage 2: Check public algorithm metadata.
+//   - Stage 3: Validate the closed Hamiltonian tour shape through tsp.ValidateTour.
+//   - Stage 4: Reject NaN, negative, and infinite costs.
+//   - Stage 5: Verify optional vertex IDs when they are present.
+//
+// Behavior highlights:
+//   - Does not require IDs because direct matrix tests may intentionally omit them.
+//   - Does not require Exact/Optimal because approximation and timeout policies differ.
+//   - Delegates tour-shape rules to production validation instead of duplicating them.
+//
+// Inputs:
+//   - result: returned public solver result.
+//   - n: expected number of vertices.
+//   - start: expected start/end vertex.
+//   - algorithm: expected result.Algorithm.
+//
+// Returns:
+//   - None. Fails the test on violation.
+//
+// Errors:
+//   - Test failure on nil result, invalid metadata, invalid tour, invalid cost, or malformed IDs.
+//
+// Determinism:
+//   - Pure validation with fixed field checks.
+//
+// Complexity:
+//   - Time O(n), Space O(n) inside tsp.ValidateTour.
+//
+// Notes:
+//   - Use specialized helpers for Exact/Optimal/TimedOut assertions when a test targets those policies.
+//
+// AI-Hints:
+//   - Do not check ApproximationRatio here; GreedyMatch and exact algorithms intentionally differ.
+//   - Do not require IDs unless the test explicitly passed IDs into SolveMatrix/SolveGraph.
+func mustValidTSPResult(t *testing.T, result *tsp.TSPResult, n int, start int, algorithm tsp.Algorithm) {
+	t.Helper()
+
+	if result == nil {
+		t.Fatalf("nil TSPResult")
+	}
+	if result.Algorithm != algorithm {
+		t.Fatalf("algorithm mismatch: got %v, want %v", result.Algorithm, algorithm)
+	}
+	if math.IsNaN(result.Cost) || math.IsInf(result.Cost, 0) || result.Cost < 0 {
+		t.Fatalf("invalid result cost: %.17g", result.Cost)
+	}
+	if err := tsp.ValidateTour(result.Tour, n, start); err != nil {
+		t.Fatalf("invalid result tour: %v; tour=%v", err, result.Tour)
+	}
+
+	if len(result.IDs) != 0 && len(result.IDs) != n {
+		t.Fatalf("invalid IDs length: got %d, want 0 or %d", len(result.IDs), n)
 	}
 }
 
@@ -323,21 +490,29 @@ func doubleAdj(adj [][]int) [][]int {
 	return cp
 }
 
-// mustEqualStrings asserts exact equality of two string slices with a domain-specific
-// operation label. It avoids reflect.DeepEqual so result-projection failures are easier
-// to diagnose.
-func mustEqualStrings(t *testing.T, got []string, want []string, op string) {
-	t.Helper()
+func cloneAdj(adj [][]int) [][]int {
+	cp := make([][]int, len(adj))
+	for i := range adj {
+		cp[i] = append([]int(nil), adj[i]...)
+	}
+	return cp
+}
 
-	if len(got) != len(want) {
-		t.Fatalf("%s: len mismatch: got=%d want=%d; got=%v want=%v", op, len(got), len(want), got, want)
+func seededSymmetricComplete(n int, seed int64) matrix.Matrix {
+	rng := rand.New(rand.NewSource(seed))
+	rows := make([][]float64, n)
+
+	for i := 0; i < n; i++ {
+		rows[i] = make([]float64, n)
 	}
 
-	var index int
-	for index = 0; index < len(got); index++ {
-		if got[index] != want[index] {
-			t.Fatalf("%s: value mismatch at %d: got=%q want=%q; got=%v want=%v",
-				op, index, got[index], want[index], got, want)
+	for i := 0; i < n; i++ {
+		for j := i + 1; j < n; j++ {
+			weight := 1 + float64(rng.Intn(10_000))/100
+			rows[i][j] = weight
+			rows[j][i] = weight
 		}
 	}
+
+	return testDense{a: rows}
 }

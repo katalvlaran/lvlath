@@ -2,8 +2,26 @@
 // Copyright (C) 2025-2026 katalvlaran
 
 // Package tsp defines dense weighted Blossom engine state.
-// The engine solves maximum-profit perfect matching after transforming local
-// minimum-cost MWPM costs into non-negative profits.
+// This file owns the local maximum-profit transformation, engine allocation,
+// solver entrypoint, result export, and structural verification helpers.
+//
+// Responsibility:
+//   - Build immutable dense edge storage from matchingProblem.
+//   - Allocate matching, forest, contraction, membership, and dual arrays.
+//   - Keep all vertex IDs local to the odd-set matching problem.
+//   - Export only original-vertex perfect matchings.
+//
+// Boundaries:
+//   - Alternating-forest search lives in blossom_forest.go.
+//   - Dual/slack movement lives in blossom_dual.go.
+//   - Contraction/expansion lives in blossom_contract.go.
+//   - Path lifting lives in blossom_path.go.
+//   - mate[] mutation lives in blossom_augment.go.
+//
+// AI-Hints:
+//   - Do not expose blossomEngine through public TSP API.
+//   - Do not store original TSP matrix vertex IDs in mate[].
+//   - Do not compute published matching cost from transformed profits.
 package tsp
 
 import "math"
@@ -260,6 +278,34 @@ const (
 	noNode = -1
 )
 
+// blossomFloatToleranceMultiplier defines the ULP budget used by scale-aware Blossom
+// dual/slack verification. It protects wide-range floating-point instances from false
+// ErrInvalidMatching while keeping relative tolerance far below matching-cost precision.
+//
+// Implementation:
+//   - Used by dualTolerance as multiplier * machineEps * scale.
+//   - Kept as a constant so numeric policy is explicit and testable.
+//
+// Behavior highlights:
+//   - Does not change the matching objective.
+//   - Does not relax oracle cost comparison.
+//   - Applies only to internal dual/slack feasibility checks.
+//
+// Value rationale:
+//   - 4096 ULPs is conservative for repeated dual updates and laminar slack sums.
+//   - At scale 1e8, the tolerance is roughly 9e-5, about 9e-13 relative.
+//
+// AI-Hints:
+//   - Do not replace this with a percentage tolerance.
+//   - Do not use it for exported tour-cost equality.
+const blossomFloatToleranceMultiplier = 4096.0
+
+// blossomDeltaSelectionToleranceMultiplier defines the much smaller ULP budget
+// used only when two candidate dual movements are numerically indistinguishable.
+// Delta selection must remain close to the true minimum; otherwise the solver can
+// overshoot near-tie slacks and fail final dual feasibility.
+const blossomDeltaSelectionToleranceMultiplier = 16.0
+
 // blossomEngine owns all mutable state for dense weighted Blossom search.
 //
 // Implementation:
@@ -302,6 +348,11 @@ type blossomEngine struct {
 	// It is copied from blossomOptions and never mutated.
 	eps float64
 
+	// scale stores the largest original matching cost used to derive a scale-aware
+	// numeric tolerance for dual/slack comparisons.
+	// It does not affect the original matching objective or exported cost.
+	scale float64
+
 	// edges stores every dense undirected edge in deterministic u<v order.
 	// edge.id is equal to its index in this slice.
 	edges []blossomEdge
@@ -334,12 +385,23 @@ type blossomEngine struct {
 	// noNode marks a root or inactive/unlabeled node.
 	parent []int
 
-	// children stores child top-level node IDs for contracted blossom nodes.
-	// The order matches cycles[node][i].node and is kept for simple membership scans.
-	children [][]int
-
 	// cycles stores ordered cycle metadata for every contracted blossom node.
-	// cycles[node][i] describes children[node][i] and the edge from it to the next child.
+	// cycles[node][i].node is the child top-level node at position i, and
+	// cycles[node][i].edgeToNext connects it to cycles[node][(i+1)%len(cycles[node])].node.
+	//
+	// Implementation:
+	//   - Stage 1: allocateBlossomNode builds the deterministic odd-cycle order.
+	//   - Stage 2: buildBlossomCycleSteps stores the boundary edge and endpoint ownership for every step.
+	//   - Stage 3: contraction, expansion, and path lifting read child order only from this field.
+	//
+	// Behavior highlights:
+	//   - This is the single source of truth for contracted child order.
+	//   - A non-empty cycle always has odd length >= 3.
+	//   - Singleton original vertices have nil cycle metadata.
+	//
+	// AI-Hints:
+	//   - Do not reintroduce a separate children field.
+	//   - Do not infer edge-to-next metadata from child nodes after contraction.
 	cycles [][]blossomCycleStep
 
 	// members stores original local vertices contained in each node.
@@ -429,6 +491,7 @@ func newBlossomEngine(problem matchingProblem, opts blossomOptions) (*blossomEng
 	engine := &blossomEngine{
 		problem:   problem,
 		eps:       opts.Eps,
+		scale:     blossomNumericScale(maxCost),
 		edges:     edges,
 		incident:  incident,
 		mate:      makeFilledInt(problem.n, noVertex),
@@ -437,7 +500,6 @@ func newBlossomEngine(problem matchingProblem, opts blossomOptions) (*blossomEng
 		base:      makeFilledInt(nodeCapacity, noVertex),
 		active:    make([]bool, nodeCapacity),
 		parent:    makeFilledInt(nodeCapacity, noNode),
-		children:  make([][]int, nodeCapacity),
 		cycles:    make([][]blossomCycleStep, nodeCapacity),
 		label:     make([]blossomLabel, nodeCapacity),
 		labelEdge: makeFilledInt(nodeCapacity, noEdge),
@@ -458,10 +520,124 @@ func newBlossomEngine(problem matchingProblem, opts blossomOptions) (*blossomEng
 	return engine, nil
 }
 
-// matchedPairs counts committed original-vertex matching pairs.
+// blossomNumericScale normalizes the matching-cost magnitude used by scale-aware
+// dual/slack tolerance. Zero-cost and tiny-cost instances keep scale 1.
+//
+// Implementation:
+//   - Stage 1: Reject non-finite and subunit scales defensively.
+//   - Stage 2: Return maxCost for large finite matching instances.
+//
+// Behavior highlights:
+//   - Does not alter costs or profits.
+//   - Used only for numeric tolerance sizing.
+//
+// Inputs:
+//   - maxCost: maximum original local matching edge cost.
+//
+// Returns:
+//   - float64: finite scale >= 1.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure numeric function.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This is not an approximation parameter.
+//
+// AI-Hints:
+//   - Do not use this to rescale matching costs.
+//   - Do not make tolerance proportional to path length unless tests prove the need.
+func blossomNumericScale(maxCost float64) float64 {
+	if math.IsNaN(maxCost) || math.IsInf(maxCost, 0) || maxCost < 1 {
+		return 1
+	}
+
+	return maxCost
+}
+
+// dualTolerance returns the effective tolerance for floating-point dual and slack checks.
+// It keeps the user epsilon as a hard lower bound and adds a small scale-aware ULP budget
+// for wide-range weighted instances.
+//
+// Implementation:
+//   - Stage 1: Compute machine epsilon around 1.
+//   - Stage 2: Scale it by the largest local matching cost.
+//   - Stage 3: Return max(user eps, scaled ULP budget).
+//
+// Behavior highlights:
+//   - Does not change exact matching objective.
+//   - Prevents false ErrInvalidMatching from harmless floating-point drift.
+//   - Keeps small integer-like instances governed by DefaultEps.
+//
+// Inputs:
+//   - None; reads e.eps and e.scale.
+//
+// Returns:
+//   - float64: effective numeric tolerance.
+//
+// Errors:
+//   - None.
+//
+// Determinism:
+//   - Pure numeric function.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - The multiplier is intentionally conservative but still tiny relative to scale.
+//   - For scale=1e8, tolerance is approximately 9e-5, i.e. about 9e-13 relative.
+//
+// AI-Hints:
+//   - Do not use a loose percentage tolerance.
+//   - Do not replace exact oracle cost comparisons with this tolerance.
+func (e *blossomEngine) dualTolerance() float64 {
+	machineEps := math.Nextafter(1, 2) - 1
+	scaled := blossomFloatToleranceMultiplier * machineEps * e.scale
+	if scaled < e.eps {
+		return e.eps
+	}
+
+	return scaled
+}
+
+// matchedPairs counts committed original-vertex matching pairs in mate[].
+// It counts each symmetric pair once by accepting only vertex<mate.
+//
+// Implementation:
+//   - Stage 1: Scan original vertices.
+//   - Stage 2: Count only pairs where vertex is the smaller endpoint.
+//
+// Behavior highlights:
+//   - Does not validate symmetry.
+//   - Ignores unmatched vertices.
+//   - Used as a progress measure inside the engine search.
+//
+// Inputs:
+//   - None; reads mate[].
+//
+// Returns:
+//   - int: number of committed matching pairs.
+//
+// Errors:
+//   - None. Corruption is handled by verifyMatchingSymmetry.
+//
+// Determinism:
+//   - Fixed increasing vertex scan.
 //
 // Complexity:
 //   - Time O(k), Space O(1).
+//
+// Notes:
+//   - This is not a perfect-matching validator.
+//
+// AI-Hints:
+//   - Do not count both directions.
 func (e *blossomEngine) matchedPairs() int {
 	pairs := 0
 
@@ -522,10 +698,41 @@ func (e *blossomEngine) exportMatching() ([]int, error) {
 	return match, nil
 }
 
-// verifyMatchingSymmetry checks mate[] and mateEdge[] consistency.
+// verifyMatchingSymmetry checks that mate[] and mateEdge[] describe a symmetric matching
+// over original local vertices. It accepts unmatched vertices during intermediate search.
+//
+// Implementation:
+//   - Stage 1: Scan every original vertex.
+//   - Stage 2: Skip currently unmatched vertices.
+//   - Stage 3: Validate mate bounds, no self-match, and reverse mate relation.
+//   - Stage 4: Validate both endpoints share the same committed mate edge.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Valid during partial and perfect matching states.
+//   - Catches stale mateEdge[] corruption.
+//
+// Inputs:
+//   - None; reads mate[] and mateEdge[].
+//
+// Returns:
+//   - error: nil when all committed pairs are symmetric.
+//
+// Errors:
+//   - ErrInvalidMatching for invalid mates, self-matches, asymmetric pairs,
+//     missing mate edges, or inconsistent mateEdge[] values.
+//
+// Determinism:
+//   - Fixed increasing vertex scan.
 //
 // Complexity:
 //   - Time O(k), Space O(1).
+//
+// Notes:
+//   - exportMatching performs additional completeness validation.
+//
+// AI-Hints:
+//   - Do not require every vertex to be matched here; partial states are valid during search.
 func (e *blossomEngine) verifyMatchingSymmetry() error {
 	for vertex := 0; vertex < e.problem.n; vertex++ {
 		mate := e.mate[vertex]
@@ -549,11 +756,39 @@ func (e *blossomEngine) verifyMatchingSymmetry() error {
 	return nil
 }
 
-// verifyTopLevelPartition checks that every original vertex belongs to one active top-level node.
-// It protects shrink/expand code from orphaning vertices.
+// verifyTopLevelPartition checks that every original vertex belongs to an active top-level node.
+// It protects contraction, expansion, lifting, and export from orphaned or stale ownership.
+//
+// Implementation:
+//   - Stage 1: Scan original vertices.
+//   - Stage 2: Read inBlossom[vertex].
+//   - Stage 3: Validate node bounds and active status.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Detects missed shrink/expand ownership remaps.
+//   - Does not require top-level nodes to be disjoint by member scan; inBlossom is the active owner map.
+//
+// Inputs:
+//   - None; reads inBlossom[] and active[].
+//
+// Returns:
+//   - error: nil when every original vertex has an active owner.
+//
+// Errors:
+//   - ErrInvalidMatching for invalid, inactive, or missing top-level ownership.
+//
+// Determinism:
+//   - Fixed increasing vertex scan.
 //
 // Complexity:
 //   - Time O(k), Space O(1).
+//
+// Notes:
+//   - This is a structural invariant, not an optimality certificate.
+//
+// AI-Hints:
+//   - Do not allow inactive contracted children to own original vertices after shrink.
 func (e *blossomEngine) verifyTopLevelPartition() error {
 	for vertex := 0; vertex < e.problem.n; vertex++ {
 		node := e.inBlossom[vertex]
@@ -565,18 +800,75 @@ func (e *blossomEngine) verifyTopLevelPartition() error {
 	return nil
 }
 
-// verifyDualFeasibility checks non-negative active dual variables within tolerance.
-// Full edge-slack verification belongs in the dual subsystem because it depends on
-// top-level blossom membership and transformed profit.
+// verifyDualFeasibility checks laminar dual feasibility and matched-edge complementary slackness.
+// Original vertex duals are unrestricted equality duals; allocated blossom duals must be
+// non-negative. Every dense edge must have non-negative reduced slack, and every committed
+// matched edge must be tight.
+//
+// Implementation:
+//   - Stage 1: Validate non-negative duals for allocated blossom nodes.
+//   - Stage 2: Check every dense edge has slack >= -eps.
+//   - Stage 3: Check every committed matched edge has |slack| <= eps.
+//   - Stage 4: Validate mateEdge consistency while scanning matched pairs.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Uses laminar slack computation, not inBlossom as a dual shortcut.
+//   - Serves as the final dual certificate check before export.
+//
+// Inputs:
+//   - None; reads duals, edges, mate[], mateEdge[], and blossom metadata.
+//
+// Returns:
+//   - error: nil when the final dual certificate is feasible and complementary.
+//
+// Errors:
+//   - ErrInvalidMatching for negative blossom duals, negative edge slack,
+//     missing mate edges, or non-tight matched edges.
+//
+// Determinism:
+//   - Fixed node, edge, and vertex scan order.
 //
 // Complexity:
-//   - Time O(k), Space O(1).
+//   - Time O(E*B*m + k), Space O(1), where B is allocated blossom count
+//     and m is average membership scan cost used by slack.
+//
+// Notes:
+//   - Vertex duals may be negative; do not constrain them.
+//   - This check is stricter than structural matching correctness.
+//
+// AI-Hints:
+//   - Do not remove matched-edge tightness.
+//   - Do not compute slack from dual[inBlossom[u]] + dual[inBlossom[v]].
 func (e *blossomEngine) verifyDualFeasibility() error {
-	for node := 0; node < len(e.active); node++ {
-		if !e.active[node] {
+	tol := e.dualTolerance()
+
+	for node := e.problem.n; node < e.nextNode; node++ {
+		if !e.isAllocatedBlossom(node) {
 			continue
 		}
-		if e.dual[node] < -e.eps {
+		if e.dual[node] < -tol {
+			return ErrInvalidMatching
+		}
+	}
+
+	for _, edge := range e.edges {
+		if e.slack(edge.id) < -tol {
+			return ErrInvalidMatching
+		}
+	}
+
+	for vertex := 0; vertex < e.problem.n; vertex++ {
+		mate := e.mate[vertex]
+		if mate == noVertex || vertex > mate {
+			continue
+		}
+
+		edgeID := e.mateEdge[vertex]
+		if edgeID == noEdge || edgeID != e.mateEdge[mate] {
+			return ErrInvalidMatching
+		}
+		if math.Abs(e.slack(edgeID)) > tol {
 			return ErrInvalidMatching
 		}
 	}
@@ -584,10 +876,40 @@ func (e *blossomEngine) verifyDualFeasibility() error {
 	return nil
 }
 
-// verifyOptimalState checks final structural invariants before export.
+// verifyOptimalState checks final structural and dual invariants before exporting a matching.
+// It ensures the committed matching is symmetric, every original vertex has active ownership,
+// and the laminar dual certificate remains feasible.
+//
+// Implementation:
+//   - Stage 1: Verify mate[] / mateEdge[] symmetry.
+//   - Stage 2: Verify active top-level ownership for every original vertex.
+//   - Stage 3: Verify dual feasibility and matched-edge tightness.
+//
+// Behavior highlights:
+//   - Does not mutate engine state.
+//   - Runs after the solver has reached a perfect matching count.
+//   - Converts hidden internal corruption into ErrInvalidMatching before export.
+//
+// Inputs:
+//   - None; reads engine state.
+//
+// Returns:
+//   - error: nil when final state is safe to export.
+//
+// Errors:
+//   - ErrInvalidMatching from any structural or dual invariant violation.
+//
+// Determinism:
+//   - Delegates to deterministic verification helpers.
 //
 // Complexity:
-//   - Time O(k), Space O(1).
+//   - Time O(E*B*m + k), Space O(1).
+//
+// Notes:
+//   - exportMatching still checks completeness and returns a detached matching array.
+//
+// AI-Hints:
+//   - Do not skip this for speed until benchmarked and separately guarded by tests.
 func (e *blossomEngine) verifyOptimalState() error {
 	if err := e.verifyMatchingSymmetry(); err != nil {
 		return err
@@ -665,10 +987,40 @@ func validateBlossomProblem(problem matchingProblem, opts blossomOptions) error 
 	return nil
 }
 
-// makeFilledInt returns an int slice initialized with value.
+// makeFilledInt returns an int slice of length n initialized with one explicit value.
+// It avoids relying on Go's zero value when noNode/noVertex/noEdge are negative sentinels.
+//
+// Implementation:
+//   - Stage 1: Allocate a length-n int slice.
+//   - Stage 2: Fill every index with value.
+//   - Stage 3: Return the initialized slice.
+//
+// Behavior highlights:
+//   - Deterministic allocation and fill.
+//   - Works for negative sentinels.
+//   - Used by engine allocation for parent, labelEdge, treeRoot, mate, and base arrays.
+//
+// Inputs:
+//   - n: requested slice length.
+//   - value: value to store in every slot.
+//
+// Returns:
+//   - []int: initialized slice.
+//
+// Errors:
+//   - None. Go runtime handles allocation failure.
+//
+// Determinism:
+//   - Fixed index-order fill.
 //
 // Complexity:
 //   - Time O(n), Space O(n).
+//
+// Notes:
+//   - Prefer this helper over make([]int,n) for sentinel-backed arrays.
+//
+// AI-Hints:
+//   - Do not replace with zero-initialized make when sentinel is noNode/noVertex/noEdge.
 func makeFilledInt(n int, value int) []int {
 	out := make([]int, n)
 	for index := range out {
@@ -678,11 +1030,40 @@ func makeFilledInt(n int, value int) []int {
 	return out
 }
 
-// makeFilledIdentity returns a length cap slice with indices [0,n) initialized to themselves.
-// Remaining entries are initialized to noNode so unallocated blossom nodes are explicit.
+// makeFilledIdentity returns a length-capacity slice whose original vertex range [0,n)
+// maps each index to itself, while all remaining blossom-node slots are initialized to noNode.
+//
+// Implementation:
+//   - Stage 1: Allocate a sentinel-filled slice of length capacity.
+//   - Stage 2: Set out[i]=i for every original vertex i in [0,n).
+//   - Stage 3: Leave unallocated blossom slots explicit as noNode.
+//
+// Behavior highlights:
+//   - Encodes singleton top-level ownership at engine construction.
+//   - Makes unallocated blossom nodes visibly invalid.
+//   - Avoids accidental zero ownership for future blossom slots.
+//
+// Inputs:
+//   - n: number of original local vertices.
+//   - capacity: total original-plus-blossom node capacity.
+//
+// Returns:
+//   - []int: initialized identity/sentinel slice.
+//
+// Errors:
+//   - None. Caller is responsible for capacity>=n.
+//
+// Determinism:
+//   - Fixed increasing vertex initialization.
 //
 // Complexity:
 //   - Time O(capacity), Space O(capacity).
+//
+// Notes:
+//   - Used for inBlossom initialization.
+//
+// AI-Hints:
+//   - Do not initialize future blossom slots to 0.
 func makeFilledIdentity(n int, capacity int) []int {
 	out := makeFilledInt(capacity, noNode)
 	for index := 0; index < n; index++ {

@@ -42,7 +42,7 @@ func TestIntegration_AutoVsBnB_Symmetric(t *testing.T) {
 	optAuto.EnableLocalSearch = true
 	// Intentionally leave BoundAlgo/Algo as defaults to exercise the dispatcher.
 
-	resAuto, err := tsp.SolveWithMatrix(m, nil, optAuto)
+	resAuto, err := tsp.SolveMatrix(m, nil, optAuto)
 	if err != nil {
 		t.Fatalf("SolveWithMatrix (Auto) failed: %v", err)
 	}
@@ -62,9 +62,9 @@ func TestIntegration_AutoVsBnB_Symmetric(t *testing.T) {
 	optBB.BoundAlgo = tsp.SimpleBound // deterministic admissible LB
 	optBB.EnableLocalSearch = false   // avoid extra work; correctness unaffected
 
-	resBB, err := tsp.TSPBranchAndBound(m, optBB)
+	resBB, err := tsp.BranchAndBoundSolve(m, optBB)
 	if err != nil {
-		t.Fatalf("TSPBranchAndBound failed: %v", err)
+		t.Fatalf("BranchAndBoundSolve failed: %v", err)
 	}
 	if err = tsp.ValidateTour(resBB.Tour, n, startV); err != nil {
 		t.Fatalf("BnB: returned tour invalid: %v", err)
@@ -104,7 +104,7 @@ func TestIntegration_Auto_ATSP(t *testing.T) {
 	opt.EnableLocalSearch = true
 	opt.Algo = tsp.TwoOptOnly
 
-	res, err := tsp.SolveWithMatrix(m, nil, opt)
+	res, err := tsp.SolveMatrix(m, nil, opt)
 	if err != nil {
 		t.Fatalf("SolveWithMatrix (ATSP) failed: %v", err)
 	}
@@ -143,7 +143,7 @@ func TestIntegration_BranchAndBound_OneTree_NotWorse_Than_Simple(t *testing.T) {
 	// Simple bound.
 	simple := base
 	simple.BoundAlgo = tsp.SimpleBound
-	rS, err := tsp.SolveWithMatrix(m, nil, simple)
+	rS, err := tsp.SolveMatrix(m, nil, simple)
 	if err != nil {
 		t.Fatalf("BnB SimpleBound failed: %v", err)
 	}
@@ -151,7 +151,7 @@ func TestIntegration_BranchAndBound_OneTree_NotWorse_Than_Simple(t *testing.T) {
 	// OneTree bound.
 	one := base
 	one.BoundAlgo = tsp.OneTreeBound
-	rO, err := tsp.SolveWithMatrix(m, nil, one)
+	rO, err := tsp.SolveMatrix(m, nil, one)
 	if err != nil {
 		t.Fatalf("BnB OneTreeBound failed: %v", err)
 	}

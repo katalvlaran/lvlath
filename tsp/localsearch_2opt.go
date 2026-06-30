@@ -301,20 +301,51 @@ func twoOptKernel(dist matrix.Matrix, initTour []int, opts Options) (localSearch
 	return finishLocalSearchCurrent(cur, cost, accepted, false, n, opts.StartVertex)
 }
 
-// applyTwoOptStar applies an asymmetric 2-opt* move on a closed tour.
+// applyTwoOptStar applies an asymmetric 2-opt* move to a closed tour without reversing
+// the middle segment. It rewires two outgoing arcs and reconstructs the resulting cycle
+// from a successor representation.
 //
-// Notation (closed tour T of length n+1):
+// Notation for closed tour T of length n+1:
+//   - 1 <= i < k <= n-1.
+//   - a=T[i-1], b=T[i], c=T[k], d=T[k+1].
+//   - Remove arcs a->b and c->d.
+//   - Add arcs a->d and c->b.
 //
-//	i,k are indices with 1 ≤ i < k ≤ n−1.
-//	a=T[i−1], b=T[i], c=T[k], d=T[k+1].
+// Implementation:
+//   - Stage 1: Build succ[v] from the current closed tour.
+//   - Stage 2: Rewire succ[a]=d and succ[c]=b.
+//   - Stage 3: Follow successors from start for n steps.
+//   - Stage 4: Append start as the closing vertex.
 //
-// The move removes arcs (a→b) and (c→d), and adds (a→d) and (c→b),
-// without reversing the [i..k] segment. We implement it by:
-//  1. Building a successor array succ[v] from the current tour.
-//  2. Rewiring succ[a]=d and succ[c]=b.
-//  3. Reconstructing a fresh sequence by following succ from start.
+// Behavior highlights:
+//   - Allocates a fresh tour.
+//   - Does not reverse tour[i:k].
+//   - Intended for ATSP-compatible local search.
+//   - Executed only after a move has been accepted by delta evaluation.
 //
-// Complexity: O(n) time, O(n) space (executed only on *accepted* moves).
+// Inputs:
+//   - tour: closed tour.
+//   - start: fixed start vertex.
+//   - i: first cut index.
+//   - k: second cut index.
+//
+// Returns:
+//   - []int: fresh closed tour after the 2-opt* move.
+//
+// Errors:
+//   - None. Caller must pass a validated accepted move.
+//
+// Determinism:
+//   - Pure successor rewiring and deterministic reconstruction.
+//
+// Complexity:
+//   - Time O(n), Space O(n).
+//
+// Notes:
+//   - Symmetric 2-opt uses segment reversal instead.
+//
+// AI-Hints:
+//   - Do not use reverseArcInPlace for 2-opt*; it changes the wrong arcs for ATSP.
 func applyTwoOptStar(tour []int, start, i, k int) []int {
 	n := len(tour) - 1
 

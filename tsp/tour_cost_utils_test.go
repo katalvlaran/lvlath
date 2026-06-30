@@ -44,32 +44,32 @@ func TestValidateTour_InvalidLength_Duplicates_OOB(t *testing.T) {
 	const n = 4
 	const start = 0
 
-	t.Run("length != n → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("length != n → ErrInvalidTour", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			tour := []int{0, 1, 2} // len=3, expect n=4
 			err := tsp.ValidateTour(tour, n, start)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidTour) {
+				t.Fatalf("want ErrInvalidTour, got %v", err)
 			}
 		})
 	})
 
-	t.Run("duplicates → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("duplicates → ErrInvalidTour", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			tour := []int{0, 1, 1, 3}
 			err := tsp.ValidateTour(tour, n, start)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidTour) {
+				t.Fatalf("want ErrInvalidTour, got %v", err)
 			}
 		})
 	})
 
-	t.Run("out-of-range → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("out-of-range → ErrInvalidTour", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			tour := []int{0, 1, 2, 9}
 			err := tsp.ValidateTour(tour, n, start)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidTour) {
+				t.Fatalf("want ErrInvalidTour, got %v", err)
 			}
 		})
 	})
@@ -153,8 +153,8 @@ func TestTourCost_StrictSentinels_OnBadEdges(t *testing.T) {
 			m := withEdge(base, 0, 1, math.NaN())
 			tour := []int{0, 1, 2}
 			_, err := tsp.TourCost(m, tour)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrNaNInf) {
+				t.Fatalf("want ErrNaNInf, got %v", err)
 			}
 		})
 	})

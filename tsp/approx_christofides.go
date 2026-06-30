@@ -123,7 +123,12 @@ func christofides(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 		return nil, err
 	}
 
-	eulerianWalk, err := EulerianCircuit(mstAdjacency, opts.StartVertex)
+	eulerianAdjacency, err := canonicalizeUndirectedMultigraph(mstAdjacency)
+	if err != nil {
+		return nil, err
+	}
+
+	eulerianWalk, err := EulerianCircuit(eulerianAdjacency, opts.StartVertex)
 	if err != nil {
 		return nil, err
 	}

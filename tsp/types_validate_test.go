@@ -91,7 +91,7 @@ func mkValid3() matrix.Matrix {
 // runSolve is a thin wrapper to execute SolveWithMatrix and return only error.
 // We use TwoOptOnly as a benign base algo where validation is the gatekeeper.
 func runSolve(m matrix.Matrix, ids []string, opt tsp.Options) error {
-	_, err := tsp.SolveWithMatrix(m, ids, opt)
+	_, err := tsp.SolveMatrix(m, ids, opt)
 	return err
 }
 
@@ -114,35 +114,35 @@ func defaultOpts() tsp.Options {
 func TestValidate_NegativeOptions_StrictSentinels(t *testing.T) {
 	m := mkValid3()
 
-	t.Run("Eps<0 → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("Eps<0 → ErrInvalidOptions", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			opt := defaultOpts()
 			opt.Eps = -1e-9
 			err := runSolve(m, nil, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidOptions) {
+				t.Fatalf("want ErrInvalidOptions, got %v", err)
 			}
 		})
 	})
 
-	t.Run("TimeLimit<0 → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("TimeLimit<0 → ErrInvalidOptions", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			opt := defaultOpts()
 			opt.TimeLimit = -1 * time.Millisecond
 			err := runSolve(m, nil, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidOptions) {
+				t.Fatalf("want ErrInvalidOptions, got %v", err)
 			}
 		})
 	})
 
-	t.Run("TwoOptMaxIters<0 → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("TwoOptMaxIters<0 → ErrInvalidOptions", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			opt := defaultOpts()
 			opt.TwoOptMaxIters = -1
 			err := runSolve(m, nil, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidOptions) {
+				t.Fatalf("want ErrInvalidOptions, got %v", err)
 			}
 		})
 	})
@@ -198,8 +198,8 @@ func TestValidate_Matrix_ShapeAndValues(t *testing.T) {
 			var m matrix.Matrix // nil interface
 			opt := defaultOpts()
 			err := runSolve(m, nil, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrNilDistanceMatrix) {
+				t.Fatalf("want ErrNilDistanceMatrix, got %v", err)
 			}
 		})
 	})
@@ -233,7 +233,7 @@ func TestValidate_Matrix_ShapeAndValues(t *testing.T) {
 		})
 	})
 
-	t.Run("NaN entry → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("NaN entry → ErrNaNInf", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			m := mkDense([][]float64{
 				{0, math.NaN(), 1},
@@ -242,8 +242,8 @@ func TestValidate_Matrix_ShapeAndValues(t *testing.T) {
 			})
 			opt := defaultOpts()
 			err := runSolve(m, nil, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrNaNInf) {
+				t.Fatalf("want ErrNaNInf, got %v", err)
 			}
 		})
 	})
@@ -348,24 +348,24 @@ func TestValidate_IDs_LengthAndDuplicates(t *testing.T) {
 		})
 	})
 
-	t.Run("ids contain empty string → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("ids contain empty string → ErrInvalidIDs", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			ids := []string{"v0", "", "v2"}
 			opt := defaultOpts()
 			err := runSolve(m, ids, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidIDs) {
+				t.Fatalf("want ErrInvalidIDs, got %v", err)
 			}
 		})
 	})
 
-	t.Run("ids with duplicates → ErrDimensionMismatch", func(t *testing.T) {
+	t.Run("ids with duplicates → ErrInvalidIDs", func(t *testing.T) {
 		Repeat(t, 3, func(t *testing.T) {
 			opt := defaultOpts()
 			ids := []string{"v0", "v1", "v1"} // duplicate "v1"
 			err := runSolve(m, ids, opt)
-			if !errors.Is(err, tsp.ErrDimensionMismatch) {
-				t.Fatalf("want ErrDimensionMismatch, got %v", err)
+			if !errors.Is(err, tsp.ErrInvalidIDs) {
+				t.Fatalf("want ErrInvalidIDs, got %v", err)
 			}
 		})
 	})

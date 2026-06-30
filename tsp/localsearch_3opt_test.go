@@ -26,7 +26,7 @@ import (
 // It allows selecting policy (first vs best), shuffling, symmetry, eps, seed,
 // start vertex and time budget; returns the final TSResult from the solver.
 func run3opt(
-	m matrix.Matrix,
+	dist matrix.Matrix,
 	bestImprovement bool,
 	shuffleNeighborhood bool,
 	symmetric bool,
@@ -34,19 +34,18 @@ func run3opt(
 	seed int64,
 	start int,
 	timeLimit time.Duration,
-) (tsp.TSResult, error) {
-	opt := tsp.DefaultOptions()
-	opt.Algo = tsp.ThreeOptOnly                   // choose the 3-opt algorithm
-	opt.BestImprovement = bestImprovement         // best-improvement vs first-improvement
-	opt.ShuffleNeighborhood = shuffleNeighborhood // optionally shuffle candidate scan order
-	opt.Symmetric = symmetric                     // TSP (true) or ATSP (false)
-	opt.Eps = eps                                 // acceptance tolerance
-	opt.Seed = seed                               // deterministic RNG seed
-	opt.StartVertex = start                       // canonical start index
-	opt.TimeLimit = timeLimit                     // optional time budget
+) (*tsp.TSPResult, error) {
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.ThreeOptOnly
+	opts.BestImprovement = bestImprovement
+	opts.ShuffleNeighborhood = shuffleNeighborhood
+	opts.Symmetric = symmetric
+	opts.Eps = eps
+	opts.Seed = seed
+	opts.StartVertex = start
+	opts.TimeLimit = timeLimit
 
-	// Note: EnableLocalSearch is irrelevant here (we already chose ThreeOptOnly).
-	return tsp.SolveWithMatrix(m, nil, opt)
+	return tsp.SolveMatrix(dist, nil, opts)
 }
 
 // bestLEqFirst asserts that the "best-improvement" policy is never worse
@@ -147,30 +146,20 @@ func TestThreeOpt_ATSP_Basic(t *testing.T) {
 	pts := [][2]float64{{0, 0}, {1, 0}, {1, 1}, {0, 1}}
 	m := euclidAsym(pts, 0.2) // reuse helper from two_opt_test.go
 
-	// 2-opt on ATSP (asymmetric=false) should be disallowed; we set Symmetric=false.
-	two, err := run2opt(m, epsTiny, false, seedDet, startV, 0)
-	if err != nil {
-		// If the implementation blocks ATSP in 2-opt, accept a clear sentinel.
-		if !errors.Is(err, tsp.ErrATSPNotSupportedByAlgo) {
-			t.Fatalf("unexpected error from 2-opt on ATSP: %v", err)
-		}
-	}
+	two, twoErr := run2opt(m, epsTiny, false, seedDet, startV, 0)
 
-	// 3-opt on ATSP path: must produce a valid tour.
 	thr, err := run3opt(m, true, false, false, epsTiny, seedDet, startV, 0)
-	if err != nil {
-		t.Fatalf("3-opt on ATSP failed: %v", err)
-	}
-	if err = tsp.ValidateTour(thr.Tour, 4, startV); err != nil {
-		t.Fatalf("ATSP 3-opt returned invalid tour: %v", err)
-	}
+	mustNoError(t, err)
+	mustValidTSPResult(t, thr, 4, startV, tsp.ThreeOptOnly)
 
-	// If 2-opt did produce a result (implementation-dependent), 3-opt must not be worse.
-	//if (two != tsp.TSResult{}) {
-	if round1e9(thr.Cost) > round1e9(two.Cost) {
-		t.Fatalf("ATSP: 3-opt worse than 2-opt: 3-opt=%.12f  2-opt=%.12f", thr.Cost, two.Cost)
+	if twoErr == nil {
+		mustValidTSPResult(t, two, 4, startV, tsp.TwoOptOnly)
+		if thr.Cost > two.Cost+epsTiny {
+			t.Fatalf("ATSP: 3-opt worse than 2-opt: three=%.12f two=%.12f", thr.Cost, two.Cost)
+		}
+	} else if !errors.Is(twoErr, tsp.ErrATSPNotSupportedByAlgo) {
+		t.Fatalf("unexpected 2-opt ATSP error: %v", twoErr)
 	}
-	//}
 }
 
 // -----------------------------------------------------------------------------
@@ -291,7 +280,7 @@ func TestThreeOpt_InvalidBaseTour_StrictSentinel(t *testing.T) {
 	m := testDense{a: a}
 
 	// Base tour contains an out-of-range vertex 99 (n=4 → valid indices 0..3).
-	base := []int{0, 1, 2, 99}
+	base := []int{0, 1, 2, 99, 0}
 
 	// Options for a direct ThreeOpt call (symmetric TSP).
 	opt := tsp.DefaultOptions()
@@ -302,8 +291,8 @@ func TestThreeOpt_InvalidBaseTour_StrictSentinel(t *testing.T) {
 	opt.StartVertex = startV
 
 	// Call the algorithm directly; must error with a strict sentinel.
-	_, _, err := tsp.ThreeOpt(m, base, opt)
-	if !errors.Is(err, tsp.ErrDimensionMismatch) {
-		t.Fatalf("want ErrDimensionMismatch on invalid base, got %v", err)
+	_, err := tsp.ThreeOptSearch(m, base, opt)
+	if !errors.Is(err, tsp.ErrInvalidTour) {
+		t.Fatalf("want ErrInvalidTour on invalid base, got %v", err)
 	}
 }

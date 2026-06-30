@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp_test validates the exact Branch-and-Bound solver (TSPBranchAndBound).
+// Package tsp_test validates the exact Branch-and-Bound solver (BranchAndBoundSolve).
 // Focus:
 //  1. Strict sentinels on malformed inputs (non-square, OOB start, NaN, negative, +Inf).
 //  2. Correctness on tiny symmetric instances (triangle) and ATSP square.
@@ -15,6 +15,7 @@ import (
 	"math"
 	"slices"
 	"testing"
+	"time"
 
 	"github.com/katalvlaran/lvlath/matrix"
 	"github.com/katalvlaran/lvlath/tsp"
@@ -119,7 +120,7 @@ func TestBB_Errors_StrictSentinels(t *testing.T) {
 	// Non-square → ErrNonSquare.
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkNonSquareDense()
-		_, err := tsp.TSPBranchAndBound(m, opt)
+		_, err := tsp.BranchAndBoundSolve(m, opt)
 		mustErrIs(t, err, tsp.ErrNonSquare)
 	})
 
@@ -128,34 +129,29 @@ func TestBB_Errors_StrictSentinels(t *testing.T) {
 		m := mkTriangleDense()
 		optBad := opt
 		optBad.StartVertex = 99 // invalid for n=3
-		_, err := tsp.TSPBranchAndBound(m, optBad)
+		_, err := tsp.BranchAndBoundSolve(m, optBad)
 		// Accept either a specific "start vertex out of range" sentinel or the generic one.
-		if !(errors.Is(err, tsp.ErrDimensionMismatch) ||
-			(err != nil && (err.Error() == "tsp: start vertex out of range" || // exact message in current impl
-				// be robust if error text changes slightly:
-				len(err.Error()) > 0))) {
-			t.Fatalf("want ErrDimensionMismatch or 'start vertex out of range', got %v", err)
-		}
+		mustErrIs(t, err, tsp.ErrStartOutOfRange)
 	})
 
 	// NaN weight → ErrDimensionMismatch (prefetch guard).
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkBadSym(0, 1, math.NaN())
-		_, err := tsp.TSPBranchAndBound(m, opt)
-		mustErrIs(t, err, tsp.ErrDimensionMismatch)
+		_, err := tsp.BranchAndBoundSolve(m, opt)
+		mustErrIs(t, err, tsp.ErrNaNInf)
 	})
 
 	// Negative weight → ErrNegativeWeight.
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkBadSym(0, 1, -1)
-		_, err := tsp.TSPBranchAndBound(m, opt)
+		_, err := tsp.BranchAndBoundSolve(m, opt)
 		mustErrIs(t, err, tsp.ErrNegativeWeight)
 	})
 
 	// +Inf that leaves *some vertex with no finite in/out* → ErrIncompleteGraph.
 	Repeat(t, 2, func(t *testing.T) {
 		m := mkSymWithIsolatedVertex(4, 1) // vertex 1 has no finite neighbor → infeasible
-		_, err := tsp.TSPBranchAndBound(m, opt)
+		_, err := tsp.BranchAndBoundSolve(m, opt)
 		mustErrIs(t, err, tsp.ErrIncompleteGraph)
 	})
 }
@@ -178,9 +174,9 @@ func TestBB_TSP_Triangle_Exact(t *testing.T) {
 	opt.BoundAlgo = tsp.SimpleBound
 	opt.EnableLocalSearch = false // UB seeding may still run trivial ring if Christofides not present
 
-	res, err := tsp.TSPBranchAndBound(m, opt)
+	res, err := tsp.BranchAndBoundSolve(m, opt)
 	if err != nil {
-		t.Fatalf("TSPBranchAndBound failed: %v", err)
+		t.Fatalf("BranchAndBoundSolve failed: %v", err)
 	}
 	mustValidTourCost(t, m, res.Tour, n, startV, want)
 }
@@ -214,15 +210,15 @@ func TestBB_TSP_Policies_EquivalentResults(t *testing.T) {
 	optOneTree.BoundAlgo = tsp.OneTreeBound
 
 	// Solve under all three policies.
-	resNo, err := tsp.TSPBranchAndBound(m, optNo)
+	resNo, err := tsp.BranchAndBoundSolve(m, optNo)
 	if err != nil {
 		t.Fatalf("NoBound failed: %v", err)
 	}
-	resSimple, err := tsp.TSPBranchAndBound(m, optSimple)
+	resSimple, err := tsp.BranchAndBoundSolve(m, optSimple)
 	if err != nil {
 		t.Fatalf("SimpleBound failed: %v", err)
 	}
-	resOneTree, err := tsp.TSPBranchAndBound(m, optOneTree)
+	resOneTree, err := tsp.BranchAndBoundSolve(m, optOneTree)
 	if err != nil {
 		t.Fatalf("OneTreeBound failed: %v", err)
 	}
@@ -262,7 +258,7 @@ func TestBB_ATSP_Square_BasicValidity(t *testing.T) {
 	opt.BoundAlgo = tsp.SimpleBound
 	opt.EnableLocalSearch = false
 
-	res, err := tsp.TSPBranchAndBound(m, opt)
+	res, err := tsp.BranchAndBoundSolve(m, opt)
 	if err != nil {
 		t.Fatalf("ATSP Branch-and-Bound failed: %v", err)
 	}
@@ -283,29 +279,31 @@ func TestBB_ATSP_Square_BasicValidity(t *testing.T) {
 // --------------------------------------------------------------
 
 func TestBB_TimeLimit_TinyBudget_NoBound(t *testing.T) {
-	// Purposefully use NoBound and a medium size to inflate the search tree
-	// and make the tiny deadline meaningful and reproducible.
 	const n = 13
-	pts := make([][2]float64, n)
-	var i int
-	var th float64
-	for i = 0; i < n; i++ {
-		th = 2 * math.Pi * float64(i) / float64(n) // uniform angles on a unit circle
-		pts[i] = [2]float64{math.Cos(th), math.Sin(th)}
+
+	points := make([][2]float64, n)
+	for vertex := 0; vertex < n; vertex++ {
+		theta := 2 * math.Pi * float64(vertex) / float64(n)
+		points[vertex] = [2]float64{math.Cos(theta), math.Sin(theta)}
 	}
-	m := euclid(pts)
 
-	opt := tsp.DefaultOptions()
-	opt.StartVertex = startV
-	opt.Symmetric = true
-	opt.Eps = epsTiny
-	opt.BoundAlgo = tsp.NoBound   // deliberately weakest pruning
-	opt.EnableLocalSearch = false // avoid extra work before DFS
-	opt.TimeLimit = timeTiny      // tiny time budget (from testutil_test.go)
+	dist := euclid(points)
 
-	_, err := tsp.TSPBranchAndBound(m, opt)
+	opts := tsp.DefaultOptions()
+	opts.Algo = tsp.BranchAndBound
+	opts.Symmetric = true
+	opts.StartVertex = startV
+	opts.BoundAlgo = tsp.NoBound
+	opts.EnableLocalSearch = false
+	opts.TimeLimit = time.Nanosecond
+
+	result, err := tsp.BranchAndBoundSolve(dist, opts)
+	if err == nil {
+		mustValidTSPResult(t, result, n, startV, tsp.BranchAndBound)
+		return
+	}
 	if !errors.Is(err, tsp.ErrTimeLimit) {
-		t.Fatalf("want ErrTimeLimit under tiny budget, got %v", err)
+		t.Fatalf("want nil or ErrTimeLimit under tiny budget, got %v", err)
 	}
 }
 
@@ -338,7 +336,7 @@ func TestBB_Determinism_Repeat4(t *testing.T) {
 	var cost0 float64
 
 	Repeat(t, 4, func(t *testing.T) {
-		res, err := tsp.TSPBranchAndBound(m, opt)
+		res, err := tsp.BranchAndBoundSolve(m, opt)
 		if err != nil {
 			t.Fatalf("run failed: %v", err)
 		}

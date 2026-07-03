@@ -1,5 +1,8 @@
-// Package prim_kruskal provides an implementation of Kruskal’s Minimum Spanning Tree algorithm.
-// It assumes an undirected, weighted *core.Graph and produces a slice of edges forming the MST.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package prim_kruskal contains the Kruskal MST/MSF kernel.
+// Public wrappers live in api.go and delegate here through MinimumSpanningTree.
 package prim_kruskal
 
 import (
@@ -8,132 +11,121 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// Kruskal computes the Minimum Spanning Tree (MST) of an undirected, weighted graph.
-// It uses a disjoint-set (union-find) data structure with path compression and union by rank.
+// kruskalKernel computes a minimum spanning tree or forest over a validated snapshot.
 //
-// Error Conditions:
-//   - ErrInvalidGraph  : if graph is nil, or graph.Directed() == true, or graph.Weighted() == false.
-//   - ErrDisconnected  : if |V| == 0 or |V| > 1 but graph is not fully connected.
+// Implementation:
+//   - Stage 1: Copy detached non-loop snapshot edges into local candidate storage.
+//   - Stage 2: Stable-sort candidates by ascending finite weight.
+//   - Stage 3: Use DSU to accept only edges joining different components.
+//   - Stage 4: Enforce strict tree connectivity or publish forest metadata.
 //
-// Steps:
-//  1. Validate: graph != nil, graph.Weighted(), !graph.Directed() and !graph.HasDirectedEdges()..
-//  2. Retrieve sorted vertex IDs; if len(vertices)==0 → ErrDisconnected.
-//     If len(vertices)==1 → trivial MST (empty, weight=0).
-//  3. Collect all edges via graph.Edges(), skip self-loops (e.From == e.To).
-//  4. Sort edges by ascending Weight (use sort.SliceStable to maintain deterministic order for equal weights).
-//  5. Initialize DSU maps parent[] and rank[] for each vertex in vertices.
-//  6. Loop over sorted edges: for each edge (u,v), if find(u) != find(v), then union(u,v) and include edge in MST.
-//  7. Once MST has |V|-1 edges, break. After loop, if MST edge count < |V|-1 → ErrDisconnected.
+// Behavior highlights:
+//   - Equal-weight candidates retain snapshot edge order, inherited from core.Edges().
+//   - Negative finite weights are valid.
+//   - Self-loops were removed by the adapter.
 //
-// Complexity: O(E log E + α(V)*E) ≈ O(E log V). Memory: O(E + V).
-func Kruskal(graph *core.Graph) ([]core.Edge, float64, error) {
-	// 1. Validate that graph is non-nil, weighted, undirected and have no direct edges.
-	if graph == nil || !graph.Weighted() || graph.Directed() || graph.HasDirectedEdges() {
-		// Return ErrInvalidGraph for any invalid condition.
-		return nil, 0, ErrInvalidGraph
+// Inputs:
+//   - snapshot: validated MST snapshot.
+//   - cfg: finalized option policy.
+//
+// Returns:
+//   - *MSTResult: canonical detached result.
+//   - error: ErrDisconnected in strict tree mode when not all vertices connect.
+//
+// Errors:
+//   - ErrDisconnected for disconnected strict tree mode.
+//
+// Determinism:
+//   - Candidate edge order is stable by Weight, then original core.Edges() order for ties.
+//   - ComponentRoots are deterministic lexicographic minima for Kruskal forests.
+//
+// Complexity:
+//   - Time O(E log E + E·α(V)), Space O(E + V).
+//
+// AI-Hints:
+//   - Do not replace stable sort with an unstable sort; equal-weight MST representatives would drift.
+func kruskalKernel(snapshot *mstSnapshot, cfg Options) (*MSTResult, error) {
+	vertexCount := len(snapshot.vertices)
+
+	result := &MSTResult{
+		Algorithm:   AlgorithmKruskal,
+		Mode:        cfg.Mode,
+		Edges:       make([]core.Edge, 0, maxMSTEdgeCapacity(vertexCount)),
+		VertexCount: vertexCount,
 	}
 
-	// 2. Retrieve all vertex IDs in sorted order for determinism.
-	vertices := graph.Vertices()
-	// If no vertices exist, there is no spanning tree but also no edges;
-	// by convention, we consider this a disconnected graph for |V| == 0.
-	if len(vertices) == 0 {
-		return nil, 0, ErrDisconnected
-	}
-	// If exactly one vertex, the MST is trivially empty with total weight 0.
-	if len(vertices) == 1 {
-		// Return an empty slice (no edges) and zero weight.
-		return []core.Edge{}, 0, nil
+	// Publish the trivial tree for a single-vertex graph without sorting or DSU allocation.
+	if vertexCount == 1 {
+		result.ComponentCount = 1
+		result.ComponentRoots = []string{snapshot.vertices[0]}
+		return result, nil
 	}
 
-	// 3. Collect all edges from graph, skipping self-loops to avoid trivial cycles.
-	allEdges := graph.Edges()                     // []*core.Edge sorted by Edge.ID
-	edges := make([]*core.Edge, 0, len(allEdges)) // filtered slice
-	for _, e := range allEdges {
-		if e.From == e.To {
-			// Skip self-loops entirely: they cannot be part of a spanning tree.
-			continue
-		}
-		edges = append(edges, e)
-	}
-
-	// 4. Sort edges by ascending weight (stable sort ensures deterministic tie-breaking
-	//    based on original Edge.ID order from graph.Edges()).
-	sort.SliceStable(edges, func(i, j int) bool {
-		return edges[i].Weight < edges[j].Weight
+	// Copy candidates before sorting so snapshot edge order remains reusable by other kernels/tests.
+	candidates := append([]core.Edge(nil), snapshot.edges...)
+	sort.SliceStable(candidates, func(i int, j int) bool {
+		return candidates[i].Weight < candidates[j].Weight
 	})
 
-	// 5. Initialize disjoint-set (union-find) structures.
-	//    parent maps each vertex to its parent in the DSU; initially parent[v] = v.
-	parent := make(map[string]string, len(vertices))
-	//    rank keeps track of tree depth to optimize unions.
-	rank := make(map[string]int, len(vertices))
-	for _, vid := range vertices {
-		parent[vid] = vid
-		rank[vid] = 0
-	}
+	// Initialize one DSU component per vertex.
+	set := newDisjointSet(snapshot.vertices)
 
-	// Iterative find with path compression to avoid deep recursion.
-	find := func(u string) string {
-		// Walk up until the root (parent[u] == u).
-		for parent[u] != u {
-			// Path compression: make u point to its grandparent.
-			parent[u] = parent[parent[u]]
-			u = parent[u]
+	for _, edge := range candidates {
+		// Accept only edges that join two previously separate components.
+		if !set.union(edge.From, edge.To) {
+			continue
 		}
 
-		return u
-	}
+		// Publish the detached edge value and accumulate its finite weight.
+		result.Edges = append(result.Edges, edge)
+		result.TotalWeight += edge.Weight
 
-	// Union by rank merges two disjoint sets.
-	union := func(u, v string) {
-		rootU := find(u)
-		rootV := find(v)
-		if rootU == rootV {
-			// Already in the same set; no action needed.
-			return
-		}
-		// Attach smaller-rank tree under larger-rank root.
-		if rank[rootU] < rank[rootV] {
-			parent[rootU] = rootV
-		} else {
-			parent[rootV] = rootU
-			// If ranks are equal, increment the resulting root's rank by 1.
-			if rank[rootU] == rank[rootV] {
-				rank[rootU]++
-			}
+		// Strict tree mode can stop as soon as |V|-1 accepted edges are present.
+		if cfg.Mode == ModeStrictTree && len(result.Edges) == vertexCount-1 {
+			break
 		}
 	}
 
-	// 6. Build MST by iterating over sorted edges.
-	var (
-		mst         []core.Edge // resulting edges in the MST
-		e           *core.Edge
-		u, v        string
-		totalWeight float64 // sum of weights
-		numVerts    = len(vertices)
-	)
-	for _, e = range edges {
-		u = e.From // one endpoint
-		v = e.To   // the other endpoint
-		// Check if endpoints are in different components.
-		if find(u) != find(v) {
-			// If disjoint, merge sets and include this edge in MST.
-			union(u, v)
-			mst = append(mst, *e)   // dereference *core.Edge to core.Edge
-			totalWeight += e.Weight // accumulate weight
-			// If we have |V|-1 edges, MST is complete.
-			if len(mst) == numVerts-1 {
-				break
-			}
-		}
+	// Compute deterministic component metadata after all accepted unions.
+	result.ComponentRoots = set.componentRoots(snapshot.vertices)
+	result.ComponentCount = len(result.ComponentRoots)
+
+	// Strict tree mode requires one connected component and exactly |V|-1 accepted edges.
+	if cfg.Mode == ModeStrictTree && len(result.Edges) != vertexCount-1 {
+		return nil, ErrDisconnected
 	}
 
-	// 7. If MST does not contain exactly |V|-1 edges, graph was disconnected.
-	if len(mst) < numVerts-1 {
-		return nil, 0, ErrDisconnected
-	}
+	return result, nil
+}
 
-	// 8. Return the built MST and its total weight.
-	return mst, totalWeight, nil
+// maxMSTEdgeCapacity returns the maximum number of edges in a spanning tree over vertexCount vertices.
+// It centralizes the |V|-1 capacity rule and avoids negative capacities for empty or single-vertex graphs.
+//
+// Implementation:
+//   - Stage 1: Return 0 for vertexCount <= 1.
+//   - Stage 2: Return vertexCount-1 for all larger graphs.
+//
+// Behavior highlights:
+//   - Used only for slice preallocation.
+//   - Does not validate graph connectivity.
+//
+// Inputs:
+//   - vertexCount: number of vertices in a validated snapshot.
+//
+// Returns:
+//   - int: safe edge-slice capacity.
+//
+// Determinism:
+//   - Pure arithmetic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// AI-Hints:
+//   - Do not use vertexCount-1 directly in make capacity without guarding vertexCount <= 1.
+func maxMSTEdgeCapacity(vertexCount int) int {
+	if vertexCount <= 1 {
+		return 0
+	}
+	return vertexCount - 1
 }

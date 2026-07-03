@@ -1,103 +1,188 @@
-// Package prim_kruskal provides two battle-tested algorithms for computing the Minimum Spanning Tree (MST)
-// on an undirected, weighted *core.Graph: Prim’s algorithm and Kruskal’s algorithm.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package prim_kruskal computes minimum spanning trees and minimum spanning forests
+// over weighted, undirected core.Graph instances.
 //
-// What & Why
+// Domain scope:
 //
-//   - What is an MST?
-//     Given an undirected, connected, weighted graph G = (V, E), an MST is a subset T ⊆ E such that
-//     T connects all vertices in V (i.e., spans the graph) and the sum of weights of edges in T is minimized.
+//   - Strict MST: connect every vertex with exactly |V|-1 selected edges.
+//   - Explicit MSF: return one minimum spanning tree per connected component.
+//   - Algorithms: Kruskal and Prim.
+//   - Input model: *core.Graph with weighted, undirected graph policy.
+//   - Result model: MSTResult as the canonical public artifact.
 //
-//   - Why MST matters:
+// What MST solves:
 //
-//   - Network Design: Build cost-efficient communication or transportation networks (e.g., fiber-optic backbones, road systems).
+//   - Given an undirected weighted graph G=(V,E), a minimum spanning tree is a
+//     subset T of edges that connects all vertices with minimum total finite cost:
 //
-//   - Clustering: In machine learning, MST helps form clusters by cutting the largest edges in the tree.
+//     minimize:   sum w(e), for every e in T
+//     subject to: T spans V, T is acyclic, and |T| = |V| - 1
 //
-//   - Subroutines: MST is a building block in many approximation algorithms (e.g., Steiner trees, k-centers) and graph partitioning tasks.
+//     Equivalent compact form:
 //
-//   - Theoretical Insights: MST reveals structural properties of weighted graphs (e.g., cut-property, cycle-property).
+//     min_{T ⊆ E} Σ_{e ∈ T} w(e),   |T| = |V| - 1
 //
-// Algorithms Provided
+//     CodeCogs view:
+//     https://latex.codecogs.com/svg.image?\min_{T\subseteq%20E}\sum_{e\in%20T}w(e),\quad|T|=|V|-1
 //
-//   - Kruskal(g *core.Graph) ([]core.Edge, float64, error)
+//   - For a disconnected graph, explicit forest mode applies the same objective
+//     independently to each connected component:
 //
-//   - Strategy: Sort all edges by weight, then iterate from smallest to largest. Use a Disjoint-Set (Union-Find) data structure
-//     to merge vertices component-by-component, skipping edges whose endpoints are already connected. Stop once |V|−1 edges have been added.
+//     MSF(G) = union of MST(C_i) for every connected component C_i.
 //
-//   - Complexity:
+// Why MST matters:
 //
-//   - Time: O(E log E + α(V)*E) ≈ O(E log V) because sorting dominates (E = number of edges, V = number of vertices, α = inverse Ackermann).
+//   - Network design:
+//     MST gives the cheapest backbone that still connects every required site.
+//     Examples include fiber rings, emergency radio relays, satellite mesh control
+//     links, industrial sensor networks, and campus / data-center cabling.
 //
-//   - Space: O(V + E) for storing parent/rank arrays and the sorted edge list.
+//   - VLSI and physical design:
+//     MST-style topologies are useful as a deterministic baseline for global
+//     routing, clock distribution sketches, pin clustering, and low-cost net
+//     connection before more specialized Steiner-tree or timing-aware refinements.
 //
-//   - Determinism: graph.Edges() returns edges in ascending ID order; we perform a stable sort by weight, ensuring that ties break predictably.
+//   - Smart grids and green energy:
+//     MST helps reason about minimum-cost connectivity among substations,
+//     batteries, renewable sources, and critical loads while keeping disconnected
+//     islanded microgrids explicit through forest mode.
 //
-//   - Prim(g *core.Graph, root string) ([]core.Edge, float64, error)
+//   - Big data and machine learning:
+//     MST is a standard primitive for clustering, outlier analysis, graph-based
+//     manifold approximations, and “cut the largest tree edges” segmentation.
 //
-//   - Strategy: Grow a single tree starting from a specified root vertex. Maintain a min-heap (priority queue) of candidate edges
-//     that connect the current tree to an outside vertex. At each step, extract the smallest-weight edge that adds a new vertex.
-//     Continue until |V|−1 edges have been added.
+//   - Algorithmic subroutines:
+//     MST appears inside approximation algorithms, clustering pipelines,
+//     graph partitioning, network sparsification, and topology preconditioners.
 //
-//   - Complexity:
+// Non-goals:
 //
-//   - Time: O(E log V) because each edge may be pushed/popped on the heap once (heap operations cost O(log V)).
+//   - Directed optimum branching/arborescence is not MST and is intentionally rejected.
+//   - Shortest path computation is not MST; use a shortest-path package for route queries.
+//   - Steiner tree optimization is not implemented here; MST can be a baseline but
+//     does not introduce new Steiner points.
+//   - Dynamic MST maintenance is out of scope; every call snapshots the graph.
+//   - The package does not mutate the input graph.
+//   - Matrix-backed APIs must not be documented here unless their exact public
+//     signatures and sentinel laws exist in the package.
 //
-//   - Space: O(V + E) for the visited set and heap storage.
+// Public API:
 //
-//   - Use-Case: When the graph is large but you know a reasonable starting point (root), and you want to avoid sorting all edges upfront.
+//   - MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error)
+//     Canonical facade. It assembles options, validates graph policy, snapshots graph
+//     data, dispatches to one algorithm, and returns a detached result artifact.
 //
-// When to Choose Which Algorithm
+//   - Kruskal(graph *core.Graph) (*MSTResult, error)
+//     Focused strict-tree wrapper selecting AlgorithmKruskal.
 //
-//   - Prim (O(E log V))
+//   - Prim(graph *core.Graph, root string) (*MSTResult, error)
+//     Focused strict-tree wrapper selecting AlgorithmPrim with an explicit root.
 //
-//   - Preferred for very sparse graphs (E ≈ O(V)), since heap operations on O(V) vertices/edges are efficient.
+//   - MSTResult
+//     Canonical result artifact containing Algorithm, Mode, Root, Edges,
+//     TotalWeight, VertexCount, ComponentCount, and ComponentRoots.
 //
-//   - Requires a valid starting vertex (root). If you know a “good” root (e.g., a central hub), Prim often outperforms Kruskal.
+// Result interpretation:
 //
-//   - Kruskal (O(E log E + α(V)*E))
+//   - Algorithm reports the kernel selected by the facade.
+//   - Mode reports strict tree or explicit forest semantics.
+//   - Root is meaningful for Prim; in forest mode it can describe the first
+//     deterministic component root when no explicit root is supplied.
+//   - Edges contains detached core.Edge values selected by the MST/MSF.
+//   - TotalWeight is the sum of selected edge weights.
+//   - VertexCount is the number of vertices in the validated snapshot.
+//   - ComponentCount is 1 for a successful strict MST and can be greater than 1
+//     for explicit forest mode.
+//   - ComponentRoots gives deterministic public component roots.
 //
-//   - Easy to implement when you simply need one global pass over all edges.
+// Options and regimes:
 //
-//   - Preferred when you want a conceptually straightforward sort-and-union approach, or if you only occasionally compute MST (no need to maintain a heap).
+//   - DefaultOptions returns AlgorithmKruskal + ModeStrictTree.
+//   - WithAlgorithm selects AlgorithmKruskal or AlgorithmPrim.
+//   - WithRoot supplies the explicit Prim root.
+//   - WithForest enables explicit minimum spanning forest mode.
+//   - WithStrictTree restores strict spanning tree mode after WithForest.
+//   - Option application is deterministic and follows caller-provided order.
 //
-//   - If E » V (very dense graph), sorting all edges (E log E) may be heavier than Prim’s edge-driven expansion (E log V).
+// Graph policy:
 //
-// Error Conditions
+//   - graph must be non-nil.
+//   - graph must be weighted.
+//   - graph must be undirected at graph level.
+//   - graph must not contain directed edge-level overrides.
+//   - Self-loops are ignored because they cannot connect two components.
+//   - Parallel edges are allowed; the lighter useful candidate may be selected.
+//   - Negative finite weights are allowed and mathematically valid for MST.
+//   - NaN and ±Inf weights are rejected before sorting or heap operations.
 //
-//	Both Kruskal and Prim return meaningful sentinel errors to signal invalid inputs or unreachable MST scenarios:
+// Connectivity policy:
 //
-//	- ErrInvalidGraph
-//	    - Graph is nil, OR
-//	    - graph.Directed() == true (MST requires undirected), OR
-//	    - !graph.Weighted() (MST requires nonzero weights), OR
-//	    - graph.HasDirectedEdges() == true (if mixed-mode per-edge overrides exist; MST requires purely undirected).
+//   - ModeStrictTree is the default and returns ErrDisconnected when the graph
+//     cannot be spanned by one tree.
+//   - ModeForest is explicit opt-in via WithForest and returns a minimum spanning
+//     forest instead of silently downgrading strict tree semantics.
+//   - Empty graphs are classified as disconnected and empty through joined sentinels
+//     where the validator exposes both conditions.
 //
-//	- ErrEmptyRoot (Prim only)
-//	    - root == "" (no starting vertex specified).
+// Determinism:
 //
-//	- core.ErrVertexNotFound (Prim only)
-//	    - root does not exist in graph.Vertices().
+//   - Vertex order is inherited from core.Vertices().
+//   - Edge order is inherited from core.Edges().
+//   - Kruskal stable-sorts by finite Weight; equal-weight candidates keep core edge order.
+//   - Prim's heap orders by finite Weight, then unique Edge.ID.
+//   - ComponentRoots are deterministic public roots, normalized by lexicographic vertex ID.
+//   - Examples print invariant outputs unless edge order itself is the demonstrated contract.
 //
-//	- ErrDisconnected
-//	    - |V| == 0 (empty graph), OR
-//	    - |V| > 1 but the graph is not fully connected (no spanning tree can cover all vertices).
+// Error law:
 //
-// GoDoc Summary
+//   - Use errors.Is for classification.
+//   - Invalid graph failures preserve ErrInvalidGraph plus precise sentinels where applicable.
+//   - ErrNilGraph reports nil graph input.
+//   - ErrUnweightedGraph reports missing weighted semantics.
+//   - ErrDirectedGraph reports directed graph policy.
+//   - ErrDirectedEdge reports directed edge-level overrides.
+//   - ErrEmptyGraph reports an empty graph.
+//   - ErrDisconnected reports strict tree mode failure on empty or disconnected graphs.
+//   - ErrNaNInfWeight reports non-finite edge weights.
+//   - ErrEmptyRoot reports missing Prim root in strict mode.
+//   - core.ErrVertexNotFound reports an absent non-empty Prim root.
+//   - ErrNilOption reports nil Option values.
+//   - ErrUnsupportedAlgorithm reports unsupported algorithm policy.
+//   - ErrInvalidOption reports invalid option state.
+//   - ErrNilResult reports invalid nil result helper access.
 //
-//   - Kruskal(graph *core.Graph) ([]core.Edge, float64, error)
-//     Compute MST via global edge sort + union-find.
-//     Returns (edges, totalWeight, nil) on success, else returns (nil, 0, ErrInvalidGraph/ErrDisconnected).
+// Complexity:
 //
-//   - Prim(graph *core.Graph, root string) ([]core.Edge, float64, error)
-//     Compute MST via a min-heap expansion from a specified root vertex.
-//     Returns (edges, totalWeight, nil) on success, else returns (nil, 0, ErrInvalidGraph/ErrEmptyRoot/core.ErrVertexNotFound/ErrDisconnected).
+//   - Kruskal: O(E log E + E·α(V)) time, O(E + V) space.
+//     Sorting dominates; DSU operations are effectively near-constant amortized.
 //
-// Package prim_kruskal strives for correctness, determinism, and performance:
+//   - Prim: O(E log E) time, O(E + V) space for the current edge-frontier heap.
+//     This package does not currently use a decrease-key vertex heap; therefore
+//     O(E log V) must not be claimed for the current implementation.
 //
-//   - All vertex and edge lists from core.Graph are sorted (by ID) to ensure repeatable behavior.
-//   - Kruskal uses a stable sort by weight so that, for equal weights, edges appear in original insertion order.
-//   - Prim uses a standard min-heap (heap.Interface) to achieve O(E log V) time with minimal memory overhead.
+//   - Result clone helpers are O(E + C), where C is the component count.
 //
-// For examples of usage, see the example_test.go file in this package
-// For deep dive (pseudocode, math formulation, examples), see docs/PRIM_&_KRUSKAL.md..
+// Result ownership:
+//
+//   - MSTResult contains detached core.Edge values.
+//   - No live *core.Edge pointers are retained in public results.
+//   - MSTResult.Clone returns detached slice fields.
+//   - MSTResult.EdgeValues returns a caller-owned edge slice.
+//
+// Concurrency:
+//
+//   - Algorithms snapshot vertices and edges before the kernel starts.
+//   - Concurrent mutation of the same graph during snapshot construction is unsupported;
+//     callers must synchronize graph writes.
+//
+// AI-Hints:
+//
+//   - Do not reintroduce tuple-return public APIs; MSTResult is the canonical result.
+//   - Do not use epsilon inside sort or heap comparators; reject NaN/Inf and compare finite weights directly.
+//   - Do not use edge.To as the next endpoint for undirected traversal; resolve endpoints relative to the source vertex.
+//   - Do not silently return a forest from strict tree mode; require WithForest.
+//   - Do not document matrix-backed APIs unless the exact public signatures exist.
+//   - Do not claim Prim is O(E log V) unless the implementation changes to a vertex-key decrease-key policy.
 package prim_kruskal

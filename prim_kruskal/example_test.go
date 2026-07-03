@@ -1,171 +1,253 @@
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
 package prim_kruskal_test
 
 import (
+	"errors"
 	"fmt"
+	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/prim_kruskal"
 )
 
-// ExampleKruskal_Triangle demonstrates Kruskal’s algorithm on the same triangle graph.
-// The MST is the same set {A–B, B–C} with total weight = 3.
-// Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/cWR3GQU2luz)
-func ExampleKruskal_triangle() {
-	// 1. Construct a new weighted, undirected graph.
-	g, _ := core.NewGraph(core.WithWeighted())
-	// 2. Add edges to form the triangle:
-	_, _ = g.AddEdge("A", "B", 1) // A—B with weight 1
-	_, _ = g.AddEdge("B", "C", 2) // B—C with weight 2
-	_, _ = g.AddEdge("A", "C", 4) // A—C with weight 4
+// ExampleMinimumSpanningTree_vlsiGlobalRouting demonstrates MST as a deterministic
+// global-routing baseline for VLSI-style physical design.
+//
+// Scenario:
+//   - A chip floorplan contains compute blocks, memory blocks, PHY blocks, power management,
+//     and a NoC hub.
+//   - Each weighted edge is a candidate metal route / channel reservation cost between blocks.
+//   - The goal is not final sign-off routing; the goal is a cheap, acyclic connectivity skeleton
+//     that can be refined later by timing-aware, congestion-aware, or Steiner-style tools.
+//
+// Process:
+//   - Build a fixed weighted undirected graph of candidate interconnect channels.
+//   - Run the canonical facade with default Kruskal strict-tree policy.
+//   - Consume stable invariants: selected wires, connected components, and total routing cost.
+//
+// Static fixture note:
+//   - Construction errors are ignored only because this package example uses fixed, audited data.
+//   - Production code must check every core.NewGraph/AddEdge error.
+func ExampleMinimumSpanningTree_vlsiGlobalRouting() {
+	graph, _ := core.NewGraph(core.WithWeighted())
 
-	// 3. Run Kruskal’s algorithm.
-	edges, total, err := prim_kruskal.Kruskal(g)
-	if err != nil {
-		// If any error occurs (e.g., disconnected), print it and exit.
-		fmt.Println("error:", err)
-		return
-	}
+	_, _ = graph.AddEdge("PLL", "NoC", 4)
+	_, _ = graph.AddEdge("NoC", "CPU", 3)
+	_, _ = graph.AddEdge("NoC", "GPU", 5)
+	_, _ = graph.AddEdge("NoC", "NPU", 4)
+	_, _ = graph.AddEdge("NoC", "SRAM", 2)
+	_, _ = graph.AddEdge("CPU", "SRAM", 6)
+	_, _ = graph.AddEdge("GPU", "SRAM", 3)
+	_, _ = graph.AddEdge("NPU", "SRAM", 4)
+	_, _ = graph.AddEdge("ISP", "NoC", 7)
+	_, _ = graph.AddEdge("ISP", "GPU", 6)
+	_, _ = graph.AddEdge("DDR", "PHY", 5)
+	_, _ = graph.AddEdge("PHY", "NoC", 8)
+	_, _ = graph.AddEdge("DDR", "CPU", 9)
+	_, _ = graph.AddEdge("PMIC", "PLL", 3)
+	_, _ = graph.AddEdge("PMIC", "PHY", 4)
+	_, _ = graph.AddEdge("PMIC", "NoC", 10)
+	_, _ = graph.AddEdge("DDR", "SRAM", 7)
+	_, _ = graph.AddEdge("ISP", "PHY", 8)
 
-	// 4. Print the total weight and the list of edges in the MST.
-	fmt.Printf("Total: %g, Edges: ", total)
-	for i, e := range edges {
-		if i > 0 {
-			fmt.Print(" ")
-		}
-		fmt.Printf("%s-%s", e.From, e.To)
-	}
-	// Output: Total: 3, Edges: A-B B-C
-}
-
-// ExamplePrim_Pentagon demonstrates Prim’s algorithm on a simple 5‐vertex pentagon graph.
-// Vertices: A, B, C, D, E. Edges: A–B (1), B–C (2), C–D (3), D–E (5), A–E (12)
-// The MST in this graph is edges {A–B, B–C, C-D, D-E} with total weight = 11.
-// Playground: [![Playground - Prim](https://img.shields.io/badge/Go_Playground-Prim-blue?logo=go)](https://go.dev/play/p/2P5c7LC2Ac-)
-func ExamplePrim_Pentagon() {
-	// Construct triangle graph: A–B(1), B–C(2), C–D(3), D–E(5), A–E(12)
-	g, _ := core.NewGraph(core.WithWeighted())
-	_, _ = g.AddEdge("A", "B", 1)
-	_, _ = g.AddEdge("A", "E", 12)
-	_, _ = g.AddEdge("B", "C", 2)
-	_, _ = g.AddEdge("C", "D", 3)
-	_, _ = g.AddEdge("D", "E", 5)
-
-	edges, total, err := prim_kruskal.Prim(g, "A")
+	result, err := prim_kruskal.MinimumSpanningTree(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
-	fmt.Printf("Total: %g, Edges: ", total)
-	for i, e := range edges {
-		if i > 0 {
-			fmt.Print(" ")
-		}
-		fmt.Printf("%s-%s", e.From, e.To)
-	}
-	// Output: Total: 11, Edges: A-B B-C C-D D-E
+	fmt.Printf(
+		"vlsi algorithm=%s mode=%s blocks=%d wires=%d components=%d total=%.0f\n",
+		result.Algorithm,
+		result.Mode,
+		result.VertexCount,
+		len(result.Edges),
+		result.ComponentCount,
+		result.TotalWeight,
+	)
+
+	// Output:
+	// vlsi algorithm=kruskal mode=strict_tree blocks=10 wires=9 components=1 total=34
 }
 
-// ExampleKruskal_MediumGraph demonstrates Kruskal’s algorithm on a larger 4‐vertex graph((letter envelope)).
-// Vertices: A, B, C, D
-// Edges:
+// ExampleMinimumSpanningTree_spaceMeshForest demonstrates explicit forest mode for
+// a satellite / orbital relay mesh.
 //
-//	A—B (4), B—C (2), C—D (5), D—A (4),
-//	A—C (1), B—D (3).
+// Scenario:
+//   - Ground control receives topology candidates from several disconnected orbital groups.
+//   - A strict MST would be mathematically wrong because not every satellite can currently
+//     reach every other group.
+//   - WithForest asks for the cheapest safe control backbone inside every reachable component,
+//     while preserving the fact that the constellation is still split.
 //
-// The MST has 3 edges: {A–C, C–B, B–D} with total weight = 6.
-// Playground: [![Playground - Kruskal_medium](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/aDggwYQ8H4Q)
-func ExampleKruskal_MediumGraph() {
-	// Medium graph: A–B(4), A–C(1), C–B(2), B–D(3), C–D(5), D–A(4)
-	g, _ := core.NewGraph(core.WithWeighted())
-	_, _ = g.AddEdge("A", "B", 4)
-	_, _ = g.AddEdge("A", "C", 1)
-	_, _ = g.AddEdge("C", "B", 2)
-	_, _ = g.AddEdge("B", "D", 3)
-	_, _ = g.AddEdge("C", "D", 5)
-	_, _ = g.AddEdge("D", "A", 4)
+// Process:
+//   - Build three disconnected weighted mesh components.
+//   - Select AlgorithmPrim to demonstrate component growth from deterministic roots.
+//   - Enable WithForest so the result is an MSF, not a hidden strict-tree fallback.
+//
+// Static fixture note:
+//   - Construction errors are ignored only because this package example uses fixed, audited data.
+//   - Production code must check every core.NewGraph/AddEdge error.
+func ExampleMinimumSpanningTree_spaceMeshForest() {
+	graph, _ := core.NewGraph(core.WithWeighted())
 
-	edges, total, err := prim_kruskal.Kruskal(g)
+	_, _ = graph.AddEdge("Arctic-1", "Arctic-2", 6)
+	_, _ = graph.AddEdge("Arctic-2", "Arctic-3", 4)
+	_, _ = graph.AddEdge("Arctic-3", "Arctic-Gateway", 5)
+	_, _ = graph.AddEdge("Arctic-1", "Arctic-Gateway", 9)
+	_, _ = graph.AddEdge("Arctic-2", "Arctic-Gateway", 8)
+
+	_, _ = graph.AddEdge("Equator-1", "Equator-2", 3)
+	_, _ = graph.AddEdge("Equator-2", "Equator-3", 4)
+	_, _ = graph.AddEdge("Equator-3", "Equator-4", 3)
+	_, _ = graph.AddEdge("Equator-1", "Equator-4", 8)
+	_, _ = graph.AddEdge("Equator-2", "Equator-4", 5)
+	_, _ = graph.AddEdge("Equator-1", "Equator-3", 6)
+
+	_, _ = graph.AddEdge("Pacific-Relay", "Pacific-1", 7)
+	_, _ = graph.AddEdge("Pacific-Relay", "Pacific-2", 6)
+	_, _ = graph.AddEdge("Pacific-1", "Pacific-2", 10)
+
+	result, err := prim_kruskal.MinimumSpanningTree(
+		graph,
+		prim_kruskal.WithAlgorithm(prim_kruskal.AlgorithmPrim),
+		prim_kruskal.WithForest(),
+	)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
-	fmt.Printf("Total: %g, Edges: ", total)
-	for i, e := range edges {
-		if i > 0 {
-			fmt.Print(" ")
-		}
-		fmt.Printf("%s-%s", e.From, e.To)
-	}
-	// Output: Total: 6, Edges: A-C C-B B-D
+	fmt.Printf(
+		"space_mesh algorithm=%s mode=%s satellites=%d links=%d components=%d roots=%v total=%.0f\n",
+		result.Algorithm,
+		result.Mode,
+		result.VertexCount,
+		len(result.Edges),
+		result.ComponentCount,
+		result.ComponentRoots,
+		result.TotalWeight,
+	)
+
+	// Output:
+	// space_mesh algorithm=prim mode=forest satellites=11 links=8 components=3 roots=[Arctic-1 Equator-1 Pacific-1] total=38
 }
 
-// ExamplePrim_LargeGraph demonstrates Prim’s algorithm on a larger 7‐vertex graph.
-// Vertices: A, B, C, D, E, F, G
-// Edges:
+// ExampleKruskal_embeddingClustering demonstrates MST consumption in a machine-learning
+// clustering workflow.
 //
-//	B—C (1), D—E (1), A—B (2), E—G (2), F—G (3),
-//	A—C (3), B—D (4), C—E (5), E—F (6), D—F (7).
+// Scenario:
+//   - Each vertex is a vector cluster prototype from an embedding index.
+//   - Edge weights are distances between prototypes.
+//   - The MST exposes the cheapest global similarity backbone.
+//   - Cutting the largest selected MST edges is a classic way to split the backbone into
+//     a chosen number of clusters.
 //
-// The MST has 6 edges: {A–B, B–C, B–D, D–E, E–G, E–F} with total weight = 16.
-// Playground: [![Playground - Prim_large](https://img.shields.io/badge/Go_Playground-Kruskal-blue?logo=go)](https://go.dev/play/p/EwPJLIM1y31)
-func ExamplePrim_LargeGraph() {
-	// 1. Construct a new weighted, undirected graph.
-	g, _ := core.NewGraph(core.WithWeighted())
+// Process:
+//   - Build a fixed graph with three dense local groups and expensive cross-group bridges.
+//   - Run Kruskal to obtain a deterministic MST.
+//   - Sort the selected MST edges by descending weight and cut the two largest links.
+//
+// Static fixture note:
+//   - Construction errors are ignored only because this package example uses fixed, audited data.
+//   - Production code must check every core.NewGraph/AddEdge error.
+func ExampleKruskal_embeddingClustering() {
+	graph, _ := core.NewGraph(core.WithWeighted())
 
-	// 2. Add all vertices one by one.
-	_ = g.AddVertex("A")
-	_ = g.AddVertex("B")
-	_ = g.AddVertex("C")
-	_ = g.AddVertex("D")
-	_ = g.AddVertex("E")
-	_ = g.AddVertex("F")
-	_ = g.AddVertex("G")
+	_, _ = graph.AddEdge("vision-01", "vision-02", 0.12)
+	_, _ = graph.AddEdge("vision-02", "vision-03", 0.15)
+	_, _ = graph.AddEdge("vision-01", "vision-03", 0.22)
 
-	// 3. Add edges with the specified weights (alternative path, will be skipped by MST).
-	_, _ = g.AddEdge("A", "B", 2)
-	_, _ = g.AddEdge("B", "C", 1)
-	_, _ = g.AddEdge("D", "E", 1)
-	_, _ = g.AddEdge("E", "G", 2)
-	_, _ = g.AddEdge("F", "G", 3)
-	_, _ = g.AddEdge("A", "C", 3)
-	_, _ = g.AddEdge("B", "D", 4)
-	_, _ = g.AddEdge("C", "E", 5)
-	_, _ = g.AddEdge("E", "F", 6)
-	_, _ = g.AddEdge("D", "F", 7)
+	_, _ = graph.AddEdge("speech-01", "speech-02", 0.10)
+	_, _ = graph.AddEdge("speech-02", "speech-03", 0.17)
+	_, _ = graph.AddEdge("speech-01", "speech-03", 0.25)
 
-	// 4. Run Prim’s algorithm, starting from vertex "A".
-	edges, total, err := prim_kruskal.Prim(g, "A")
+	_, _ = graph.AddEdge("fraud-01", "fraud-02", 0.08)
+	_, _ = graph.AddEdge("fraud-02", "fraud-03", 0.13)
+	_, _ = graph.AddEdge("fraud-01", "fraud-03", 0.21)
+
+	_, _ = graph.AddEdge("vision-03", "speech-01", 0.94)
+	_, _ = graph.AddEdge("speech-03", "fraud-01", 1.08)
+	_, _ = graph.AddEdge("vision-02", "speech-02", 1.21)
+	_, _ = graph.AddEdge("speech-01", "fraud-02", 1.35)
+	_, _ = graph.AddEdge("vision-01", "fraud-03", 1.62)
+
+	result, err := prim_kruskal.Kruskal(graph)
 	if err != nil {
-		// If graph were invalid or disconnected, print error and return.
 		fmt.Println("error:", err)
 		return
 	}
 
-	// 5. Print the total weight and the list of edges in the MST, in the order Prim discovered them.
-	fmt.Printf("Total: %g, Edges: ", total)
-	for i, e := range edges {
-		if i > 0 {
-			fmt.Print(" ")
-		}
-		fmt.Printf("%s-%s", e.From, e.To)
-	}
-	// Output: Total: 16, Edges: A-B B-C B-D D-E E-G E-F
+	cutCandidates := append([]core.Edge(nil), result.Edges...)
+	sort.SliceStable(cutCandidates, func(i, j int) bool {
+		return cutCandidates[i].Weight > cutCandidates[j].Weight
+	})
+
+	cut1 := cutCandidates[0]
+	cut2 := cutCandidates[1]
+	remaining := result.TotalWeight - cut1.Weight - cut2.Weight
+
+	fmt.Printf(
+		"ml_clustering mst_edges=%d mst_total=%.2f cut1=%s-%s:%.2f cut2=%s-%s:%.2f remaining=%.2f clusters=%d\n",
+		len(result.Edges),
+		result.TotalWeight,
+		cut1.From,
+		cut1.To,
+		cut1.Weight,
+		cut2.From,
+		cut2.To,
+		cut2.Weight,
+		remaining,
+		3,
+	)
+
+	// Output:
+	// ml_clustering mst_edges=8 mst_total=2.77 cut1=speech-03-fraud-01:1.08 cut2=vision-03-speech-01:0.94 remaining=0.75 clusters=3
 }
 
-func ExamplePrim_ErrDisconnected() {
-	g, _ := core.NewGraph(core.WithWeighted())
-	// Attempt to run Prim with root "A" on an empty graph.
-	_, _, err := prim_kruskal.Prim(g, "A")
-	fmt.Println(err)
-	// Output: prim_kruskal: graph is disconnected
-}
+// ExampleMinimumSpanningTree_smartGridProtectionPolicy demonstrates sentinel-first rejection
+// of a directed edge inside an otherwise weighted smart-grid topology.
+//
+// Scenario:
+//   - A planning graph mixes physical power links with a one-way telemetry/control channel.
+//   - The power links are undirected connectivity candidates.
+//   - The telemetry edge is directed and must not be treated as a physical bidirectional
+//     grid tie by MST.
+//   - The package rejects this graph before any tree construction starts.
+//
+// Process:
+//   - Build a mixed-edge graph with realistic grid assets.
+//   - Insert several undirected power links and one directed control edge.
+//   - Use errors.Is to classify the failure without matching error strings.
+//
+// Static fixture note:
+//   - Construction errors are ignored only because this package example uses fixed, audited data.
+//   - Production code must check every core.NewGraph/AddEdge error.
+func ExampleMinimumSpanningTree_smartGridProtectionPolicy() {
+	graph, _ := core.NewGraph(core.WithWeighted(), core.WithMixedEdges())
 
-func ExampleKruskal_ErrDisconnected() {
-	g, _ := core.NewGraph(core.WithWeighted())
-	// Attempt to run Kruskal on an empty graph.
-	_, _, err := prim_kruskal.Kruskal(g)
-	fmt.Println(err)
-	// Output: prim_kruskal: graph is disconnected
+	_, _ = graph.AddEdge("SolarFarm-A", "Substation-A", 4)
+	_, _ = graph.AddEdge("WindPark-B", "Substation-B", 5)
+	_, _ = graph.AddEdge("Substation-A", "Substation-B", 3)
+	_, _ = graph.AddEdge("Substation-B", "BatteryHub", 2)
+	_, _ = graph.AddEdge("BatteryHub", "HospitalLoop", 6)
+	_, _ = graph.AddEdge("HospitalLoop", "DowntownLoad", 4)
+	_, _ = graph.AddEdge("DowntownLoad", "IndustrialLoad", 5)
+	_, _ = graph.AddEdge("IndustrialLoad", "Substation-A", 7)
+	_, _ = graph.AddEdge("MicrogridIsland", "BatteryHub", 8)
+
+	_, _ = graph.AddEdge("ControlCenter", "Substation-A", 1, core.WithEdgeDirected(true))
+
+	_, err := prim_kruskal.MinimumSpanningTree(graph)
+
+	fmt.Printf(
+		"smart_grid_policy invalid=%t directed_edge=%t\n",
+		errors.Is(err, prim_kruskal.ErrInvalidGraph),
+		errors.Is(err, prim_kruskal.ErrDirectedEdge),
+	)
+
+	// Output:
+	// smart_grid_policy invalid=true directed_edge=true
 }

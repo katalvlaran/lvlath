@@ -256,3 +256,131 @@ func validateTSPResultForTest(result *TSPResult, n int, start int, algo Algorith
 
 	return nil
 }
+
+func FuzzEulerianCircuitParallelMultigraph(f *testing.F) {
+	for _, seed := range []uint64{1, 2, 3, 7, 42, 128, 1001} {
+		for _, n := range []int{2, 3, 4, 8, 16} {
+			f.Add(seed, n)
+		}
+	}
+
+	f.Fuzz(func(t *testing.T, rawSeed uint64, rawN int) {
+		n := rawN
+		if n < 2 {
+			n = 2
+		}
+		if n > 24 {
+			n = 24
+		}
+
+		adj := seededEulerianMultigraphForTest(n, int64(rawSeed))
+
+		start := int(rawSeed % uint64(n))
+		walk, err := EulerianCircuit(adj, start)
+		if err != nil {
+			t.Fatalf("EulerianCircuit: %v n=%d seed=%d adj=%v", err, n, rawSeed, adj)
+		}
+
+		if err = verifyEulerianWalkUsesEveryEdgeForTest(adj, walk, start); err != nil {
+			t.Fatalf("verify walk: %v n=%d seed=%d walk=%v adj=%v", err, n, rawSeed, walk, adj)
+		}
+	})
+}
+
+func seededEulerianMultigraphForTest(n int, seed int64) [][]int {
+	rng := rand.New(rand.NewSource(seed))
+
+	adj := make([][]int, n)
+
+	// Start with one simple cycle so the non-zero graph is connected.
+	for vertex := 0; vertex < n; vertex++ {
+		next := (vertex + 1) % n
+		adj[vertex] = append(adj[vertex], next)
+		adj[next] = append(adj[next], vertex)
+	}
+
+	// Add random pairs of parallel undirected edges.
+	// Adding two copies preserves even degree at both endpoints.
+	extraPairs := n + rng.Intn(3*n)
+	for i := 0; i < extraPairs; i++ {
+		u := rng.Intn(n)
+		v := rng.Intn(n)
+		if u == v {
+			v = (v + 1) % n
+		}
+
+		for copyIndex := 0; copyIndex < 2; copyIndex++ {
+			adj[u] = append(adj[u], v)
+			adj[v] = append(adj[v], u)
+		}
+	}
+
+	return adj
+}
+func verifyEulerianWalkUsesEveryEdgeForTest(adj [][]int, walk []int, start int) error {
+	if len(walk) == 0 {
+		return fmt.Errorf("empty walk")
+	}
+	if walk[0] != start || walk[len(walk)-1] != start {
+		return fmt.Errorf("walk is not closed at start=%d: %v", start, walk)
+	}
+
+	want := make(map[uint64]int)
+	edgeCount := 0
+
+	for from := range adj {
+		if len(adj[from])&1 == 1 {
+			return fmt.Errorf("odd degree vertex=%d degree=%d", from, len(adj[from]))
+		}
+		for _, to := range adj[from] {
+			key := packUndirectedKey(from, to)
+			want[key]++
+			edgeCount++
+		}
+	}
+
+	for key, count := range want {
+		if count&1 == 1 {
+			return fmt.Errorf("non-reciprocal edge key=%d count=%d", key, count)
+		}
+		want[key] = count / 2
+	}
+
+	if len(walk) != edgeCount/2+1 {
+		return fmt.Errorf("walk length got %d want %d", len(walk), edgeCount/2+1)
+	}
+
+	for i := 0; i+1 < len(walk); i++ {
+		u := walk[i]
+		v := walk[i+1]
+		if u < 0 || u >= len(adj) || v < 0 || v >= len(adj) {
+			return fmt.Errorf("walk edge %d has OOB endpoint %d->%d", i, u, v)
+		}
+
+		key := packUndirectedKey(u, v)
+		if want[key] == 0 {
+			return fmt.Errorf("walk uses missing/excess edge %d->%d at index %d", u, v, i)
+		}
+		want[key]--
+	}
+
+	for key, remaining := range want {
+		if remaining != 0 {
+			return fmt.Errorf("unused edge key=%d remaining=%d", key, remaining)
+		}
+	}
+
+	return nil
+}
+func packUndirectedKey(u, v int) uint64 {
+	var (
+		a = uint64(u)
+		b = uint64(v)
+	)
+	// Order the endpoints to make the key direction-agnostic.
+	if a < b {
+		return (a << 32) | b
+	}
+
+	return (b << 32) | a
+}

@@ -1,5 +1,8 @@
-// Package prim_kruskal provides an implementation of Prim’s Minimum Spanning Tree (MST) algorithm.
-// It assumes an undirected, weighted *core.Graph and grows the MST from a specified root vertex using a min‐heap.
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+// Package prim_kruskal contains Prim's Minimum Spanning Tree implementation in this file.
+// The algorithm consumes incident undirected edges from core.Graph without assuming edge.To is the next vertex.
 package prim_kruskal
 
 import (
@@ -8,153 +11,331 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// Prim computes the Minimum Spanning Tree (MST) of an undirected, weighted graph
-// by growing outwards from a specified root vertex using a min‐heap.
+// primCandidate stores one frontier edge together with the unvisited endpoint it reaches.
+// It is the heap payload used by Prim to avoid assuming that core.Edge.To is always the next vertex.
 //
-// Error Conditions:
-//   - ErrInvalidGraph      : if graph is nil, or graph.Directed() == true, or graph.Weighted() == false.
-//   - ErrEmptyRoot         : if the provided root string is empty.
-//   - core.ErrVertexNotFound: if the root vertex does not exist in the graph.
-//   - ErrDisconnected      : if |V| == 0 (empty graph) or |V| > 1 but the graph is not fully connected.
+// Implementation:
+//   - Stage 1: enqueuePrimSnapshotFrontier resolves target relative to the current source.
+//   - Stage 2: heap.Push stores the detached edge value and resolved target together.
+//   - Stage 3: primKernel discards stale candidates whose target was already visited.
 //
-// Steps:
-//  1. Validate: graph != nil, graph.Weighted(), !graph.Directed() and !graph.HasDirectedEdges().
-//  2. Retrieve sorted vertex IDs; if len(vertices)==0 → ErrDisconnected.
-//     If len(vertices)==1, check that root matches the single vertex → return trivial empty MST.
-//  3. Validate root: root != "", graph.HasVertex(root).
-//  4. Initialize:
-//     - visited map to track which vertices are already in MST.
-//     - pq (min‐heap) to hold candidate edges ordered by weight.
-//     - mark root as visited and push all edges adjacent to root into pq.
-//  5. While pq not empty and MST has < |V|-1 edges:
-//     a. Pop the smallest‐weight edge (u→v) from pq.
-//     b. If v is already visited, skip (this edge would form a cycle).
-//     c. Otherwise, add (u→v) to MST, mark v as visited, accumulate weight.
-//     d. Push all edges from v to as‐yet‐unvisited neighbors into pq.
-//  6. If MST size < |V|-1 after loop → ErrDisconnected.
-//  7. Return MST edges and total weight.
+// Behavior highlights:
+//   - edge is a detached core.Edge value from mstSnapshot.
+//   - target is the endpoint that was unvisited at enqueue time.
 //
-// Complexity: O(E log V) time, O(V + E) memory.
-func Prim(graph *core.Graph, root string) ([]core.Edge, float64, error) {
-	// 1. Validate that graph is non-nil, weighted, undirected and have no direct edges.
-	if graph == nil || !graph.Weighted() || graph.Directed() || graph.HasDirectedEdges() {
-		// Return ErrInvalidGraph for any invalid condition.
-		return nil, 0, ErrInvalidGraph
-	}
+// Fields:
+//   - edge: candidate edge value.
+//   - target: resolved unvisited endpoint.
+//
+// Determinism:
+//   - Heap ordering is controlled by primFrontier.Less.
+//
+// Complexity:
+//   - Space O(1) per queued candidate.
+//
+// AI-Hints:
+//   - Do not remove target and later use edge.To; undirected traversal depends on the source vertex.
+type primCandidate struct {
+	// edge is the detached candidate edge considered for inclusion in the MST/MSF.
+	edge core.Edge
 
-	// 2. Retrieve all vertex IDs in sorted order (core.Graph.Vertices() returns sorted).
-	vertices := graph.Vertices()
-	// If no vertices, we cannot form any MST: treat as disconnected.
-	if len(vertices) == 0 {
-		return nil, 0, ErrDisconnected
-	}
-	// If exactly one vertex, MST is trivially empty (no edges) if root matches that vertex.
-	if len(vertices) == 1 {
-		if vertices[0] != root {
-			// If the single vertex does not match the requested root, that root doesn't exist.
-			return nil, 0, core.ErrVertexNotFound
-		}
-
-		// Single‐vertex MST: empty edge list, zero total weight, no error.
-		return []core.Edge{}, 0, nil
-	}
-
-	// 3. Validate root is non-empty and actually exists in the graph.
-	if root == "" {
-		return nil, 0, ErrEmptyRoot
-	}
-	if !graph.HasVertex(root) {
-		return nil, 0, core.ErrVertexNotFound
-	}
-
-	// 4. Initialize visited set and MST container.
-	n := len(vertices)                  // total number of vertices
-	visited := make(map[string]bool, n) // mark visited vertices
-	mst := make([]core.Edge, 0, n-1)    // will hold up to n-1 edges
-	var totalWeight float64             // sum of weights in MST
-
-	// 4a. Prepare the priority queue (min‐heap) of *core.Edge pointers.
-	pq := &edgePQ{} // our custom edge priority queue
-	heap.Init(pq)   // initialize internal slice
-
-	// 4b. Mark root as visited and push all edges adjacent to root.
-	visited[root] = true
-	neighbors, err := graph.Neighbors(root) // get all outgoing/undirected edges from root
-	if err != nil {
-		// If Neighbors returned an error (e.g., vertex not found), propagate it.
-		return nil, 0, err
-	}
-	for _, e := range neighbors {
-		// Only consider edges whose other endpoint is not yet visited.
-		if !visited[e.To] {
-			heap.Push(pq, e) // push pointer to *core.Edge
-		}
-	}
-
-	// 5. Main loop: extract smallest edge and expand MST until we have n-1 edges.
-	for pq.Len() > 0 && len(mst) < n-1 {
-		// Pop the minimal‐weight edge from the heap.
-		e := heap.Pop(pq).(*core.Edge)
-		v := e.To
-		// If this endpoint is already visited, skip to avoid cycles.
-		if visited[v] {
-			continue
-		}
-		// 5a. Include this edge (u→v) in MST.
-		visited[v] = true       // mark new vertex as visited
-		mst = append(mst, *e)   // append the edge value (dereference pointer)
-		totalWeight += e.Weight // accumulate its weight
-
-		// 5b. Push all edges from newly visited vertex v to unvisited neighbors.
-		nextNeighbors, err := graph.Neighbors(v)
-		if err != nil {
-			// Propagate any error encountered while fetching neighbors.
-			return nil, 0, err
-		}
-		for _, ne := range nextNeighbors {
-			if !visited[ne.To] {
-				heap.Push(pq, ne)
-			}
-		}
-	}
-
-	// 6. If we did not collect exactly n-1 edges, the graph must be disconnected.
-	if len(mst) < n-1 {
-		return nil, 0, ErrDisconnected
-	}
-
-	// 7. Return the completed MST and its total weight.
-	return mst, totalWeight, nil
+	// target is the endpoint that was unvisited when this candidate entered the heap.
+	target string
 }
 
-// edgePQ implements heap.Interface for a min‐heap of *core.Edge, ordered by Weight.
-type edgePQ []*core.Edge
+// primFrontier implements heap.Interface for Prim frontier candidates.
+// It orders candidates by finite Weight and then unique Edge.ID for deterministic equal-weight selection.
+//
+// Implementation:
+//   - Stage 1: Len, Less, Swap provide heap ordering.
+//   - Stage 2: Push appends a primCandidate supplied by heap.Push.
+//   - Stage 3: Pop removes the tail after heap.Pop moves the minimum there.
+//
+// Behavior highlights:
+//   - Non-finite weights are rejected by newMSTSnapshot before candidates reach the heap.
+//   - Equal-weight choices are deterministic because Edge.ID is unique.
+//   - The target field is traversal metadata, not a tie-break key.
+//
+// Determinism:
+//   - Less uses Weight, then Edge.ID.
+//   - No map iteration participates in heap ordering.
+//
+// Complexity:
+//   - Len/Less/Swap are O(1); heap Push/Pop are O(log E).
+//
+// AI-Hints:
+//   - Do not add source/target tie-breaks after Edge.ID; unique edge IDs already close the order.
+type primFrontier []primCandidate
 
-// Len returns the number of edges in the priority queue.
-// Complexity: O(1).
-func (pq edgePQ) Len() int { return len(pq) }
+// Len returns the number of candidate edges currently stored in the heap.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func (pf primFrontier) Len() int { return len(pf) }
 
-// Less reports whether element i should sort before j.
-// We compare by edge.Weight for ascending order.
-// Complexity: O(1).
-func (pq edgePQ) Less(i, j int) bool { return pq[i].Weight < pq[j].Weight }
+// Less reports whether candidate i has higher heap priority than candidate j.
+// Lower finite weight wins; equal weights are broken by unique Edge.ID.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func (pf primFrontier) Less(i, j int) bool {
+	left := pf[i].edge
+	right := pf[j].edge
 
-// Swap swaps elements at indices i and j.
-// Complexity: O(1).
-func (pq edgePQ) Swap(i, j int) { pq[i], pq[j] = pq[j], pq[i] }
+	if left.Weight != right.Weight {
+		return left.Weight < right.Weight
+	}
 
-// Push appends a new *core.Edge to the heap.
-// Type‐assert x to *core.Edge and append to underlying slice.
-// Called by heap.Push. Complexity: O(log N) amortized.
-func (pq *edgePQ) Push(x interface{}) { *pq = append(*pq, x.(*core.Edge)) }
+	return left.ID < right.ID
+}
 
-// Pop removes and returns the smallest‐weight *core.Edge from the heap.
-// Called by heap.Pop. Complexity: O(log N) amortized.
-func (pq *edgePQ) Pop() interface{} {
-	old := *pq
-	n := len(old)
-	edge := old[n-1] // smallest element after heap adjustments
-	*pq = old[:n-1]  // shrink slice
+// Swap exchanges two heap candidates in O(1) time.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+func (pf primFrontier) Swap(i, j int) { pf[i], pf[j] = pf[j], pf[i] }
 
-	return edge
+// Push appends one primCandidate to the frontier.
+// The container/heap package calls Push and then restores heap order.
+//
+// Complexity:
+//   - Amortized append O(1); heap.Push as a whole is O(log E).
+func (pf *primFrontier) Push(value any) {
+	*pf = append(*pf, value.(primCandidate))
+}
+
+// Pop removes and returns the heap tail after heap.Pop moves the minimum candidate there.
+// It clears the removed slot to avoid retaining detached edge data longer than needed.
+//
+// Complexity:
+//   - Time O(1) for this method; heap.Pop as a whole is O(log E).
+func (pf *primFrontier) Pop() any {
+	old := *pf
+	lastIndex := len(old) - 1
+	candidate := old[lastIndex]
+	old[lastIndex] = primCandidate{}
+	*pf = old[:lastIndex]
+
+	return candidate
+}
+
+// primKernel computes a minimum spanning tree or forest using Prim's frontier policy.
+//
+// Implementation:
+//   - Stage 1: Validate root policy against the snapshot.
+//   - Stage 2: Grow the explicit root component in strict mode.
+//   - Stage 3: In forest mode, grow remaining components in vertex order.
+//   - Stage 4: Enforce strict connectivity or publish forest metadata.
+//
+// Behavior highlights:
+//   - Strict Prim requires a root.
+//   - Forest Prim may omit root and then starts from the first vertex in core.Vertices() order.
+//   - Heap ordering is by finite Weight, then Edge.ID.
+//   - Stale heap candidates are discarded after their target is already visited.
+//
+// Inputs:
+//   - snapshot: validated MST snapshot.
+//   - cfg: finalized option policy.
+//
+// Returns:
+//   - *MSTResult: canonical detached result.
+//   - error: ErrDisconnected in strict tree mode when not all vertices connect.
+//
+// Errors:
+//   - core.ErrVertexNotFound when the requested root is absent.
+//   - ErrDisconnected when strict mode cannot reach all vertices.
+//
+// Determinism:
+//   - Primary root is explicit or the first unvisited vertex in snapshot order.
+//   - Secondary forest roots follow snapshot vertex order.
+//   - Frontier ties are resolved by Edge.ID.
+//
+// Complexity:
+//   - Time O(E log E), Space O(V + E).
+//
+// AI-Hints:
+//   - Do not derive target from edge.to alone; the same undirected edge is stored in both adjacency lists.
+func primKernel(snapshot *mstSnapshot, cfg Options) (*MSTResult, error) {
+	vertexCount := len(snapshot.vertices)
+
+	result := &MSTResult{
+		Algorithm:      AlgorithmPrim,
+		Mode:           cfg.Mode,
+		Root:           cfg.Root,
+		Edges:          make([]core.Edge, 0, maxMSTEdgeCapacity(vertexCount)),
+		VertexCount:    vertexCount,
+		ComponentRoots: make([]string, 0, 1),
+	}
+
+	// A single-vertex graph has an empty spanning tree; optional forest mode may infer the only root.
+	if vertexCount == 1 {
+		root := cfg.Root
+		if root == "" {
+			root = snapshot.vertices[0]
+		}
+
+		// A non-empty root still must refer to the only vertex in the snapshot.
+		if !snapshot.hasVertex(root) {
+			return nil, core.ErrVertexNotFound
+		}
+
+		result.Root = root
+		result.ComponentCount = 1
+		result.ComponentRoots = []string{root}
+		return result, nil
+	}
+
+	// Validate the explicit Prim root before any traversal starts.
+	if cfg.Root != "" && !snapshot.hasVertex(cfg.Root) {
+		return nil, core.ErrVertexNotFound
+	}
+
+	visited := make(map[string]bool, vertexCount)
+
+	// Grow the requested root component first when a root was supplied.
+	if cfg.Root != "" {
+		growPrimComponent(snapshot, cfg.Root, visited, result)
+	}
+
+	// Strict mode must produce exactly one spanning tree over all vertices.
+	if cfg.Mode == ModeStrictTree {
+		if len(result.Edges) != vertexCount-1 {
+			return nil, ErrDisconnected
+		}
+		result.ComponentCount = 1
+		if len(result.ComponentRoots) == 0 {
+			result.ComponentRoots = []string{cfg.Root}
+		}
+		return result, nil
+	}
+
+	// Forest mode resumes from every still-unvisited vertex in deterministic snapshot order.
+	for _, root := range snapshot.vertices {
+		// Skip vertices already covered by the explicit root component or an earlier forest component.
+		if visited[root] {
+			continue
+		}
+
+		// Grow one minimum spanning tree for this connected component.
+		growPrimComponent(snapshot, root, visited, result)
+	}
+
+	// Finalize forest metadata after every component has been grown.
+	result.ComponentCount = len(result.ComponentRoots)
+	if result.Root == "" && len(result.ComponentRoots) > 0 {
+		result.Root = result.ComponentRoots[0]
+	}
+
+	return result, nil
+}
+
+// growPrimComponent grows one Prim component from root and appends accepted edges into result.
+// It mutates visited and result as kernel-local state owned by the current Prim execution.
+//
+// Implementation:
+//   - Stage 1: Register root as a public component root.
+//   - Stage 2: Initialize an empty frontier heap.
+//   - Stage 3: Mark root visited and enqueue all frontier candidates.
+//   - Stage 4: Pop candidates by priority, skipping stale targets.
+//   - Stage 5: Accept the lightest valid edge and expand from the reached target.
+//
+// Behavior highlights:
+//   - Stale candidates are expected when multiple edges reach a vertex before it is visited.
+//   - Accepted edges are detached values copied from mstSnapshot.
+//   - TotalWeight is accumulated only for accepted edges.
+//
+// Inputs:
+//   - snapshot: validated MST snapshot.
+//   - root: component root to grow from.
+//   - visited: shared visited set across strict/forest traversal.
+//   - result: mutable result artifact under construction.
+//
+// Determinism:
+//   - Initial adjacency scan follows snapshot adjacency order.
+//   - Candidate extraction follows primFrontier ordering.
+//   - Component root registration follows caller-provided root order.
+//
+// Complexity:
+//   - Time O(Ec log E), where Ec is the scanned edge count for the component.
+//   - Space O(Ec) in the frontier at worst.
+//
+// Notes:
+//   - This helper is a kernel helper and assumes inputs were validated by primKernel.
+//
+// AI-Hints:
+//   - Do not append result edges before checking visited[target]; stale heap candidates must not form cycles.
+func growPrimComponent(snapshot *mstSnapshot, root string, visited map[string]bool, result *MSTResult) {
+	result.ComponentRoots = append(result.ComponentRoots, root)
+
+	frontier := &primFrontier{}
+	heap.Init(frontier)
+
+	visited[root] = true
+	enqueuePrimSnapshotFrontier(snapshot, root, visited, frontier)
+
+	for frontier.Len() > 0 {
+		candidate := heap.Pop(frontier).(primCandidate)
+		if visited[candidate.target] {
+			continue
+		}
+
+		visited[candidate.target] = true
+		result.Edges = append(result.Edges, candidate.edge)
+		result.TotalWeight += candidate.edge.Weight
+
+		enqueuePrimSnapshotFrontier(snapshot, candidate.target, visited, frontier)
+	}
+}
+
+// enqueuePrimSnapshotFrontier pushes all candidate edges from source to unvisited endpoints.
+// It resolves the opposite endpoint relative to source, which is required for undirected edge values.
+//
+// Implementation:
+//   - Stage 1: Scan snapshot.adj[source] in deterministic order.
+//   - Stage 2: Resolve the endpoint opposite to source.
+//   - Stage 3: Skip already visited targets.
+//   - Stage 4: Push a primCandidate carrying the edge value and resolved target.
+//
+// Behavior highlights:
+//   - No graph calls happen here; all data comes from mstSnapshot.
+//   - The helper does not allocate a secondary edge list.
+//   - Invalid endpoint pairs are ignored because the snapshot adapter owns adjacency construction.
+//
+// Inputs:
+//   - snapshot: validated MST snapshot.
+//   - source: visited vertex whose incident edges are scanned.
+//   - visited: current Prim visited set.
+//   - frontier: heap receiving candidates.
+//
+// Determinism:
+//   - Scan order follows snapshot adjacency order.
+//   - Extraction order is controlled later by primFrontier.Less.
+//
+// Complexity:
+//   - Time O(deg(source) log E), Space O(k) for pushed candidates.
+//
+// AI-Hints:
+//   - Keep endpoint resolution relative to source; simplifying this to edge.To reintroduces the P0 bug.
+func enqueuePrimSnapshotFrontier(snapshot *mstSnapshot, source string, visited map[string]bool, frontier *primFrontier) {
+	for _, edge := range snapshot.adj[source] {
+		var target string
+
+		switch source {
+		case edge.From:
+			target = edge.To
+		case edge.To:
+			target = edge.From
+		default:
+			continue
+		}
+
+		if visited[target] {
+			continue
+		}
+
+		heap.Push(frontier, primCandidate{
+			edge:   edge,
+			target: target,
+		})
+	}
 }

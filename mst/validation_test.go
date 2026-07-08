@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"errors"
@@ -9,43 +9,43 @@ import (
 	"testing"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 func TestValidation_EmptyGraphReturnsDisconnectedAndEmptyGraph(t *testing.T) {
 	graph := mustWeightedGraph(t)
 
-	_, err := prim_kruskal.Kruskal(graph)
+	_, err := mst.Kruskal(graph)
 
-	mustErrorIs(t, err, prim_kruskal.ErrDisconnected, "Kruskal empty graph disconnected")
-	mustErrorIs(t, err, prim_kruskal.ErrEmptyGraph, "Kruskal empty graph precise")
+	mustErrorIs(t, err, mst.ErrDisconnected, "Kruskal empty graph disconnected")
+	mustErrorIs(t, err, mst.ErrEmptyGraph, "Kruskal empty graph precise")
 }
 
 func TestValidation_NilGraphReturnsPreciseSentinels(t *testing.T) {
-	_, err := prim_kruskal.MinimumSpanningTree(nil)
+	_, err := mst.MinimumSpanningTree(nil)
 
-	mustErrorIs(t, err, prim_kruskal.ErrInvalidGraph, "nil graph umbrella")
-	mustErrorIs(t, err, prim_kruskal.ErrNilGraph, "nil graph precise")
+	mustErrorIs(t, err, mst.ErrInvalidGraph, "nil graph umbrella")
+	mustErrorIs(t, err, mst.ErrNilGraph, "nil graph precise")
 }
 
 func TestValidation_UnweightedGraphRejected(t *testing.T) {
 	graph, err := core.NewGraph()
 	mustNoError(t, err, "core.NewGraph")
 
-	_, err = prim_kruskal.Kruskal(graph)
+	_, err = mst.Kruskal(graph)
 
-	mustErrorIs(t, err, prim_kruskal.ErrInvalidGraph, "unweighted graph umbrella")
-	mustErrorIs(t, err, prim_kruskal.ErrUnweightedGraph, "unweighted graph precise")
+	mustErrorIs(t, err, mst.ErrInvalidGraph, "unweighted graph umbrella")
+	mustErrorIs(t, err, mst.ErrUnweightedGraph, "unweighted graph precise")
 }
 
 func TestValidation_DirectedGraphRejected(t *testing.T) {
 	graph, err := core.NewGraph(core.WithWeighted(), core.WithDirected(true))
 	mustNoError(t, err, "core.NewGraph directed weighted")
 
-	_, err = prim_kruskal.Kruskal(graph)
+	_, err = mst.Kruskal(graph)
 
-	mustErrorIs(t, err, prim_kruskal.ErrInvalidGraph, "directed graph umbrella")
-	mustErrorIs(t, err, prim_kruskal.ErrDirectedGraph, "directed graph precise")
+	mustErrorIs(t, err, mst.ErrInvalidGraph, "directed graph umbrella")
+	mustErrorIs(t, err, mst.ErrDirectedGraph, "directed graph precise")
 }
 
 func TestValidation_DirectedEdgeRejected(t *testing.T) {
@@ -55,19 +55,19 @@ func TestValidation_DirectedEdgeRejected(t *testing.T) {
 	_, err = graph.AddEdge("A", "B", 1, core.WithEdgeDirected(true))
 	mustNoError(t, err, "Graph.AddEdge directed override")
 
-	_, err = prim_kruskal.Prim(graph, "A")
+	_, err = mst.Prim(graph, "A")
 
-	mustErrorIs(t, err, prim_kruskal.ErrInvalidGraph, "directed edge umbrella")
-	mustErrorIs(t, err, prim_kruskal.ErrDirectedEdge, "directed edge precise")
+	mustErrorIs(t, err, mst.ErrInvalidGraph, "directed edge umbrella")
+	mustErrorIs(t, err, mst.ErrDirectedEdge, "directed edge precise")
 }
 
 func TestValidation_EmptyPrimRootRejectedBeforeTraversal(t *testing.T) {
 	graph := mustWeightedGraph(t)
 	_ = graph.AddVertex("X")
 
-	_, err := prim_kruskal.Prim(graph, "")
+	_, err := mst.Prim(graph, "")
 
-	mustErrorIs(t, err, prim_kruskal.ErrEmptyRoot, "empty Prim root")
+	mustErrorIs(t, err, mst.ErrEmptyRoot, "empty Prim root")
 }
 
 func TestValidation_NonFiniteWeightRejectedAfterAliasMutation(t *testing.T) {
@@ -86,11 +86,11 @@ func TestValidation_NonFiniteWeightRejectedAfterAliasMutation(t *testing.T) {
 			edgeID, _ := graph.AddEdge("A", "B", 1)
 			mustCorruptEdgeWeight(t, graph, edgeID, tt.weight)
 
-			_, err := prim_kruskal.Kruskal(graph)
-			mustErrorIs(t, err, prim_kruskal.ErrNaNInfWeight, "Kruskal non-finite weight")
+			_, err := mst.Kruskal(graph)
+			mustErrorIs(t, err, mst.ErrNaNInfWeight, "Kruskal non-finite weight")
 
-			_, err = prim_kruskal.Prim(graph, "A")
-			mustErrorIs(t, err, prim_kruskal.ErrNaNInfWeight, "Prim non-finite weight")
+			_, err = mst.Prim(graph, "A")
+			mustErrorIs(t, err, mst.ErrNaNInfWeight, "Prim non-finite weight")
 		})
 	}
 }
@@ -99,21 +99,21 @@ func TestValidation_NilOptionRejected(t *testing.T) {
 	graph := mustWeightedGraph(t)
 	_, _ = graph.AddEdge("A", "B", 1)
 
-	_, err := prim_kruskal.MinimumSpanningTree(graph, nil)
+	_, err := mst.MinimumSpanningTree(graph, nil)
 
-	mustErrorIs(t, err, prim_kruskal.ErrNilOption, "nil option")
+	mustErrorIs(t, err, mst.ErrNilOption, "nil option")
 }
 
 func TestValidation_UnsupportedAlgorithmRejected(t *testing.T) {
 	graph := mustWeightedGraph(t)
 	_, _ = graph.AddEdge("A", "B", 1)
 
-	_, err := prim_kruskal.MinimumSpanningTree(
+	_, err := mst.MinimumSpanningTree(
 		graph,
-		prim_kruskal.WithAlgorithm(prim_kruskal.Algorithm("unknown")),
+		mst.WithAlgorithm(mst.Algorithm("unknown")),
 	)
 
-	mustErrorIs(t, err, prim_kruskal.ErrUnsupportedAlgorithm, "unsupported algorithm")
+	mustErrorIs(t, err, mst.ErrUnsupportedAlgorithm, "unsupported algorithm")
 }
 
 func TestValidation_StrictModeRejectsDisconnectedGraph(t *testing.T) {
@@ -121,14 +121,14 @@ func TestValidation_StrictModeRejectsDisconnectedGraph(t *testing.T) {
 	_, _ = graph.AddEdge("A", "B", 1)
 	_, _ = graph.AddEdge("C", "D", 2)
 
-	_, err := prim_kruskal.MinimumSpanningTree(graph)
+	_, err := mst.MinimumSpanningTree(graph)
 
-	mustErrorIs(t, err, prim_kruskal.ErrDisconnected, "strict disconnected graph")
+	mustErrorIs(t, err, mst.ErrDisconnected, "strict disconnected graph")
 }
 
 func TestValidation_NoErrorStringMatching(t *testing.T) {
-	err := errors.Join(prim_kruskal.ErrInvalidGraph, prim_kruskal.ErrNilGraph)
+	err := errors.Join(mst.ErrInvalidGraph, mst.ErrNilGraph)
 
-	mustErrorIs(t, err, prim_kruskal.ErrInvalidGraph, "joined invalid graph")
-	mustErrorIs(t, err, prim_kruskal.ErrNilGraph, "joined nil graph")
+	mustErrorIs(t, err, mst.ErrInvalidGraph, "joined invalid graph")
+	mustErrorIs(t, err, mst.ErrNilGraph, "joined nil graph")
 }

@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal contains Prim's Minimum Spanning Tree implementation in this file.
+// Package mst contains Prim's Minimum Spanning Tree implementation in this file.
 // The algorithm consumes incident undirected edges from core.Graph without assuming edge.To is the next vertex.
-package prim_kruskal
+package mst
 
 import (
 	"container/heap"

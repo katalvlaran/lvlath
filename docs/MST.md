@@ -3,7 +3,7 @@
 
   Purpose:
     This document is the repository-level specification, tutorial, and contract map
-    for lvlath/prim_kruskal. It defines the mathematical MST/MSF problem, maps the
+    for lvlath/mst. It defines the mathematical MST/MSF problem, maps the
     public API to the implementation architecture, explains deterministic Kruskal
     and Prim behavior, documents graph-policy validation, numeric discipline,
     sentinel-first errors, result ownership, and production usage patterns.
@@ -30,9 +30,9 @@
 
 # 6. Minimum Spanning Trees and Forests
 
-> **Package:** `lvlath/prim_kruskal` | **Focus:** Deterministic MST/MSF Kernels, Strict Graph Policy, Sentinel-First Errors, Detached Results
+> **Package:** `lvlath/mst` | **Focus:** Deterministic MST/MSF Kernels, Strict Graph Policy, Sentinel-First Errors, Detached Results
 
-The `lvlath/prim_kruskal` package is a deterministic, contract-driven minimum-spanning connectivity kernel for `core.Graph`. It is not a casual graph snippet, not a topology mutator, and not a hidden fallback layer for disconnected systems. It validates graph semantics, assembles explicit runtime policy, snapshots candidate edges into detached storage, applies a precise greedy kernel, and publishes a canonical `MSTResult` artifact.
+The `lvlath/mst` package is a deterministic, contract-driven minimum-spanning connectivity kernel for `core.Graph`. It is not a casual graph snippet, not a topology mutator, and not a hidden fallback layer for disconnected systems. It validates graph semantics, assembles explicit runtime policy, snapshots candidate edges into detached storage, applies a precise greedy kernel, and publishes a canonical `MSTResult` artifact.
 
 The package answers one foundational question:
 
@@ -47,7 +47,7 @@ Both algorithms obey the same graph-policy law, numeric law, endpoint law, owner
 
 ---
 
-## 6.1. What & Why: The Laws of `prim_kruskal`
+## 6.1. What & Why: The Laws of `mst`
 
 Minimum spanning tree computation is a graph-theoretic compression tool: it removes every unnecessary cycle while preserving connectivity with the least possible total finite edge cost. This makes it valuable in domains where each retained edge means money, latency, metal area, risk, power loss, or operational complexity.
 
@@ -71,7 +71,7 @@ Minimum spanning tree computation is a graph-theoretic compression tool: it remo
 5. **Algorithmic subroutines**
     - MST appears in approximation algorithms, graph sparsification, partitioning, topology simplification, and as a diagnostic baseline for more constrained optimization problems.
 
-### 6.1.2. The Six Laws of `prim_kruskal`
+### 6.1.2. The Six Laws of `mst`
 
 #### Law 1: Graph-Semantics Fidelity
 
@@ -421,7 +421,7 @@ func (r *MSTResult) EdgeValues() ([]core.Edge, error)
 
 ### 6.4.6. Result-domain states
 
-`prim_kruskal` has no target vertex and does not expose path-style states such as “unknown target” or “known but unreachable”. Its states are MST/MSF publication states.
+`mst` has no target vertex and does not expose path-style states such as “unknown target” or “known but unreachable”. Its states are MST/MSF publication states.
 
 | State                    | Result               | Error                                      | Meaning                                         |
 |:-------------------------|:---------------------|:-------------------------------------------|:------------------------------------------------|
@@ -1097,7 +1097,7 @@ Undirected adjacency is mirrored. Prim must resolve the opposite endpoint relati
 ║ U01: edge.From = "A"                                                        ║
 ║      edge.To   = "B"                                                        ║
 ║      Weight    = 7                                                          ║
-╚══════════════════════════════════════════════════════════════════════════════╝
+╚═════════════════════════════════════════════════════════════════════════════╝
 
 Snapshot adjacency after mirroring:
 
@@ -1197,9 +1197,7 @@ Merge table:
 
 Completion law:
 
-$$
-|T| = |V| - 1 = 8 - 1 = 7
-$$
+$$ |T| = |V| - 1 = 8 - 1 = 7 $$
 
 ## 6.8. Go Example Scenarios
 
@@ -1216,7 +1214,7 @@ import (
     "fmt"
 
     "github.com/katalvlaran/lvlath/core"
-    "github.com/katalvlaran/lvlath/prim_kruskal"
+    "github.com/katalvlaran/lvlath/mst"
 )
 
 func main() {
@@ -1240,7 +1238,7 @@ func main() {
 	_, _ = graph.AddEdge("DDR", "SRAM", 7)
 	_, _ = graph.AddEdge("ISP", "PHY", 8)
 
-    result, err := prim_kruskal.MinimumSpanningTree(graph)
+    result, err := mst.MinimumSpanningTree(graph)
     if err != nil {
         fmt.Println("mst:", err)
         return
@@ -1272,7 +1270,7 @@ import (
     "fmt"
 
     "github.com/katalvlaran/lvlath/core"
-    "github.com/katalvlaran/lvlath/prim_kruskal"
+    "github.com/katalvlaran/lvlath/mst"
 )
 
 func main() {
@@ -1294,10 +1292,10 @@ func main() {
 	_, _ = graph.AddEdge("Pacific-Relay", "Pacific-2", 6)
 	_, _ = graph.AddEdge("Pacific-1", "Pacific-2", 10)
 
-    result, err := prim_kruskal.MinimumSpanningTree(
+    result, err := mst.MinimumSpanningTree(
         graph,
-        prim_kruskal.WithAlgorithm(prim_kruskal.AlgorithmPrim),
-        prim_kruskal.WithForest(),
+        mst.WithAlgorithm(mst.AlgorithmPrim),
+        mst.WithForest(),
     )
     if err != nil {
         fmt.Println("msf:", err)
@@ -1332,7 +1330,7 @@ import (
     "sort"
 
     "github.com/katalvlaran/lvlath/core"
-    "github.com/katalvlaran/lvlath/prim_kruskal"
+    "github.com/katalvlaran/lvlath/mst"
 )
 
 func main() {
@@ -1355,7 +1353,7 @@ func main() {
 	_, _ = graph.AddEdge("speech-01", "fraud-02", 1.35)
 	_, _ = graph.AddEdge("vision-01", "fraud-03", 1.62)
 
-    result, err := prim_kruskal.Kruskal(graph)
+    result, err := mst.Kruskal(graph)
     if err != nil {
         fmt.Println("mst:", err)
         return
@@ -1401,7 +1399,7 @@ import (
     "fmt"
 
     "github.com/katalvlaran/lvlath/core"
-    "github.com/katalvlaran/lvlath/prim_kruskal"
+    "github.com/katalvlaran/lvlath/mst"
 )
 
 func main() {
@@ -1421,12 +1419,12 @@ func main() {
         return
     }
 
-    _, err = prim_kruskal.MinimumSpanningTree(graph)
+    _, err := mst.MinimumSpanningTree(graph)
 
     fmt.Printf(
         "invalid=%t directed_edge=%t\n",
-        errors.Is(err, prim_kruskal.ErrInvalidGraph),
-        errors.Is(err, prim_kruskal.ErrDirectedEdge),
+        errors.Is(err, mst.ErrInvalidGraph),
+        errors.Is(err, mst.ErrDirectedEdge),
     )
 
     // Output:
@@ -1458,7 +1456,7 @@ Consequences:
 `Clone()` is nil-safe.
 
 ```go
-var result *prim_kruskal.MSTResult
+var result *mst.MSTResult
 clone := result.Clone()
 fmt.Println(clone == nil)
 ```
@@ -1479,7 +1477,7 @@ For non-nil results, `Clone()` preserves scalar metadata and deep-copies:
 `EdgeValues()` classifies nil receiver access with `ErrNilResult`.
 
 ```go
-var result *prim_kruskal.MSTResult
+var result *mst.MSTResult
 edges, err := result.EdgeValues()
 ```
 
@@ -1487,7 +1485,7 @@ Expected state:
 
 ```text
 edges == nil
-errors.Is(err, prim_kruskal.ErrNilResult) == true
+errors.Is(err, mst.ErrNilResult) == true
 ```
 
 ### 6.9.4. Concurrency Law
@@ -1537,7 +1535,7 @@ Forest mode is not a partial result. It is an explicit publication mode selected
 >Use:
 >
 >```go
->errors.Is(err, prim_kruskal.ErrDisconnected)
+>errors.Is(err, mst.ErrDisconnected)
 >```
 
 > #### Anti-pattern 2: Treating `edge.To` as the Prim destination
@@ -1619,7 +1617,7 @@ Forest mode is not a partial result. It is an explicit publication mode selected
 Use the default facade:
 
 ```go
-result, err := prim_kruskal.MinimumSpanningTree(graph)
+result, err := mst.MinimumSpanningTree(graph)
 ```
 
 Default policy is Kruskal + strict tree.
@@ -1629,7 +1627,7 @@ Default policy is Kruskal + strict tree.
 Use Prim when the root is meaningful to the workflow:
 
 ```go
-result, err := prim_kruskal.Prim(graph, "HQ")
+result, err := mst.Prim(graph, "HQ")
 ```
 
 This is useful when logs, diagrams, or operational explanations should describe growth from a known site.
@@ -1639,7 +1637,7 @@ This is useful when logs, diagrams, or operational explanations should describe 
 Use explicit forest mode:
 
 ```go
-result, err := prim_kruskal.MinimumSpanningTree(graph, prim_kruskal.WithForest())
+result, err := mst.MinimumSpanningTree(graph, mst.WithForest())
 ```
 
 This is correct for disconnected domains where each component has independent meaning.
@@ -1653,13 +1651,13 @@ Run Kruskal, clone selected edges, sort by descending weight, and remove the lar
 Use `errors.Is`:
 
 ```go
-if errors.Is(err, prim_kruskal.ErrDirectedEdge) {
+if errors.Is(err, mst.ErrDirectedEdge) {
     // The graph contains a directed edge-level override and is outside MST domain.
 }
 ```
 
 ---
 
-**lvlath/prim_kruskal**: deterministic by contract, strict in graph semantics, finite in numeric policy, and safe to compose through detached `MSTResult` artifacts.
+**lvlath/mst**: deterministic by contract, strict in graph semantics, finite in numeric policy, and safe to compose through detached `MSTResult` artifacts.
 
 > Next: [7. Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic →](FLOW.md)

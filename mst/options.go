@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal defines option assembly for the canonical MST facade.
+// Package mst defines option assembly for the canonical MST facade.
 // Options are validated before graph adaptation and before any algorithm allocation.
-package prim_kruskal
+package mst
 
 // Option configures MinimumSpanningTree through a safe, error-returning option model.
 //

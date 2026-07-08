@@ -1,12 +1,12 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"testing"
 
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 func TestForest_KruskalDisconnectedGraph(t *testing.T) {
@@ -14,11 +14,11 @@ func TestForest_KruskalDisconnectedGraph(t *testing.T) {
 	_, _ = graph.AddEdge("A", "B", 1)
 	_, _ = graph.AddEdge("C", "D", 2)
 
-	result, err := prim_kruskal.MinimumSpanningTree(graph, prim_kruskal.WithForest())
+	result, err := mst.MinimumSpanningTree(graph, mst.WithForest())
 
 	mustNoError(t, err, "Kruskal forest")
-	mustEqualString(t, string(result.Algorithm), string(prim_kruskal.AlgorithmKruskal), "forest algorithm")
-	mustEqualString(t, string(result.Mode), string(prim_kruskal.ModeForest), "forest mode")
+	mustEqualString(t, string(result.Algorithm), string(mst.AlgorithmKruskal), "forest algorithm")
+	mustEqualString(t, string(result.Mode), string(mst.ModeForest), "forest mode")
 	mustValidForest(t, graph, result, 2, 3)
 	mustEqualString(t, result.ComponentRoots[0], "A", "forest first root")
 	mustEqualString(t, result.ComponentRoots[1], "C", "forest second root")
@@ -29,15 +29,15 @@ func TestForest_PrimDisconnectedGraphWithExplicitRoot(t *testing.T) {
 	_, _ = graph.AddEdge("A", "B", 1)
 	_, _ = graph.AddEdge("C", "D", 2)
 
-	result, err := prim_kruskal.MinimumSpanningTree(
+	result, err := mst.MinimumSpanningTree(
 		graph,
-		prim_kruskal.WithAlgorithm(prim_kruskal.AlgorithmPrim),
-		prim_kruskal.WithRoot("C"),
-		prim_kruskal.WithForest(),
+		mst.WithAlgorithm(mst.AlgorithmPrim),
+		mst.WithRoot("C"),
+		mst.WithForest(),
 	)
 
 	mustNoError(t, err, "Prim forest with explicit root")
-	mustEqualString(t, string(result.Algorithm), string(prim_kruskal.AlgorithmPrim), "forest algorithm")
+	mustEqualString(t, string(result.Algorithm), string(mst.AlgorithmPrim), "forest algorithm")
 	mustEqualString(t, result.ComponentRoots[0], "C", "explicit component root first")
 	mustValidForest(t, graph, result, 2, 3)
 }
@@ -54,12 +54,12 @@ func TestDeterminism_EqualWeightCompleteGraphStableRepresentative(t *testing.T) 
 
 	wantIDs := []string{edgeAB, edgeAC, edgeAD}
 
-	kruskalResult, err := prim_kruskal.Kruskal(graph)
+	kruskalResult, err := mst.Kruskal(graph)
 	mustNoError(t, err, "Kruskal equal-weight deterministic representative")
 	mustValidStrictMST(t, graph, kruskalResult, 3)
 	mustEqualEdgeIDs(t, kruskalResult.Edges, wantIDs, "Kruskal equal-weight edge order")
 
-	primResult, err := prim_kruskal.Prim(graph, "A")
+	primResult, err := mst.Prim(graph, "A")
 	mustNoError(t, err, "Prim equal-weight deterministic representative")
 	mustValidStrictMST(t, graph, primResult, 3)
 	mustEqualEdgeIDs(t, primResult.Edges, wantIDs, "Prim equal-weight edge order")
@@ -73,12 +73,12 @@ func TestDeterminism_RepeatedRunsReturnSameEdgeIDs(t *testing.T) {
 	_, _ = graph.AddEdge("B", "D", 3)
 	_, _ = graph.AddEdge("C", "D", 5)
 
-	first, err := prim_kruskal.MinimumSpanningTree(graph)
+	first, err := mst.MinimumSpanningTree(graph)
 	mustNoError(t, err, "first MST run")
 
 	firstIDs := edgeIDs(first.Edges)
 	for i := 0; i < 10; i++ {
-		next, err := prim_kruskal.MinimumSpanningTree(graph)
+		next, err := mst.MinimumSpanningTree(graph)
 		mustNoError(t, err, "repeated MST run")
 		mustEqualEdgeIDs(t, next.Edges, firstIDs, "repeated MST edge IDs")
 	}

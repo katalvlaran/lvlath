@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"errors"
@@ -10,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 const (
@@ -26,7 +26,7 @@ const (
 	benchmarkRandomWeightLimit = 100
 )
 
-var benchmarkMSTResult *prim_kruskal.MSTResult
+var benchmarkMSTResult *mst.MSTResult
 
 // BenchmarkMST_Kruskal_SparseConnected_500v_2000e measures global edge-sort cost
 // on a connected sparse-ish graph where E is much smaller than V².
@@ -39,7 +39,7 @@ func BenchmarkMST_Kruskal_SparseConnected_500v_2000e(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		result, err := prim_kruskal.Kruskal(graph)
+		result, err := mst.Kruskal(graph)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -54,7 +54,7 @@ func BenchmarkMST_Prim_SparseConnected_500v_2000e(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		result, err := prim_kruskal.Prim(graph, benchmarkRootVertexID)
+		result, err := mst.Prim(graph, benchmarkRootVertexID)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -69,7 +69,7 @@ func BenchmarkMST_Kruskal_DenseConnected_200v_12000e(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		result, err := prim_kruskal.Kruskal(graph)
+		result, err := mst.Kruskal(graph)
 		if err != nil {
 			b.Fatal(err)
 		}
@@ -89,7 +89,7 @@ func BenchmarkMST_Prim_DenseConnected_200v_12000e(b *testing.B) {
 	b.ResetTimer()
 
 	for i := 0; i < b.N; i++ {
-		result, err := prim_kruskal.Prim(graph, benchmarkRootVertexID)
+		result, err := mst.Prim(graph, benchmarkRootVertexID)
 		if err != nil {
 			b.Fatal(err)
 		}

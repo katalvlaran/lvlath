@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal computes minimum spanning trees and minimum spanning forests
+// Package mst computes minimum spanning trees and minimum spanning forests
 // over weighted, undirected core.Graph instances.
 //
 // Domain scope:
@@ -185,4 +185,4 @@
 //   - Do not silently return a forest from strict tree mode; require WithForest.
 //   - Do not document matrix-backed APIs unless the exact public signatures exist.
 //   - Do not claim Prim is O(E log V) unless the implementation changes to a vertex-key decrease-key policy.
-package prim_kruskal
+package mst

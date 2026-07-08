@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal exposes the canonical MST facade and focused algorithm wrappers.
+// Package mst exposes the canonical MST facade and focused algorithm wrappers.
 // Public wrappers select an algorithm while preserving the MSTResult contract.
-package prim_kruskal
+package mst
 
 import "github.com/katalvlaran/lvlath/core"
 

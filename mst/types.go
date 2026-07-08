@@ -3,7 +3,7 @@
 
 // Package prim_kruskal defines public result and compatibility configuration types.
 // Algorithm kernels, option assembly, sentinels, and graph adapters live in dedicated files.
-package prim_kruskal
+package mst
 
 import (
 	"errors"

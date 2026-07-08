@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal contains the Kruskal MST/MSF kernel.
+// Package mst contains the Kruskal MST/MSF kernel.
 // Public wrappers live in api.go and delegate here through MinimumSpanningTree.
-package prim_kruskal
+package mst
 
 import (
 	"sort"

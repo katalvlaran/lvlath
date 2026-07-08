@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"testing"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 const mstWeightTolerance = 1e-12
@@ -145,7 +145,7 @@ func mustEqualString(t *testing.T, got string, want string, op string) {
 	}
 }
 
-func mustValidStrictMST(t *testing.T, graph *core.Graph, result *prim_kruskal.MSTResult, wantWeight float64) {
+func mustValidStrictMST(t *testing.T, graph *core.Graph, result *mst.MSTResult, wantWeight float64) {
 	t.Helper()
 
 	if result == nil {
@@ -163,7 +163,7 @@ func mustValidStrictMST(t *testing.T, graph *core.Graph, result *prim_kruskal.MS
 	mustResultWeightMatchesEdges(t, result, "strict MST")
 }
 
-func mustValidForest(t *testing.T, graph *core.Graph, result *prim_kruskal.MSTResult, wantComponents int, wantWeight float64) {
+func mustValidForest(t *testing.T, graph *core.Graph, result *mst.MSTResult, wantComponents int, wantWeight float64) {
 	t.Helper()
 
 	if result == nil {
@@ -234,7 +234,7 @@ func mustConnectedSelectedEdges(t *testing.T, vertices []string, edges []core.Ed
 	}
 }
 
-func mustResultWeightMatchesEdges(t *testing.T, result *prim_kruskal.MSTResult, op string) {
+func mustResultWeightMatchesEdges(t *testing.T, result *mst.MSTResult, op string) {
 	t.Helper()
 
 	var total float64

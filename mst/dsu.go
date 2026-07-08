@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal defines a local disjoint-set structure used by Kruskal kernels.
-package prim_kruskal
+// Package mst defines a local disjoint-set structure used by Kruskal kernels.
+package mst
 
 import "sort"
 

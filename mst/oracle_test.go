@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"errors"
@@ -11,7 +11,7 @@ import (
 	"testing"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 type exactMSTOracle struct {
@@ -141,11 +141,11 @@ func mustAlgorithmsMatchExactOracle(t *testing.T, graph *core.Graph, root string
 
 	oracle := exactStrictMSTOracle(t, graph)
 
-	kruskalResult, err := prim_kruskal.Kruskal(graph)
+	kruskalResult, err := mst.Kruskal(graph)
 	mustNoError(t, err, op+" Kruskal")
 	mustValidStrictMST(t, graph, kruskalResult, oracle.weight)
 
-	primResult, err := prim_kruskal.Prim(graph, root)
+	primResult, err := mst.Prim(graph, root)
 	mustNoError(t, err, op+" Prim")
 	mustValidStrictMST(t, graph, primResult, oracle.weight)
 
@@ -258,14 +258,14 @@ func TestForestOracle_DisconnectedComponentsMatchExactComponentMSTs(t *testing.T
 
 	wantComponents, wantWeight := exactForestOracle(t, graph)
 
-	kruskalResult, err := prim_kruskal.MinimumSpanningTree(graph, prim_kruskal.WithForest())
+	kruskalResult, err := mst.MinimumSpanningTree(graph, mst.WithForest())
 	mustNoError(t, err, "Kruskal forest oracle")
 	mustValidForest(t, graph, kruskalResult, wantComponents, wantWeight)
 
-	primResult, err := prim_kruskal.MinimumSpanningTree(
+	primResult, err := mst.MinimumSpanningTree(
 		graph,
-		prim_kruskal.WithAlgorithm(prim_kruskal.AlgorithmPrim),
-		prim_kruskal.WithForest(),
+		mst.WithAlgorithm(mst.AlgorithmPrim),
+		mst.WithForest(),
 	)
 	mustNoError(t, err, "Prim forest oracle")
 	mustValidForest(t, graph, primResult, wantComponents, wantWeight)

@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-package prim_kruskal_test
+package mst_test
 
 import (
 	"errors"
@@ -9,7 +9,7 @@ import (
 	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 // ExampleMinimumSpanningTree_vlsiGlobalRouting demonstrates MST as a deterministic
@@ -52,7 +52,7 @@ func ExampleMinimumSpanningTree_vlsiGlobalRouting() {
 	_, _ = graph.AddEdge("DDR", "SRAM", 7)
 	_, _ = graph.AddEdge("ISP", "PHY", 8)
 
-	result, err := prim_kruskal.MinimumSpanningTree(graph)
+	result, err := mst.MinimumSpanningTree(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -110,10 +110,10 @@ func ExampleMinimumSpanningTree_spaceMeshForest() {
 	_, _ = graph.AddEdge("Pacific-Relay", "Pacific-2", 6)
 	_, _ = graph.AddEdge("Pacific-1", "Pacific-2", 10)
 
-	result, err := prim_kruskal.MinimumSpanningTree(
+	result, err := mst.MinimumSpanningTree(
 		graph,
-		prim_kruskal.WithAlgorithm(prim_kruskal.AlgorithmPrim),
-		prim_kruskal.WithForest(),
+		mst.WithAlgorithm(mst.AlgorithmPrim),
+		mst.WithForest(),
 	)
 	if err != nil {
 		fmt.Println("error:", err)
@@ -174,7 +174,7 @@ func ExampleKruskal_embeddingClustering() {
 	_, _ = graph.AddEdge("speech-01", "fraud-02", 1.35)
 	_, _ = graph.AddEdge("vision-01", "fraud-03", 1.62)
 
-	result, err := prim_kruskal.Kruskal(graph)
+	result, err := mst.Kruskal(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -240,12 +240,12 @@ func ExampleMinimumSpanningTree_smartGridProtectionPolicy() {
 
 	_, _ = graph.AddEdge("ControlCenter", "Substation-A", 1, core.WithEdgeDirected(true))
 
-	_, err := prim_kruskal.MinimumSpanningTree(graph)
+	_, err := mst.MinimumSpanningTree(graph)
 
 	fmt.Printf(
 		"smart_grid_policy invalid=%t directed_edge=%t\n",
-		errors.Is(err, prim_kruskal.ErrInvalidGraph),
-		errors.Is(err, prim_kruskal.ErrDirectedEdge),
+		errors.Is(err, mst.ErrInvalidGraph),
+		errors.Is(err, mst.ErrDirectedEdge),
 	)
 
 	// Output:

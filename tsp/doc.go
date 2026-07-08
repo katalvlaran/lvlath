@@ -1,141 +1,272 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package tsp provides Traveling Salesman Problem (TSP) and Asymmetric TSP (ATSP)
-// solvers over matrix.Matrix distance models and core.Graph adapters.
+// Package tsp provides deterministic Traveling Salesman Problem solvers over
+// matrix.Matrix distance models.
 //
-// The package exposes exact search, classical approximation, and local-search
-// improvements behind a single deterministic dispatcher with a consistent API,
-// strict sentinel errors, and stable cost rounding (1e-9).
+// The package is contract-first: solver selection, numeric rules, ownership
+// rules, matching policy, partial-result semantics, and approximation claims are
+// part of the public API. Documentation, examples, tests, and benchmarks must
+// describe the same behavior as the implementation.
+//
+// # Why TSP matters
+//
+// TSP models a closed route that visits every required stop exactly once and
+// returns to a fixed start. The abstract formulation appears in logistics,
+// robotics, manufacturing, inspection, drilling, warehouse picking, DNA/PCB
+// sequencing, fleet dispatch, and route-risk minimization.
+//
+// In production systems the "cost" does not have to be geographic distance.
+// It may represent time, fuel, energy, mechanical latency, security exposure,
+// spoilage risk, or a weighted business penalty. The package therefore accepts
+// matrix.Matrix as the canonical distance source and lets callers define the
+// meaning of each directed or undirected arc cost.
+//
+// TSP is NP-hard. The package exposes several explicit regimes because exactness,
+// runtime, approximation guarantees, and local-search behavior are different
+// engineering contracts.
+//
+// # Mathematical model
+//
+// For symmetric TSP, the solver searches for a Hamiltonian cycle over vertices
+// V={0,...,n-1}. A tour π fixes a cyclic order, and the objective is:
+//
+//	min_{π} ∑_{i=0}^{n-1} c(π_i, π_{i+1}),   with π_n = π_0
+//
+// For asymmetric TSP, arc direction matters:
+//
+//	c(u,v) may be different from c(v,u).
+//
+// A valid closed tour has length n+1, starts at StartVertex, ends at the same
+// vertex, and contains each vertex exactly once before the closing vertex.
 //
 // # Domain Scope & Goals
 //
-//   - Complete finite TSP/ATSP distance matrices as final solver input.
-//   - Direct matrix inputs with optional metric closure from +Inf missing edges.
-//   - core.Graph inputs through an explicit graph-to-matrix adapter.
-//   - Exact solvers: Held-Karp dynamic programming and Branch-and-Bound.
-//   - Approximation: Christofides 1.5-approx for symmetric metric TSP.
-//   - Local search: Deterministic 2-opt and 3-opt post-passes (standalone or via dispatcher).
+// The package is designed for matrix-backed complete TSP/ATSP solver kernels:
+//
+//   - SolveMatrix is the canonical matrix facade.
+//   - SolveGraph adapts core.Graph through matrix preparation at the facade boundary.
+//   - ExactHeldKarp provides exact dynamic programming for guarded small instances.
+//   - BranchAndBound provides exact search when the search completes.
+//   - Christofides provides a symmetric metric approximation pipeline.
+//   - BlossomMatch provides exact minimum-weight perfect matching for Christofides.
+//   - GreedyMatch provides an explicit weaker matching mode with no formal ratio.
+//   - TwoOptOnly and ThreeOptOnly provide deterministic local-search regimes.
+//   - Optional metric closure resolves +Inf missing edges before final kernels.
+//
+// The matrix.Matrix value is the only distance source consumed by solver kernels.
+// core.Graph is not consumed directly by Held-Karp, Branch-and-Bound,
+// Christofides, matching, Eulerian, or local-search kernels.
 //
 // # Non-Goals
 //
-//   - No branch-and-cut / cutting-plane Concorde-style solvers.
-//   - No hidden fallback from exact to heuristic unless Algo == Auto is explicitly selected.
-//   - No final TSP solving over matrices that still contain +Inf off-diagonal edges.
-//   - No formal Christofides 1.5 guarantee when Blossom/MWPM is unavailable and
-//     a deterministic greedy matching fallback is used.
-//   - No lossless support for mixed directed/undirected core.Graph inputs until the
-//     matrix adapter exposes a mixed-aware representation.
+// The package intentionally does not implement:
+//
+//   - Concorde-style branch-and-cut.
+//   - Hidden exact-to-heuristic fallback.
+//   - Hidden heuristic-to-exact fallback.
+//   - Silent GreedyMatch substitution when BlossomMatch fails.
+//   - Final solving over matrices that still contain +Inf missing edges.
+//   - Full arbitrary-reconnection ATSP 3-opt.
+//   - Sparse graph-native TSP kernels.
+//
+// If a caller chooses a mathematically stronger policy, failure remains visible
+// through errors instead of being silently replaced by weaker mathematics.
 //
 // # Matrix Law
 //
-//   - Public matrix input is matrix.Matrix.
-//   - The matrix package validates nil, typed-nil, square shape, and APSP distance semantics.
-//   - The tsp package adds TSP-domain constraints: n >= 2, diagonal ≈ 0, no negative weights,
-//     optional symmetry, and finite complete final solver input.
-//   - Solver kernels consume a detached internal weightBuffer built by weights.go helpers.
-//   - copyCompleteWeights is required for final solver kernels and rejects +Inf.
-//   - copyClosureReadyWeights is reserved for pre-closure and lower-bound helpers that can reason about +Inf.
-//   - Direct RunMetricClosure copies input into a detached Dense distance matrix and
-//     delegates APSP to matrix.APSPInPlace.
-//   - Final solver kernels must never receive +Inf as a missing-edge sentinel.
+// Public matrix input is matrix.Matrix. Before a solver kernel starts, the
+// package validates the matrix against TSP-domain constraints.
+//
+// Final solver kernels require:
+//
+//   - square n×n shape;
+//   - n >= 2 for public TSP solving;
+//   - diagonal equal to zero within the package tolerance;
+//   - no NaN;
+//   - no -Inf;
+//   - no negative finite weights;
+//   - no +Inf after optional metric closure;
+//   - symmetry when the selected algorithm requires symmetric input.
+//
+// +Inf may appear only as a missing-edge sentinel before metric closure. After
+// metric closure, every final solver kernel receives a complete finite matrix.
 //
 // # Numeric Law
 //
-//   - NaN and -Inf trigger ErrNaNInf.
-//   - Negative finite distances trigger ErrNegativeWeight.
-//   - Diagonal must be zero within symTol (|a_ii| <= 1e-12).
-//   - +Inf denotes a "missing edge" only before metric closure.
-//   - Remaining +Inf after closure triggers ErrIncompleteGraph.
-//   - Costs are rounded to 1e-9 (round1e9) to avoid floating-point drift.
+// NaN and infinities are sentinel-classified validation failures. Negative
+// finite weights are rejected. Published costs are stabilized by the package
+// rounding policy to prevent meaningless floating-point drift from changing
+// observable output.
 //
-// # Determinism & Stability Law
+// Options.Eps controls strict-improvement and equality decisions in algorithms
+// that use a tolerance. Invalid tolerance values are rejected; they are not
+// silently replaced.
 //
-//   - No time-based randomness is used. Matrix row/column order dictates vertex order.
-//   - core.Graph order is inherited through the matrix adapter and recovered by index.
-//   - Tie-breaks use vertex indices unless a specific algorithm states a stricter rule.
-//   - Branch-and-Bound branches by ascending edge weight and then vertex index.
-//   - Tours are canonicalized by a fixed start vertex and orientation where applicable
-//     (via CanonicalizeOrientationInPlace).
-//   - Randomized local-search scans are strictly deterministic under Options.Seed.
-//     Seed == 0 provides a fixed default stream.
+// # Algorithm Law
 //
-// # Algorithms & Complexity
+// ExactHeldKarp is exact and exponential:
 //
-//	ExactHeldKarp (Held–Karp DP) - Supports TSP and ATSP
-//	  Time:       O(n² * 2ⁿ)
-//	  Memory:     O(n * 2ⁿ)
-//	  Guards:     MaxExactN (=16) to bound resource allocation.
+//	time O(n^2·2^n), memory O(n*2^n).
 //
-//	BranchAndBound (Exact DFS with pruning) - Supports TSP and ATSP
-//	  Bound:      Degree-1 relaxation (admissible) and optional root-only 1-tree LB (TSP only).
-//	  Branch:     Neighbors sorted by weight, then index (deterministic).
-//	  Time:       Exponential worst case.
-//	  Memory:     O(n) path state + O(n²) precomputes.
+// It is size-guarded and must not be treated as an unbounded production fallback.
 //
-//	Christofides (1.5-approx) - Symmetric metric TSP only
-//	  Pipeline:   MST → minimum perfect matching → Eulerian circuit → shortcut to tour.
-//	  Matching:   BlossomMatch (true MWPM) with GreedyMatch fallback.
-//	  Time:       Typically O(n²) on dense metric instances.
+// BranchAndBound is exact only when the search completes. With a time limit, it
+// may return a feasible incumbent together with ErrTimeLimit. In that case,
+// TimedOut is true and Optimal is false.
 //
-//	TwoOptOnly / ThreeOptOnly (Local search) - Supports TSP and ATSP
-//	  2-opt (TSP):  Segment reversal; Δ = (a→c)+(b→d)−(a→b)−(c→d).
-//	  2-opt* (ATSP):Tail swap without reversals.
-//	  3-opt:        7 reconnections (TSP) / 3-opt* (ATSP).
-//	  Strategy:     Deterministic first/best-improvement, optional shuffled enumeration via Seed.
+// Christofides requires symmetric complete metric input. Its constructive stages
+// are:
 //
-//	Metric Closure (Floyd–Warshall)
-//	  Time:       O(n³)
-//	  Memory:     O(n²) detached Dense storage.
+//   - build a minimum spanning tree;
+//   - collect odd-degree tree vertices;
+//   - compute a minimum-weight perfect matching on those odd vertices;
+//   - build an Eulerian multigraph;
+//   - shortcut the Eulerian circuit into a Hamiltonian cycle.
 //
-// # Input Symmetry Requirements
+// The formal approximation guarantee is:
 //
-// Strict matrix symmetry (dist[i][j] == dist[j][i]) is enforced when:
-//   - opts.Algo == Christofides
-//   - opts.BoundAlgo == OneTreeBound
-//   - opts.Symmetric == true (explicit user validation request)
+//	cost(Christofides) <= 1.5 * cost(OPT)
 //
-// If opts.RunMetricClosure == false, the validator rejects +Inf off-diagonal entries.
-// Otherwise, matrix-level metric closure is applied upstream.
+// This 1.5 ratio is published only when MatchingAlgo==BlossomMatch, because the
+// proof requires exact minimum-weight perfect matching.
 //
-// # Result & Partial-Result Law
+// MatchingAlgo==GreedyMatch is an explicit weaker mode. It is deterministic and
+// useful when callers intentionally trade proof strength for speed, but it does
+// not publish the Christofides 1.5 approximation ratio.
 //
-//   - SolveMatrix and SolveGraph are canonical facades and return *TSPResult.
-//   - TSPResult owns detached Tour, IDs, and Warnings slices.
-//   - TSResult is a minimal compatibility projection used by SolveWithMatrix
-//     and SolveWithGraph.
-//   - Internal dispatcher code publishes TSPResult directly; TSResult must not
-//     be used as the canonical orchestration boundary.
-//   - Held-Karp, Christofides, and local-search wrappers return no partial results on failure.
-//   - Branch-and-Bound may return a non-nil TSPResult with TimedOut=true and
-//     Optimal=false when a feasible incumbent exists at timeout.
-//   - Legacy TSResult wrappers discard partial metadata and return zero TSResult on error.
-//   - Callers must treat any result returned with ErrTimeLimit as partial.
+// TwoOptOnly and ThreeOptOnly are local-search heuristics. They improve a
+// current tour inside their implemented neighborhoods, but they do not certify
+// global optimality.
+//
+// ATSP 3-opt mode is restricted 3-opt*: it preserves segment orientation and
+// does not implement full arbitrary directed 3-opt reconnection.
+//
+// # Options Law
+//
+// Options is an explicit solver policy, not a bag of hints.
+//
+// Important fields:
+//
+//   - Algo selects the solver family.
+//   - Symmetric declares whether the input should be treated as symmetric TSP.
+//   - StartVertex fixes tour start and closure.
+//   - MatchingAlgo selects BlossomMatch or GreedyMatch for Christofides.
+//   - BoundAlgo selects Branch-and-Bound lower-bound policy.
+//   - EnableLocalSearch enables dispatcher-managed local-search post-processing.
+//   - BestImprovement selects local-search neighborhood policy where supported.
+//   - RunMetricClosure allows +Inf missing edges to be resolved before final solving.
+//   - Eps controls numeric strictness.
+//   - TimeLimit governs soft time-budget behavior in supported algorithms.
+//   - Seed controls documented deterministic randomized neighborhood enumeration.
+//
+// Invalid options are rejected. The package does not infer hidden policy changes
+// from matrix size, runtime pressure, or algorithm failure.
+//
+// # TSPResult Law
+//
+// TSPResult is the canonical public result. It owns detached slices and publishes
+// solver facts instead of requiring callers to infer behavior from Options alone.
+//
+// Result fields communicate:
+//
+//   - Tour: closed vertex-index cycle.
+//   - Cost: stabilized directed cycle cost.
+//   - Algorithm: selected algorithm after option finalization.
+//   - Exact: whether the algorithm is exact by design.
+//   - Optimal: whether the returned result is certified optimal.
+//   - TimedOut: whether a governed time limit stopped search.
+//   - ApproximationRatio: formal ratio when one is valid, otherwise 0.
+//   - MetricClosureApplied: whether +Inf closure preparation was used.
+//   - IDs: optional detached labels aligned with matrix order.
+//
+// BranchAndBound is the governed partial-result exception. Callers using time
+// limits must inspect both error and result.
 //
 // # Matching Law
 //
-//   - BlossomMatch attempts true MWPM.
-//   - BlossomMatch is exact MWPM; it does not use size-based refusal or hidden greedy substitution.
-//   - Greedy fallback keeps the pipeline deterministic and feasible when finite edges exist,
-//     but clears the formal 1.5 approximation guarantee.
-//   - MatchingFallback, ApproximationRatio, and fallback Warnings are populated from
-//     kernel metadata, never inferred in the facade from Options alone.
+// Christofides depends on a matching engine over odd MST vertices.
+//
+// BlossomMatch means exact minimum-weight perfect matching. It is the only mode
+// that supports publishing the Christofides 1.5 ratio.
+//
+// GreedyMatch is deterministic but weaker. It is allowed only when explicitly
+// selected and must publish NoApproximationRatio.
+//
+// Matching errors are not hidden by replacing the selected matching policy with
+// another one.
+//
+// # Determinism & Stability Law
+//
+// For fixed matrix data, IDs, Options, and package version, successful results
+// are deterministic. Stable ordering comes from matrix order, vertex index order,
+// dense edge IDs, queue order, and documented algorithm-specific tie-breaks.
+//
+// Randomized local-search neighborhood enumeration is deterministic for a fixed
+// seed. The seed must not alter validation, sentinel classification, or solver
+// selection.
+//
+// # Ownership Law
+//
+// Public results own their Tour and IDs. Mutating caller-owned matrices, graphs,
+// or ID slices after solving must not mutate the published result.
+//
+// matrix.Matrix values are treated as immutable by convention during solving.
+// When metric closure is requested, closure runs on detached storage.
 //
 // # Error Law
 //
-//   - Errors must be classified exclusively through errors.Is. Do not compare error strings.
-//   - Matrix and core adapter errors preserve underlying sentinels where applicable.
-//   - ErrDimensionMismatch is strictly a structural error; it is not a catch-all for
-//     nil matrices, invalid IDs, invalid options, invalid tours, or NaN/Inf.
+// Errors are classified through sentinel values and errors.Is. Error strings are
+// diagnostics for humans and must not be used as machine protocol.
+//
+// The package preserves sentinel classification for validation failures,
+// unsupported policies, numeric failures, incomplete graphs, asymmetry, invalid
+// IDs, time limits, and invalid matching states.
+//
+// # Concurrency Law
+//
+// Independent calls may run concurrently when callers do not concurrently mutate
+// the same input matrix, graph, or ID storage. The package does not use mutable
+// package-level solver state in normal solving.
+//
+// External concurrent mutation of caller-owned input is outside the package
+// contract.
+//
+// # Typical usage
+//
+// For a symmetric metric logistics instance:
+//
+//	opts := tsp.DefaultOptions()
+//	opts.Algo = tsp.Christofides
+//	opts.Symmetric = true
+//	opts.MatchingAlgo = tsp.BlossomMatch
+//	result, err := tsp.SolveMatrix(dist, ids, opts)
+//
+// For an exact small manufacturing layout:
+//
+//	opts := tsp.DefaultOptions()
+//	opts.Algo = tsp.BranchAndBound
+//	opts.Symmetric = true
+//	opts.BoundAlgo = tsp.OneTreeBound
+//	result, err := tsp.SolveMatrix(dist, ids, opts)
+//
+// For directed local search:
+//
+//	opts := tsp.DefaultOptions()
+//	opts.Algo = tsp.TwoOptOnly
+//	opts.Symmetric = false
+//	opts.EnableLocalSearch = true
+//	result, err := tsp.SolveMatrix(dist, ids, opts)
 //
 // # AI-Hints
 //
-//   - Do not use SolveWithMatrix in new code when metadata matters.
-//   - Do not return TSResult from canonical facades or dispatcher boundaries.
-//   - Do not infer MatchingFallback outside tspApproxWithMeta.
+//   - Use SolveMatrix for new matrix-based examples and integrations.
+//   - Use SolveGraph only when the source domain is core.Graph.
+//   - Do not send core.Graph into solver kernels.
+//   - Do not describe GreedyMatch as preserving the Christofides 1.5 proof.
+//   - Do not hide exact-to-heuristic fallback behind Auto.
 //   - Do not allow +Inf into final solver kernels.
-//   - Do not use closure-ready weights in final solver kernels.
 //   - Do not compare error strings; use errors.Is.
-//   - Do not change DefaultOptions to Auto in a patch release without an explicit
-//     compatibility decision.
+//   - Do not describe ATSP 3-opt* as full ATSP 3-opt.
+//   - Do not infer optimality from a low cost; read TSPResult.Optimal.
 package tsp

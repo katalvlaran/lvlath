@@ -55,7 +55,7 @@ const (
 	degradedLinkThresholdKM = 450.0
 )
 
-// runDijkstraMapOperations runs a production-style shortest-path analysis over
+// ExampleDijkstra_mapOperations runs a production-style shortest-path analysis over
 // an already constructed Ukraine transportation graph.
 //
 // Implementation:
@@ -98,7 +98,7 @@ const (
 //   - Do not use legacy Source(...) or WithReturnPath(); sourceID is an explicit argument.
 //   - Do not compare unreachable distances to math.MaxInt64; use math.IsInf(distance, 1).
 //   - Do not call PathTo unless WithPathTracking was enabled for that result.
-func runDijkstraMapOperations(fullGraph *core.Graph) {
+func ExampleDijkstra_mapOperations(fullGraph *core.Graph) {
 	if fullGraph == nil {
 		fmt.Println("Dijkstra scenario skipped: graph is nil")
 		return

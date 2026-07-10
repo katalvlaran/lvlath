@@ -61,7 +61,7 @@ func (gg *GridGraph) InBounds(x, y int) bool {
 	return x >= 0 && x < gg.Width && y >= 0 && y < gg.Height
 }
 
-// neighborOffsets returns the precomputed neighbor offsets slice.
+// NeighborOffsets returns the precomputed neighbor offsets slice.
 // Should be used in all adjacency traversals to avoid branching.
 // Complexity: O(1).
 func (gg *GridGraph) NeighborOffsets() [][2]int {

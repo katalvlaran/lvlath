@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: AGPL-3.0-only
 // Copyright (C) 2025-2026 katalvlaran
 
-// Package prim_kruskal defines public result and compatibility configuration types.
+// Package mst defines public result and compatibility configuration types.
 // Algorithm kernels, option assembly, sentinels, and graph adapters live in dedicated files.
 package mst
 

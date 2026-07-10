@@ -21,7 +21,7 @@ const (
 	constEigenMaxIter = 200
 )
 
-// ExampleIntegratedNetworkRiskPipeline demonstrates an end-to-end matrix workflow
+// ExampleMatrix_networkRiskPipeline demonstrates an end-to-end matrix workflow
 // for service-network risk analytics.
 //
 // Scenario:
@@ -50,6 +50,8 @@ const (
 //	can face when building deterministic post-incident analysis, capacity planning,
 //	or failover simulation tooling.
 //
+// Playground: https://go.dev/play/p/pMqxpUoHlVx
+//
 // What this example proves:
 //
 //  1. Graph semantics survive matrix conversion.
@@ -75,7 +77,7 @@ const (
 //	  - Centering / normalization: O(S·F).
 //	  - Covariance / correlation: O(S·F + S·F^2).
 //	  - Dense inverse / LU / QR / eigen: O(F^3) for this risk feature system.
-func mainMatrixNetworkRiskPipeline() {
+func ExampleMatrix_networkRiskPipeline() {
 	// NewGraph creates the source service topology. It is directed because service
 	// calls have direction, weighted because communication costs matter, and loop
 	// capable because "api -> api" models internal retry/self-pressure.

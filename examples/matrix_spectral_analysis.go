@@ -48,6 +48,8 @@
 //
 //	db, backup
 //
+// Playground: https://go.dev/play/p/TptinFiaIkD
+//
 // Why this matters:
 //
 //	The principal eigenvalue/eigenvector of an adjacency operator is a compact
@@ -78,7 +80,7 @@ const (
 	powerSteps      = 24
 )
 
-func mainMatrixSpectralAnalysis() {
+func ExampleMatrix_spectralAnalysis() {
 	// NewGraph creates the source topology. This graph is undirected because
 	// infrastructure links are treated as bidirectional reachability channels,
 	// and weighted because the matrix layer should preserve numeric edge costs.

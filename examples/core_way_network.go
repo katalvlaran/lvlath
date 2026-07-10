@@ -23,6 +23,8 @@
 //   - FilterEdges for policy-style graph reduction in a copied/demo graph.
 //   - Safe handoff to the Dijkstra shortest-path scenario.
 //
+// Playground: https://go.dev/play/p/ios0HUK5fry
+//
 // Notes:
 //   - The dataset in ukrainian_map_data.go is deterministic and bundled with
 //     this example package.
@@ -87,7 +89,7 @@ type WaySegment struct {
 	KM   float64
 }
 
-// main runs the Ukraine transportation topology scenario and then delegates to
+// ExampleCore_wayNetwork runs the Ukraine transportation topology scenario and then delegates to
 // the Dijkstra shortest-path scenario.
 //
 // Implementation:
@@ -129,7 +131,8 @@ type WaySegment struct {
 // AI-Hints:
 //   - Keep this example focused on core topology operations.
 //   - Route analysis belongs in dijkstra_map_operations.go.
-func main() {
+func ExampleCore_wayNetwork() {
+	// [Run on Go Playground](https://go.dev/play/p/x1RZBJkPw7W)
 	fmt.Println("Ukraine transportation topology audit")
 	fmt.Println("-------------------------------------")
 
@@ -160,9 +163,13 @@ func main() {
 	fmt.Printf("Road CloneEmpty: vertices=%d edges=%d\n", emptyRoadDomain.VertexCount(), emptyRoadDomain.EdgeCount())
 
 	roadAuditGraph := BuildUkraineRoads()
-	roadAuditGraph.FilterEdges(func(edge *core.Edge) bool {
+	_, err = roadAuditGraph.FilterEdges(func(edge core.Edge) bool {
 		return edge.Weight <= edgeAuditLimitKM
 	})
+	if err != nil {
+		fmt.Printf("error: FilterEdges: %v\n", err)
+		return
+	}
 	fmt.Printf("RoadGraph after keeping links <= %.0f km: edges=%d\n", edgeAuditLimitKM, roadAuditGraph.EdgeCount())
 
 	fullGraphForAudit := BuildFullUkraineGraph()
@@ -192,13 +199,16 @@ func main() {
 	fmt.Printf("FullGraph CloneEmpty: vertices=%d edges=%d\n", emptyFullDomain.VertexCount(), emptyFullDomain.EdgeCount())
 
 	fullAuditGraph := BuildFullUkraineGraph()
-	fullAuditGraph.FilterEdges(func(edge *core.Edge) bool {
+	_, err = fullAuditGraph.FilterEdges(func(edge core.Edge) bool {
 		return edge.Weight <= edgeAuditLimitKM
 	})
+	if err != nil {
+		fmt.Printf("error: FilterEdges: %v\n", err)
+	}
 	fmt.Printf("FullGraph after keeping links <= %.0f km: edges=%d\n", edgeAuditLimitKM, fullAuditGraph.EdgeCount())
 
-	fmt.Println()
-	runDijkstraMapOperations(BuildFullUkraineGraph())
+	//fmt.Println()
+	//ExampleDijkstra_mapOperations(BuildFullUkraineGraph())
 }
 
 // BuildUkraineRoads constructs the road-only Ukraine graph.

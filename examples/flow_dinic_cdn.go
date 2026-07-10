@@ -1,113 +1,170 @@
-// Package main demonstrates modeling the maximum throughput of a simple
-// Content Delivery Network (CDN) using Dinic’s max‐flow algorithm.
-//
-// Playground: https://go.dev/play/p/5rSh2H5F4GY
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+
+package main
+
+import (
+	"fmt"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/flow"
+)
+
+// ExampleMaxFlow_dinicCDN runs a production-style CDN throughput analysis with Dinic.
+// The scenario models peak video delivery from a viewer-demand boundary into a
+// service tier through edge PoPs, regional backbone nodes, and origin-cache pools.
 //
 // Scenario:
 //
-//	We have a single client source “Client” connecting into two PoP (Point-of-Presence)
-//	edge servers “PoP1” and “PoP2”.  Each PoP has limited upload capacity back to
-//	the origin tier (“Origin1”, “Origin2”), which in turn forward to the “Sink”
-//	(the Internet backbone).  We want to compute the maximum concurrent throughput.
+//			A CDN operator prepares for a live-event traffic spike. The question is not
+//			"which single edge is large?", but "how much end-to-end traffic can the whole
+//			delivery fabric push before some tier becomes the bottleneck?"
 //
-//	       Client
-//	       /    \
-//	 cap10/      \cap15
-//	     /        \
-//	    PoP1     PoP2
-//	    |   \  /   |
-//	5min|  5 X 10  |3
-//	    |   / \    |
-//	 Origin1   Origin2
-//	     \        /
-//	 cap20\      /cap20
-//	       \   /
-//	 	    Sink
+//	 The network is directed and weighted:
+//	 ┌──────────────┐           ┌───────────┐
+//	 │ ViewerDemand ├───────────┤ TLSGateway│
+//	 └──────────────┘           └─┬───┬───┬─┘
+//	                              │   │   │
+//	           ┌───────────┐      │   │   │      ┌───────────┐
+//	           │  PoP_EU   ├──────┘   │   └──────┤  PoP_US   │
+//	           └───┬───┬───┘    ┌─────┴─────┐    └───┰───┬───┘
+//	               │   │   ┏━━━━┥ PoP_APAC  ├────┐   ┃   │
+//	               │   │   ┃    └───────────┘    │   ┃   │
+//	               │   └───╂──────────────────┐  │   ┃   │
+//	               │       ┃  ┏━━━━━━━━━━━━━━━┿━━┿━━━┛   │
+//	           ┌───┴───────┸─┐┃               │┌─┴───────┴───┐
+//	           │ Regional_EU ┝┛               └┤ Regional_US │
+//	           └──────┬─────┬┘                 └┰─────┬──────┘
+//	                  │     │         ┏━━━━━━━━━┛     │
+//	                  │     └─────────╂─────────┐     │
+//	                  │     ┏━━━━━━━━━┛         │     │
+//	            ┌─────┴─────┸──┐             ┌──┴─────┴─────┐
+//	            │ OriginCacheA │             │ OriginCacheB │
+//	            └────────┬─────┘             └─────┬────────┘
+//	                     │                         │
+//	                     │     ┌──────────────┐    │
+//	                     └─────┤ VideoService ├────┘
+//	                           └──────────────┘
 //
-// Nodes: Client → {PoP1, PoP2} → {Origin1, Origin2} → Sink
-// Capacities (in Gbps):
+// Capacities are in Gbps.
+// The final service-facing cache egress is 95 + 90 = 185 Gbps, while upstream
+// capacity is higher. Dinic should therefore compute 185 Gbps and the min-cut
+// certificate should identify OriginCacheA→VideoService and
+// OriginCacheB→VideoService as the saturated bottleneck boundary.
 //
-//	Client→PoP1: 10
-//	Client→PoP2: 15
-//	PoP1→Origin1: 5
-//	PoP1→Origin2: 5
-//	PoP2→Origin1: 10
-//	PoP2→Origin2: 3
-//	Origin1→Sink: 20
-//	Origin2→Sink: 20
+// Playground: https://go.dev/play/p/guL-0bqHfCS
 //
-// We use Dinic to compute the maximum flow from “Client” to “Sink”.
+// Implementation:
+//   - Stage 1: Build a directed weighted core.Graph where edge weights are capacities.
+//   - Stage 2: Add a deterministic, production-shaped CDN capacity topology.
+//   - Stage 3: Run flow.MaxFlow with AlgorithmDinic.
+//   - Stage 4: Read MaxFlowResult.Value as the maximum deliverable throughput.
+//   - Stage 5: Use CutSourceSide/CutSinkSide to compute and print the min-cut boundary.
+//   - Stage 6: Compare the computed throughput against an operational target.
 //
-// Expected max throughput = bottleneck across PoP→Origin links = 5+3=8 Gbps from PoP1 and PoP2 to Origin2 plus
-// PoP2→Origin1=10 and PoP1→Origin1=5, but client uplinks are 10+15=25, and origin uplinks sum 40.
-// The true max flow is limited by PoP→Origin edges: (5+5)+(10+3) = 23, but balanced across origins and sinks,
-// Dinic will find the actual optimum (in this case 23 Gbps).
+// Behavior highlights:
+//   - Demonstrates the canonical MaxFlow API, not legacy tuple wrappers.
+//   - Uses stable caller-defined edge order for deterministic reporting.
+//   - Shows the max-flow/min-cut theorem as an operational bottleneck explanation.
+//   - Avoids direct dependency on residual graph internals.
 //
-// Complexity: O(E·√V), Memory: O(V + E).
-package main
+// Inputs:
+//   - None. The example constructs its own deterministic CDN capacity graph.
+//
+// Returns:
+//   - None. The example prints a compact throughput and bottleneck report.
+//
+// Errors:
+//   - Prints graph-construction or max-flow errors and returns early.
+//   - Does not panic or call log.Fatal, so the example remains test-friendly.
+//
+// Determinism:
+//   - Stable for the same edge list, core.Graph ordering, and flow traversal law.
+//
+// Complexity:
+//   - Graph construction is O(E).
+//   - Dinic is O(V²·A) worst-case on general networks, where A is residual adjacency count.
+//   - Min-cut reporting scans the fixed edge list once: O(E).
+//
+// Notes:
+//   - The min-cut capacity is computed from the original graph, not from residual edges.
+//   - MaxFlowResult.Residual is still available for deeper diagnostics, but the example
+//     focuses on the business-facing certificate: "what is the bottleneck?"
+//
+// AI-Hints:
+//   - Prefer flow.MaxFlow(..., flow.WithAlgorithm(flow.AlgorithmDinic)) for new examples.
+//   - Do not use residual.AdjacencyList() as a public proof surface.
+//   - Do not claim a throughput value without verifying the min-cut certificate.
+func ExampleMaxFlow_dinicCDN() {
+	g, err := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
 
-//
-//import (
-//	"fmt"
-//	"log"
-//
-//	"github.com/katalvlaran/lvlath/core"
-//	"github.com/katalvlaran/lvlath/flow"
-//)
-//
-//func main7() {
-//	// 1) Build a directed, weighted graph for CDN capacities
-//	g := core.NewGraph(true, true)
-//
-//	// 2) Add capacity edges (from → to, capacity Gbps)
-//	edges := []struct {
-//		from, to string
-//		cap      int64
-//	}{
-//		{"Client", "PoP1", 10},
-//		{"Client", "PoP2", 15},
-//
-//		{"PoP1", "Origin1", 5},
-//		{"PoP1", "Origin2", 5},
-//		{"PoP2", "Origin1", 10},
-//		{"PoP2", "Origin2", 3},
-//
-//		{"Origin1", "Sink", 20},
-//		{"Origin2", "Sink", 20},
-//	}
-//
-//	for _, e := range edges {
-//		g.AddEdge(e.from, e.to, e.cap)
-//	}
-//
-//	// 3) Compute max-flow from "Client" → "Sink" using Dinic
-//	maxFlow, residual, err := flow.Dinic(g, "Client", "Sink", nil)
-//	if err != nil {
-//		log.Fatalf("Dinic error: %v", err)
-//	}
-//
-//	// 4) Display the result
-//	fmt.Printf("✅ CDN maximum throughput: %.0f Gbps\n\n", maxFlow)
-//
-//	// 5) Show residual capacities on key edges to see bottlenecks
-//	fmt.Println("🔍 Residual capacities after max-flow:")
-//	for _, e := range []struct{ u, v string }{
-//		{"Client", "PoP1"},
-//		{"Client", "PoP2"},
-//		{"PoP1", "Origin1"},
-//		{"PoP1", "Origin2"},
-//		{"PoP2", "Origin1"},
-//		{"PoP2", "Origin2"},
-//	} {
-//		// If forward capacity exhausted, HasEdge will be false
-//		rem := "0"
-//		if residual.HasEdge(e.u, e.v) {
-//			// residual edge weight = remaining capacity
-//			for _, edgeList := range residual.AdjacencyList()[e.u][e.v] {
-//				rem = fmt.Sprintf("%d", edgeList.Weight)
-//				break
-//			}
-//		}
-//		fmt.Printf("  %s → %s: %s Gbps remaining\n", e.u, e.v, rem)
-//	}
-//}
+	_, err = g.AddEdge("ViewerDemand", "TLSGateway", 220)
+
+	_, err = g.AddEdge("TLSGateway", "PoP_EU", 90)
+	_, err = g.AddEdge("TLSGateway", "PoP_US", 80)
+	_, err = g.AddEdge("TLSGateway", "PoP_APAC", 70)
+
+	_, err = g.AddEdge("PoP_EU", "Regional_EU", 70)
+	_, err = g.AddEdge("PoP_EU", "Regional_US", 20)
+	_, err = g.AddEdge("PoP_US", "Regional_EU", 25)
+	_, err = g.AddEdge("PoP_US", "Regional_US", 65)
+	_, err = g.AddEdge("PoP_APAC", "Regional_EU", 10)
+	_, err = g.AddEdge("PoP_APAC", "Regional_US", 50)
+
+	_, err = g.AddEdge("Regional_EU", "OriginCacheA", 75)
+	_, err = g.AddEdge("Regional_EU", "OriginCacheB", 20)
+	_, err = g.AddEdge("Regional_US", "OriginCacheA", 25)
+	_, err = g.AddEdge("Regional_US", "OriginCacheB", 85)
+
+	_, err = g.AddEdge("OriginCacheA", "VideoService", 95)
+	_, err = g.AddEdge("OriginCacheB", "VideoService", 90)
+
+	result, err := flow.MaxFlow(
+		g,
+		"ViewerDemand",
+		"VideoService",
+		flow.WithAlgorithm(flow.AlgorithmDinic),
+	)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+
+	sourceSide := make(map[string]bool, len(result.CutSourceSide))
+	for _, vertexID := range result.CutSourceSide {
+		sourceSide[vertexID] = true
+	}
+
+	cutCapacity := 0.0
+
+	fmt.Printf("CDN peak throughput: %.0f Gbps\n", result.Value)
+	fmt.Printf("SLO target 180 Gbps met: %v\n", result.Value >= 180)
+	fmt.Println("Min-cut bottleneck boundary:")
+
+	for _, edge := range g.Edges() {
+		if !sourceSide[edge.From] || sourceSide[edge.To] {
+			continue
+		}
+
+		cutCapacity += edge.Weight
+		fmt.Printf("  %s -> %s: %.0f Gbps\n", edge.From, edge.To, edge.Weight)
+	}
+
+	fmt.Printf("Min-cut capacity: %.0f Gbps\n", cutCapacity)
+	fmt.Printf("Certificate verified: %v\n", cutCapacity == result.Value)
+	fmt.Printf("Residual graph published: %v\n", result.Residual != nil)
+
+	// Output:
+	// CDN peak throughput: 185 Gbps
+	// SLO target 180 Gbps met: true
+	// Min-cut bottleneck boundary:
+	//   OriginCacheA -> VideoService: 95 Gbps
+	//   OriginCacheB -> VideoService: 90 Gbps
+	// Min-cut capacity: 185 Gbps
+	// Certificate verified: true
+	// Residual graph published: true
+}

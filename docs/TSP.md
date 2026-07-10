@@ -1036,6 +1036,8 @@ func main() {
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-TSP_Biopharmaceutical_cold_chain_dispatch-blue?logo=go)](https://go.dev/play/p/DY2hMz_yK5_V)
+
 ### 11.8.2. High-value cash-in-transit ATSP risk routing
 
 This example models a directed security route. The matrix combines travel time, fuel burn, escort availability, and exposure risk. Direction matters: returning through the same corridor may have a different risk score because of one-way streets, turn restrictions, and predictable attack surfaces.
@@ -1122,6 +1124,8 @@ func main() {
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-TSP_High_value_cash_in_transit_ATSP_risk_routing-blue?logo=go)](https://go.dev/play/p/w6OSSYWt9lG)
+
 ### 11.8.3. Semiconductor laser-drilling exact optimization
 
 An industrial laser-drilling workstation visits microscopic via-hole positions on each board. The matrix stores servo motion and stabilization latency in milliseconds. At 100,000 boards per production batch, a few milliseconds per board become minutes of machine occupancy.
@@ -1200,6 +1204,8 @@ func main() {
 	// nodes-expanded=218
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-TSP_Semiconductor_laser_drilling_exact_optimization-blue?logo=go)](https://go.dev/play/p/AUO4v86uEzU)
 
 ---
 

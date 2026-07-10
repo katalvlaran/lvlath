@@ -864,6 +864,9 @@ func main() {
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DTW_Crypto_OHLC_Breakout_Pattern_Matching-blue?logo=go)](https://go.dev/play/p/e5CI7zuPTb0)
+
+
 ### 8.9.2. Voice Command Alignment over Acoustic Cost Surface
 
 This scenario uses `AlignCostMatrix` because an upstream acoustic model already computed frame-to-frame costs. DTW consumes the cost surface directly and explains the stretched pronunciation.
@@ -934,6 +937,9 @@ func main() {
 	// decision=accepted with stretched pronunciation
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DTW_Voice_Command_Alignment-blue?logo=go)](https://go.dev/play/p/38atHI_TzoV)
+
 
 ### 8.9.3. Multivariate Vibration Signature Matching
 
@@ -1039,6 +1045,8 @@ func main() {
 	// maintenance decision=signature match
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DTW_Multivariate_Vibration_Signature-blue?logo=go)](https://go.dev/play/p/7zIwIMiHS1h)
 
 ---
 

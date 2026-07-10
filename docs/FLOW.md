@@ -175,41 +175,42 @@ This scenario highlights how arbitrary `DFS` paths (not shortest) still yield th
 package main
 
 import (
-  "context"
-  "fmt"
-  "github.com/katalvlaran/lvlath/core"
-  "github.com/katalvlaran/lvlath/flow"
+	"context"
+	"fmt"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/flow"
 )
 
 func main() {
-   // 1. Build graph
-    g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-    // Complex 8‑vertex example
-    g.AddEdge("s", "a", 5)
-    g.AddEdge("s", "c", 15)
-    g.AddEdge("a", "b", 8)
-    g.AddEdge("b", "d", 10)
-    g.AddEdge("c", "d", 5)
-    g.AddEdge("c", "e", 10)
-    g.AddEdge("e", "d", 10)
-    g.AddEdge("d", "t", 10)
-    g.AddEdge("e", "t", 5)
+	// 1. Build graph
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	// Complex 8‑vertex example
+	_, _ = g.AddEdge("s", "a", 5)
+	_, _ = g.AddEdge("s", "c", 15)
+	_, _ = g.AddEdge("a", "b", 8)
+	_, _ = g.AddEdge("b", "d", 10)
+	_, _ = g.AddEdge("c", "d", 5)
+	_, _ = g.AddEdge("c", "e", 10)
+	_, _ = g.AddEdge("e", "d", 10)
+	_, _ = g.AddEdge("d", "t", 10)
+	_, _ = g.AddEdge("e", "t", 5)
 
-    // 2. Compute max-flow
-    opts := flow.DefaultOptions()
-    opts.Ctx = context.Background()
-    maxFlow, _, err := flow.FordFulkerson(g, "s", "t", opts)
-    if err != nil {
-      panic(err)
-    }
+	// 2. Compute max-flow
+	opts := flow.DefaultOptions()
+	opts.Ctx = context.Background()
+	maxFlow, _, err := flow.FordFulkerson(g, "s", "t", opts)
+	if err != nil {
+		panic(err)
+	}
 
-   // 3. Display result
-    fmt.Printf("Maximum flow = %d\n", maxFlow)
-    // Output: Maximum flow = 15
+	// 3. Display result
+	fmt.Printf("Maximum flow = %f\n", maxFlow)
+	// Output: Maximum flow = 15.000000
 }
 ```
 
-[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_FordFulkerson-blue?logo=go)](https://go.dev/play/p/k-qe-ntQ7VO)
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_FordFulkerson-blue?logo=go)](https://go.dev/play/p/F_Q7fDcJkiy)
 
 ### 7.3.2. Edmonds-Karp (Breadth‑First Search)
 
@@ -297,48 +298,51 @@ procedure EdmondsKarp(G, S, T):
 package main
 
 import (
-  "context"
-  "fmt"
+	"context"
+	"fmt"
 
-  "github.com/katalvlaran/lvlath/core"
-  "github.com/katalvlaran/lvlath/flow"
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/flow"
 )
 
 func main() {
-     // 1. Build graph
-    ctx := context.Background()
-    g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-    // Build 19-edge network
-    edges := []struct{U,V string;C float64}{
-        {"S","A",5}, {"S","B",7}, {"S","C",15},
-        {"A","D",8}, {"A","E",3}, 
-        {"B","E",6}, 
-        {"C","E",5}, {"C","F",10},
-        {"D","G",7}, {"D","H",2}, {"D","E",7}, 
-        {"E","D",7}, {"E","T",4}, {"E","F",8}, 
-        {"F","E",8}, {"F","T",6},
-        {"G","H",9}, 
-        {"H","G",9}, {"H","T",4},
-    }
-    for _, e := range edges {
-      g.AddEdge(e.U, e.V, e.C)
-    }
+	// 1. Build graph
+	ctx := context.Background()
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	// Build 19-edge network
+	edges := []struct {
+		U, V string
+		C    float64
+	}{
+		{"S", "A", 5}, {"S", "B", 7}, {"S", "C", 15},
+		{"A", "D", 8}, {"A", "E", 3},
+		{"B", "E", 6},
+		{"C", "E", 5}, {"C", "F", 10},
+		{"D", "G", 7}, {"D", "H", 2}, {"D", "E", 7},
+		{"E", "D", 7}, {"E", "T", 4}, {"E", "F", 8},
+		{"F", "E", 8}, {"F", "T", 6},
+		{"G", "H", 9},
+		{"H", "G", 9}, {"H", "T", 4},
+	}
+	for _, e := range edges {
+		_, _ = g.AddEdge(e.U, e.V, e.C)
+	}
 
-   // 1. Build graph// Build 19-edge network// 2. Compute max-flow
-    opts := flow.DefaultOptions()
-    opts.Ctx = ctx
-    maxFlow, _, err := flow.EdmondsKarp(g, "S", "T", opts)
-    if err != nil {
-      panic(err)
-    }
-    
-    // 3. Display result    
-    fmt.Println("MaxFlow =", maxFlow)
-    // Output: Maximum flow = 14
+	// 2. Compute max-flow
+	opts := flow.DefaultOptions()
+	opts.Ctx = ctx
+	maxFlow, _, err := flow.EdmondsKarp(g, "S", "T", opts)
+	if err != nil {
+		panic(err)
+	}
+
+	// 3. Display result
+	fmt.Println("MaxFlow =", maxFlow)
+	// Output: Maximum flow = 14
 }
 ```
 
-[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_EdmondsKarp-blue?logo=go)](https://go.dev/play/p/EZsJzI4bXHt)
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_EdmondsKarp-blue?logo=go)](https://go.dev/play/p/wumx7DNCKVA)
 
 *The Edmonds-Karp method above illustrates how prioritizing shortest augmenting paths yields stable, provably bounded performance, crucial for networks with adversarial or high‐capacity configurations.*
 
@@ -449,43 +453,46 @@ function dfs(u, t, flow):
 package main
 
 import (
-   "fmt"
+	"fmt"
 
-   "github.com/katalvlaran/lvlath/core"
-   "github.com/katalvlaran/lvlath/flow"
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/flow"
 )
 
 func main() {
-   // 1. Build graph
-   g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
-   edges := []struct {u, v string; c float64}{
-      {"S", "A", 5}, {"S", "B", 7}, {"S", "C", 15},
-      {"A", "D", 9}, {"A", "E", 3},
-      {"B", "E", 2},
-      {"C", "E", 5}, {"C", "F", 10},
-      {"D", "G", 7}, {"D", "H", 2}, {"D", "E", 7},
-      {"E", "D", 5}, {"E", "T", 12}, {"E", "F", 8},
-      {"F", "E", 8}, {"F", "T", 6},
-      {"G", "H", 4},
-      {"H", "G", 4}, {"H", "T", 4},
-   }
-   for _, e := range edges {
-      g.AddEdge(e.u, e.v, e.c)
-   }
+	// 1. Build graph
+	g, _ := core.NewGraph(core.WithDirected(true), core.WithWeighted())
+	edges := []struct {
+		u, v string
+		c    float64
+	}{
+		{"S", "A", 5}, {"S", "B", 7}, {"S", "C", 15},
+		{"A", "D", 9}, {"A", "E", 3},
+		{"B", "E", 2},
+		{"C", "E", 5}, {"C", "F", 10},
+		{"D", "G", 7}, {"D", "H", 2}, {"D", "E", 7},
+		{"E", "D", 5}, {"E", "T", 12}, {"E", "F", 8},
+		{"F", "E", 8}, {"F", "T", 6},
+		{"G", "H", 4},
+		{"H", "G", 4}, {"H", "T", 4},
+	}
+	for _, e := range edges {
+		g.AddEdge(e.u, e.v, e.c)
+	}
 
-   // 2. Compute max-flow
-   opts := flow.DefaultOptions()
-   maxFlow, _, err := flow.Dinic(g, "S", "T", opts)
-   if err != nil {
-      panic(err)
-   }
+	// 2. Compute max-flow
+	opts := flow.DefaultOptions()
+	maxFlow, _, err := flow.Dinic(g, "S", "T", opts)
+	if err != nil {
+		panic(err)
+	}
 
-   // 3. Display result
-   fmt.Printf("Maximum flow S→T = %d\n", maxFlow)
-   // Output: Maximum flow S→T = 22
+	// 3. Display result
+	fmt.Printf("Maximum flow S→T = %f\n", maxFlow)
+	// Output: Maximum flow S→T = 22.000000
 }
 ```
-[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_Dinic-blue?logo=go)](https://go.dev/play/p/OW1BYVLTV9s)
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MaxFlow_Dinic-blue?logo=go)](https://go.dev/play/p/6dxEG8-iaR5)
 
 ---
 

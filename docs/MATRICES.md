@@ -82,7 +82,7 @@ where `C = Cols()`.
 
 ### 10.2.1. Visualization A: Logical Matrix to Physical Slice
 
-~~~text
+```text
       Logical 2D Matrix (3x3)                     Physical 1D Flat Slice (len=9)
       ┌────────┬────────┬────────┐
 Row 0 │ A[0,0] │ A[0,1] │ A[0,2] │ ─────┐
@@ -92,20 +92,20 @@ Row 1 │ A[1,0] │ A[1,1] │ A[1,2] │ ───┐ └─►[ 0,0 | 0,1 | 0
 Row 2 │ A[2,0] │ A[2,1] │ A[2,2] │ ─┐ └───────────────────────────────┘                 │
       └────────┴────────┴────────┘  └───────────────────────────────────────────────────┘
                                         contiguous rows maximize CPU prefetching
-~~~
+```
 
 ### 10.2.2. Visualization B: Zero-Shape Matrices
 
 Zero-shape matrices are structural matrices with no addressable cells. They are not failed allocations.
 
-~~~text
+```text
 Dense(0,4)                                                Dense(4,0)
 ┌ no rows ┐                                               ┌──── empty row 0 ────┐
 │         │  cols = 4                                     ├──── empty row 1 ────┤  cols = 0
 └─────────┘  data = nil                                   ├──── empty row 2 ────┤  data = nil
              CenterColumns -> means len 4: [0 0 0 0]      ├──── empty row 3 ────┤  CenterRows -> means len 4
              At(0,0) -> ErrOutOfRange                     └────────────────────┘  NormalizeRowsL1 -> norms len 4
-~~~
+```
 
 ### 10.2.3. The Hardware-Sympathy Rules
 
@@ -120,7 +120,7 @@ Dense(0,4)                                                Dense(4,0)
 
 ### 10.3.1. Matrix Interface
 
-~~~go
+```go
 type Matrix interface {
 	Rows() int
 	Cols() int
@@ -128,7 +128,7 @@ type Matrix interface {
 	Set(i, j int, v float64) error
 	Clone() Matrix
 }
-~~~
+```
 
 Contract:
 
@@ -139,7 +139,7 @@ Contract:
 
 ### 10.3.2. Dense Constructors and Ownership
 
-~~~go
+```go
 func NewDense(rows, cols int) (*Dense, error)
 func NewPreparedDense(rows, cols int, opts ...Option) (*Dense, error)
 
@@ -149,7 +149,7 @@ func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error)
 func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error)
 func (m *Dense) Apply(f func(i, j int, v float64) float64) error
 func (m *Dense) Do(f func(i, j int, v float64) bool)
-~~~
+```
 
 `Clone` and `Induced` own new buffers. `View` and `MatrixView` share base storage. `Apply` mutates in-place and is intentionally not all-or-nothing: earlier accepted writes remain if a later value violates policy.
 
@@ -194,7 +194,7 @@ The public API is intentionally thin: facades delegate to canonical kernels and 
 
 Options are assembled left-to-right and finalized once by `NewMatrixOptions` / internal option gathering. They are runtime policy objects; they do not mutate graph topology.
 
-~~~go
+```go
 func NewMatrixOptions(opts ...Option) (Options, error)
 
 func WithDirected() Option
@@ -216,7 +216,7 @@ func WithAutoZeroWeights() Option
 func WithEdgeThreshold(t float64) Option
 func WithKeepWeights() Option
 func WithBinaryWeights() Option
-~~~
+```
 
 ### 10.4.1. Numeric Admissibility
 
@@ -238,7 +238,7 @@ Finalization rules:
 
 #### Directed vs Undirected
 
-~~~text
+```text
 Graph edge: A --5--> B
 
 WithDirected                         WithUndirected
@@ -247,11 +247,11 @@ A     [ 0   5 ]                      A     [ 0   5 ]
 B     [ 0   0 ]                      B     [ 5   0 ]
 
 Directed writes one ordered cell. Undirected mirrors non-loop edges.
-~~~
+```
 
 #### AllowMulti vs DisallowMulti
 
-~~~text
+```text
 Input edges in stable order:
   e1: A -> B weight 2
   e2: A -> B weight 8
@@ -263,11 +263,11 @@ B     [ 0   0 ]                      B     [ 0   0 ]
 
 Dense adjacency has one cell. AllowMulti means deterministic last-write-wins.
 DisallowMulti means deterministic first-edge-wins.
-~~~
+```
 
 #### AllowLoops vs DisallowLoops
 
-~~~text
+```text
 Input edge: A -> A weight 3
 
 WithAllowLoops                       WithDisallowLoops
@@ -276,22 +276,22 @@ A     [ 3 ]                         A     [ 0 ]
 
 For +Inf-no-edge weighted adjacency, a missing loop remains +Inf in ordinary adjacency.
 Metric closure normalizes distance diagonals later.
-~~~
+```
 
 #### Weighted vs Unweighted
 
-~~~text
+```text
 Input edge: A -> B weight 42.5
 
 WithWeighted                         WithUnweighted
         A     B                              A   B
 A     [ 0   42.5 ]                   A     [ 0   1 ]
 B     [ 0    0   ]                   B     [ 0   0 ]
-~~~
+```
 
 #### PreserveZeroWeights
 
-~~~text
+```text
 Input edges:
   A -> B = 4
   A -> C = 0   real edge
@@ -303,11 +303,11 @@ B     [Inf   Inf   Inf]
 C     [Inf   Inf   Inf]
 
 All-zero weighted graphs need WithPreserveZeroWeights to avoid binary auto-degrade.
-~~~
+```
 
 #### MetricClosure
 
-~~~text
+```text
 Normal adjacency                     Metric closure distance matrix
         A   B   C                            A      B      C
 A     [ 0   5   0 ]                  A     [ 0      5     Inf ]
@@ -315,7 +315,7 @@ B     [ 0   0   2 ]                  B     [ Inf    0      2  ]
 C     [ 0   0   0 ]                  C     [ Inf   Inf     0  ]
 
 Metric closure is not adjacency anymore. ToGraph refuses it.
-~~~
+```
 
 ---
 
@@ -325,7 +325,7 @@ Graph adapters convert string vertex IDs into integer coordinates. The low-level
 
 ### 10.5.0. Conversion Pipeline
 
-~~~text
+```text
  [core.Graph]              Stable Vertex Order               [matrix.AdjacencyMatrix]
  String IDs                Integer Mapping                   Dense Tensor Coordinates
 
@@ -334,13 +334,13 @@ Graph adapters convert string vertex IDs into integer coordinates. The low-level
   "Alice"   ──────────►    2: "Fiona"  ───────────────────► Row 2 / Col 2
 
 The adapter does not store vertex IDs inside cells. It stores numeric cells plus metadata.
-~~~
+```
 
 ### 10.5.1. Social Network Scenario
 
 Consider a social platform where users send weighted directed messages.
 
-~~~text
+```text
   [User Network Example]
 
            Fiona
@@ -350,7 +350,7 @@ Consider a social platform where users send weighted directed messages.
       ↓     Eva     ↓
        ↘︎    ↑    ↙︎
            Dave
-~~~
+```
 
 Edges:
 
@@ -445,7 +445,7 @@ $$ D_{ik}+D_{kj} < D_{ij} $$
 
 Equal-cost alternatives do not overwrite existing values.
 
-~~~text
+```text
 Routing graph:
 
 A ──5──▶ B ──2──▶ C
@@ -466,7 +466,7 @@ A       0     5     7      9
 B      Inf    0     2      4
 C      Inf   Inf    0      2
 D      Inf   Inf   Inf     0
-~~~
+```
 
 Negative-cycle detection scans the final diagonal:
 
@@ -492,7 +492,7 @@ $$ \rho_i = \frac{1}{c}\sum_{j=0}^{c-1} X_{ij} $$
 
 $$ X^r_{ij}=X_{ij}-\rho_i $$
 
-~~~text
+```text
 X = 3×2 sensor readings
 
         temp  load
@@ -504,7 +504,7 @@ Column means:
         temp = 13.333..., load = 5
 
 CenterColumns subtracts those means from each column.
-~~~
+```
 
 Zero-shape law:
 
@@ -532,7 +532,7 @@ $$ s_i =
 
 Degenerate rows remain unchanged.
 
-~~~text
+```text
 Traffic distribution row:
   [ 2, 3, 5 ]
 
@@ -542,7 +542,7 @@ NormalizeRowsL1 -> [ 0.2, 0.3, 0.5 ]
 Degenerate row:
   [ 0, 0, 0 ]
 NormalizeRowsL1 -> unchanged [ 0, 0, 0 ]
-~~~
+```
 
 ### 10.7.3. Covariance and Correlation
 
@@ -573,7 +573,7 @@ Shape law:
 
 This example demonstrates the updated contracts: zero-weight preservation, loop policy, adjacency neighbors, incidence shape, metric-closure export refusal, and zero-feature covariance.
 
-~~~go
+```go
 package main
 
 import (
@@ -692,13 +692,15 @@ func main() {
 	// metric export refused: true
 	// zero-feature covariance: 0x0 means=0
 }
-~~~
+```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-Matrix_Social_Network-blue?logo=go)](https://go.dev/play/p/gp2o_7vl-YK)
 
 ### 10.8.2. Operations Lab: LU, APSP, DegreeVector, Normalization, Correlation
 
 This scenario combines algebraic and graph workflows: a small calibration solve, an in-place Floyd-Warshall distance matrix, a graph-derived degree vector, normalized routing shares, and feature correlation.
 
-~~~go
+```go
 package main
 
 import (
@@ -821,7 +823,9 @@ func main() {
 	// row0 norm 10 first share 0.2 row1 norm 0
 	// corr shape: 3x3 degenerate std: 0
 }
-~~~
+```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-Matrix_LU_APSP_DegreeVector_Normalization_Correlation-blue?logo=go)](https://go.dev/play/p/ITfz4eDMR9c)
 
 ---
 
@@ -892,4 +896,4 @@ Construction and transform functions return `nil` result artifacts with an error
 
 **lvlath/matrix**: deterministic dense algebra, precise numeric policy, and graph semantics without ambiguity.
 
-> Next: [11. Traveling Salesman (TSP) ->](TRAVELING_SALESMAN.md)
+> Next: [11. Traveling Salesman (TSP) ->](TSP.md)

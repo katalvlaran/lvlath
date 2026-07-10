@@ -20,14 +20,14 @@
 
 ---
 
-```text
+~~~text
 ┌─────────────────────────────────┐
 │  o       o            o    o    │
 │  ║ o   o ║   o───╖  o─╫─o  ║    │
 │  ║  \ /  ║   o───╢    ║    ╟──╖ │
 │  ╙o  o   ╙o  ╙───o    ╙o   o  o │
 └─────────────────────────────────┘
-```
+~~~
 
 [![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-reference-blue?logo=go)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
 [![Go Report Card](https://goreportcard.com/badge/github.com/katalvlaran/lvlath)](https://goreportcard.com/report/github.com/katalvlaran/lvlath)
@@ -59,60 +59,66 @@ It is built for people who need algorithmic tools they can explain in a code rev
 
 ## Why lvlath exists
 
-A graph library becomes dangerous when the simplest demo works but the real system loses determinism, topology meaning, or error identity.
+A graph or numeric-algorithm library becomes dangerous when the demo works, but the production system loses ordering, topology meaning, numeric semantics, or error identity.
 
 The common failures are familiar:
 
 * Go map iteration leaks into traversal order;
-* directed, undirected, mixed, loop, and multi-edge semantics are assumed instead of modeled;
+* directed, undirected, mixed, loop, and multi-edge semantics are guessed instead of modeled;
 * zero-weight edges disappear inside adjacency matrices;
-* `+Inf` is flattened into magic integers or arbitrary large constants;
-* BFS is accidentally used for weighted routing;
-* Dijkstra silently accepts invalid negative weights;
-* DFS finish order is confused with discovery order;
-* max-flow examples show a number but hide residual capacity semantics;
-* examples panic or print unstable maps;
-* documentation explains theory but not actual API contracts.
+* `+Inf` is replaced with “large enough” constants and later becomes a fake route;
+* BFS is used for weighted routing because it “looks like pathfinding”;
+* Dijkstra, MST, TSP, and DTW are treated as interchangeable shortest-cost tools;
+* DFS discovery order is confused with finish order;
+* max-flow examples print only a number and hide residual-network semantics;
+* Christofides is claimed without checking metric assumptions or matching strength;
+* DTW path output is requested from a memory mode that intentionally discarded history;
+* examples panic, print unstable maps, or silently rely on fictional APIs;
+* documentation explains textbook theory but not the actual package contract.
 
-`lvlath` answers those problems with explicit engineering laws.
+`lvlath` is built against those failure modes. It is an algorithm engineering library: each package publishes a narrow mathematical contract, validates its input domain, returns meaningful result artifacts, and keeps deterministic behavior observable.
 
 ### The repository-level laws
 
-1. **Determinism is a feature, not an accident**
+1. **Determinism is a package contract**
 
-   `core` provides deterministic graph surfaces. Algorithms either preserve that order or document their own tie-break. That means examples, golden tests, CI logs, and witness paths remain stable.
+   `core` provides stable graph surfaces. Algorithm packages either preserve that order or define their own deterministic tie-breaks: BFS processing order, DFS finish order, Dijkstra strict improvement, MST edge ordering, DTW backtracking, TSP matrix order and solver tie-breaks.
 
-2. **Capabilities are declared at construction**
+2. **Capabilities are declared before topology is trusted**
 
-   Directedness, weighting, loops, multi-edges, and mixed edges are opt-in model choices. A graph rejects operations that violate its configured capabilities instead of letting invalid topology poison later algorithms.
+   Directedness, weighting, loops, multi-edges, and mixed-edge behavior are graph capabilities, not comments. Invalid topology should be rejected at the write or validation boundary, not discovered after an algorithm has already published nonsense.
 
-3. **Every algorithm has a result contract**
+3. **Every non-trivial algorithm publishes a result artifact**
 
-   `BFSResult`, `DFSResult`, `DijkstraResult`, residual flow graphs, adjacency matrices, metric closures, and TSP tours are caller-owned artifacts with semantics.
+   `BFSResult`, `DFSResult`, `DijkstraResult`, `MSTResult`, `TSPResult`, DTW `Result`, residual flow graphs, adjacency matrices, incidence matrices, and metric closures are caller-owned artifacts with domain meaning. They are not incidental internal state.
 
 4. **Errors are protocol, not prose**
 
-   Public errors are sentinels for `errors.Is`. Error strings are diagnostics only.
+   Public errors are meant for `errors.Is`. Error text is diagnostic only. A caller must be able to distinguish “unknown target,” “known unreachable,” “path not tracked,” “disconnected strict MST,” “invalid matching policy,” and “time-limited incumbent.”
 
-5. **Policy should not mutate topology**
+5. **Policy must be explicit**
 
-   Use BFS/DFS filters, Dijkstra thresholds, max-distance cutoffs, matrix options, and flow epsilon policies to model one run. Do not delete the graph to simulate a runtime rule.
+   Filters, cutoffs, thresholds, forest mode, metric closure, local search, matching engine, DTW window, memory mode, slope penalty, and TSP time limits are explicit policy choices. No package should silently swap to weaker mathematics because the selected one is inconvenient.
 
-6. **Matrix algebra preserves graph meaning**
+6. **Numeric semantics are not interchangeable**
 
-   Dense adjacency, incidence, metric closure, zero-weight edges, `+Inf` absence, loops, and multi-edge compression are all explicit policy decisions.
+   `0`, `+Inf`, `NaN`, negative weights, missing edges, zero-cost edges, unreachable states, and local costs mean different things in different packages. `matrix`, `dtw`, `mst`, `dijkstra`, and `tsp` intentionally enforce different numeric laws because they solve different problems.
 
-7. **Documentation is part of the implementation surface**
+7. **Graph algorithms and dense algebra compose without erasing meaning**
 
-   Each package has a local `{package}/doc.go` for implemented API contracts and a repository-level `docs/{PACKAGE}.md` for theory, proofs, diagrams, examples, and operational guidance.
+   `matrix` can convert topology into adjacency, incidence, metric closure, statistics, and factorization workflows. It must preserve zero-weight and `+Inf` semantics instead of flattening them into convenient but false dense arrays.
+
+8. **Documentation, examples, tests, and source must describe the same library**
+
+   `{package}/doc.go` is the implemented API contract. `docs/{PACKAGE}.md` teaches the mathematics and operational pitfalls. Examples demonstrate real package behavior. Tests defend the contract. None of them should invent future APIs or convenient lies.
 
 ---
 
 ## Installation
 
-```bash
+~~~bash
 go get github.com/katalvlaran/lvlath@latest
-```
+~~~
 
 Requires Go 1.23 or newer. Pure Go. No cgo. No external runtime dependencies.
 
@@ -120,7 +126,7 @@ Requires Go 1.23 or newer. Pure Go. No cgo. No external runtime dependencies.
 
 ## Repository structure
 
-```text
+~~~text
 lvlath/
 ├── core/                  # deterministic graph substrate
 │   └── doc.go             # package-level API contract
@@ -128,7 +134,7 @@ lvlath/
 ├── bfs/                   # unweighted hop traversal and weak components
 ├── dfs/                   # post-order traversal, cycle witnesses, topological sort
 ├── dijkstra/              # weighted single-source shortest paths
-├── prim_kruskal/          # minimum spanning tree algorithms
+├── mst/          # minimum spanning tree algorithms
 ├── flow/                  # Ford-Fulkerson, Edmonds-Karp, Dinic
 ├── dtw/                   # dynamic time warping for numeric sequences
 ├── gridgraph/             # 2D lattice graph generation
@@ -142,12 +148,12 @@ lvlath/
 │   ├── BFS.md
 │   ├── DFS.md
 │   ├── DIJKSTRA.md
-│   ├── PRIM_&_KRUSKAL.md
+│   ├── MST.md
 │   ├── FLOW.md
 │   ├── DTW.md
 │   ├── GRID_GRAPH.md
 │   ├── MATRICES.md
-│   ├── TRAVELING_SALESMAN.md
+│   ├── TSP.md
 │   ├── lvlath_UES.md
 │   └── FAQ_&_TIPS.md
 │
@@ -156,11 +162,11 @@ lvlath/
 ├── LICENSE
 ├── README.md
 └── go.mod
-```
+~~~
 
 ### Two documentation layers
 
-```text
+~~~text
 lvlath/{package}/doc.go
   ↓
   The implemented API contract:
@@ -170,94 +176,99 @@ lvlath/docs/{PACKAGE}.md
   ↓
   The learning and specification layer:
   mathematics, proofs, pseudocode, diagrams, pitfalls, scenarios, and package selection guidance.
-```
+~~~
 
 ---
 
 ## Package map: how the system composes
 
 ```text
-                                      ┌──────────────────────────────┐
-                                      │          core.Graph          │
-                                      │  deterministic topology API  │
-                                      └───────────────┬──────────────┘
-                                                      │
-                    ┌─────────────────────────────────┼────────────────────────────────┐
-                    │                                 │                                │
-          unweighted traversal                 weighted routing                   dense algebra
-                    │                                 │                                │
-        ┌───────────▼───────────┐          ┌──────────▼──────────┐          ┌──────────▼──────────┐
-        │ bfs                   │          │ dijkstra            │          │ matrix              │
-        │ layers, paths,        │          │ costs, witnesses,   │          │ adjacency,          │
-        │ weak components       │          │ +Inf policy         │          │ incidence, APSP     │
-        └───────────┬───────────┘          └──────────┬──────────┘          └──────────┬──────────┘
-                    │                                 │                                │
-        ┌───────────▼───────────┐          ┌──────────▼──────────┐          ┌──────────▼──────────┐
-        │ dfs                   │          │ prim_kruskal        │          │ analytics           │
-        │ post-order, cycles,   │          │ MST backbones       │          │ LU/QR/Eigen, stats, │
-        │ topological plans     │          │ and clustering      │          │ sanitation, compare │
-        └───────────┬───────────┘          └──────────┬──────────┘          └──────────┬──────────┘
-                    │                                 │                                │
-                    │                      ┌──────────▼──────────┐                     │
-                    │                      │ flow                │                     │
-                    │                      │ capacity networks,  │                     │
-                    │                      │ residual graphs     │                     │
-                    │                      └──────────┬──────────┘                     │
-                    │                                 │                                │
-                    │                      ┌──────────▼──────────┐                     │
-                    │                      │ tsp                 │◄────────────────────┘
-                    │                      │ tours, heuristics,  │
-                    │                      │ exact small-n       │
-                    │                      └─────────────────────┘
-                    │
-       ┌────────────▼────────────┐         ┌─────────────────────┐          ┌─────────────────────┐
-       │ gridgraph               │         │ builder             │          │ dtw                 │
-       │ lattice topologies for  │         │ deterministic       │          │ alignment           │
-       │ BFS / Dijkstra demos    │         │ fixtures/benchmarks │          │ numeric sequence    │
-       └─────────────────────────┘         └─────────────────────┘          └─────────────────────┘
+                                      ┌──────────────────────────────────────┐
+                                      │              core.Graph              │
+                                      │ deterministic topology + capability  │
+                                      │ directed / weighted / loops / multi  │
+                                      └───────────────────┬──────────────────┘
+                                                          │
+        ┌───────────────────────────────┬─────────────────┼─────────────────┬───────────────────────────────┐
+        │                               │                 │                 │                               │
+  hop / structure                 weighted cost      connectivity       capacity flow                   dense algebra
+        │                               │                 │                 │                               │
+┌───────▼────────┐              ┌───────▼────────┐ ┌──────▼──────┐ ┌───────▼────────┐               ┌───────▼────────┐
+│ bfs            │              │ dijkstra       │ │ mst         │ │ flow           │               │ matrix         │
+│ hop layers,    │              │ non-negative   │ │ strict MST  │ │ max-flow,      │               │ adjacency,     │
+│ paths, weak    │              │ shortest paths,│ │ explicit    │ │ min-cut,       │               │ incidence,     │
+│ components     │              │ +Inf states    │ │ forest mode │ │ residual graph │               │ APSP, stats    │
+└───────┬────────┘              └───────┬────────┘ └──────┬──────┘ └───────┬────────┘               └───────┬────────┘
+        │                               │                 │                │                                │
+┌───────▼────────┐                      │                 │                │                        ┌───────▼────────┐
+│ dfs            │                      │                 │                │                        │ tsp            │
+│ finish order,  │                      │                 │                │                        │ matrix-backed  │
+│ cycle witness, │                      │                 │                │                        │ tours: exact,  │
+│ topo sort      │                      │                 │                │                        │ approximate,   │
+└────────────────┘                      │                 │                │                        │ local search   │
+                                        │                 │                │                        └────────────────┘
+                                        │                 │                │
+                           ┌────────────▼──────────┐      │     ┌──────────▼──────────┐
+                           │ gridgraph             │      │     │ builder             │
+                           │ generated lattice     │      │     │ deterministic       │
+                           │ topology for routing  │      │     │ fixtures, examples, │
+                           │ and traversal demos   │      │     │ benchmarks          │
+                           └───────────────────────┘      │     └─────────────────────┘
+                                                          │
+                                             ┌────────────▼────────────┐
+                                             │ dtw                     │
+                                             │ deterministic temporal  │
+                                             │ alignment for scalar,   │
+                                             │ cost-matrix, and        │
+                                             │ multivariate sequences  │
+                                             └─────────────────────────┘
 
-       dtw lives beside graph workflows: numeric sequence alignment that can use
-       the same documentation, testing, determinism, and matrix discipline.
+Composition rule:
+  core owns topology.
+  matrix owns dense graph/numeric artifacts.
+  dtw owns temporal alignment artifacts.
+  mst / flow / tsp own optimization artifacts.
+  builder and gridgraph produce reproducible input worlds.
 ```
 
 ---
 
 ## Package roles and strengths
 
-| Package        | What it gives you                                                                                                                                   | Concrete strength                                                                                              | Typical scenario                                                             |
-|:---------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
-| `core`         | Thread-safe in-memory graph with deterministic `Vertices`, `Edges`, and `Neighbors`; explicit directed/weighted/loop/multi/mixed capabilities.      | Prevents unstable map order and invalid topology from leaking into algorithms.                                 | Service maps, routing graphs, dependency graphs, test fixtures.              |
-| `bfs`          | Unweighted shortest-hop traversal, path reconstruction, weak components, hooks, filters, partial results.                                           | Distinguishes discovery (`Visited`) from processing (`Order`) and preserves useful partial state.              | Blast radius, dependency waves, crawler frontiers, weak island discovery.    |
-| `dfs`          | DFS forest, post-order, cycle witnesses, topological sorting, hooks, filters, cancellation.                                                         | Makes finish order explicit and returns deterministic cycle witnesses instead of unstable recursion artifacts. | Release plans, DAG validation, lock/resource cycle auditing.                 |
-| `dijkstra`     | Single-source shortest paths on non-negative weighted graphs, path witnesses, wall thresholds, max-distance cutoff, `+Inf` unreachable publication. | Separates unknown target, known unreachable target, tracking disabled, and no path.                            | Logistics routing, network failover, service-radius queries.                 |
-| `prim_kruskal` | Minimum spanning tree construction through Prim/Kruskal.                                                                                            | Uses greedy MST structure for deterministic backbones and clustering cuts.                                     | Cable layout, transport backbones, clustering by removing heavy MST edges.   |
-| `flow`         | Ford-Fulkerson, Edmonds-Karp, and Dinic over `core.Graph`, returning max flow and residual graph.                                                   | Preserves residual semantics and supports algorithm selection from simple to high-throughput.                  | Capacity planning, traffic engineering, assignment models, min-cut analysis. |
-| `dtw`          | Dynamic Time Warping with window, slope penalty, memory modes, and optional path recovery.                                                          | Aligns sequences that share a pattern but differ in speed or local timing.                                     | Sensors, gestures, audio contours, time-series similarity.                   |
-| `gridgraph`    | 2D lattice graph generation with neighborhood and obstacle-style workflows.                                                                         | Avoids manual wiring for pathfinding maps and teaching graphs.                                                 | Grid routing, maps, demos, benchmark fixtures.                               |
-| `matrix`       | Dense row-major matrices, adjacency/incidence, metric closure, APSP, algebra, LU/QR/Eigen, covariance/correlation, sanitation.                      | Connects graph topology to numeric workflows without losing zero/`+Inf`/metric semantics.                      | Spectral analysis, graph features, routing matrices, risk/ML preprocessing.  |
-| `tsp`          | Tour optimization toolkit: practical approximation/local search/exact small-instance strategies.                                                    | Bridges exactness and practicality for route planning.                                                         | Delivery tours, inspection routes, metric routing experiments.               |
-| `builder`      | Deterministic graph and data generators.                                                                                                            | Produces reproducible examples, tests, and benchmarks.                                                         | Golden tests, performance fixtures, tutorials.                               |
+| Package     | What it gives you                                                                                                                                   | Concrete strength                                                                                              | Typical scenario                                                             |
+|:------------|:----------------------------------------------------------------------------------------------------------------------------------------------------|:---------------------------------------------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
+| `core`      | Thread-safe in-memory graph with deterministic `Vertices`, `Edges`, and `Neighbors`; explicit directed/weighted/loop/multi/mixed capabilities.      | Prevents unstable map order and invalid topology from leaking into algorithms.                                 | Service maps, routing graphs, dependency graphs, test fixtures.              |
+| `bfs`       | Unweighted shortest-hop traversal, path reconstruction, weak components, hooks, filters, partial results.                                           | Distinguishes discovery (`Visited`) from processing (`Order`) and preserves useful partial state.              | Blast radius, dependency waves, crawler frontiers, weak island discovery.    |
+| `dfs`       | DFS forest, post-order, cycle witnesses, topological sorting, hooks, filters, cancellation.                                                         | Makes finish order explicit and returns deterministic cycle witnesses instead of unstable recursion artifacts. | Release plans, DAG validation, lock/resource cycle auditing.                 |
+| `dijkstra`  | Single-source shortest paths on non-negative weighted graphs, path witnesses, wall thresholds, max-distance cutoff, `+Inf` unreachable publication. | Separates unknown target, known unreachable target, tracking disabled, and no path.                            | Logistics routing, network failover, service-radius queries.                 |
+| `mst`       | Minimum spanning tree construction through Prim/Kruskal.                                                                                            | Uses greedy MST structure for deterministic backbones and clustering cuts.                                     | Cable layout, transport backbones, clustering by removing heavy MST edges.   |
+| `flow`      | Ford-Fulkerson, Edmonds-Karp, and Dinic over `core.Graph`, returning max flow and residual graph.                                                   | Preserves residual semantics and supports algorithm selection from simple to high-throughput.                  | Capacity planning, traffic engineering, assignment models, min-cut analysis. |
+| `dtw`       | Dynamic Time Warping with window, slope penalty, memory modes, and optional path recovery.                                                          | Aligns sequences that share a pattern but differ in speed or local timing.                                     | Sensors, gestures, audio contours, time-series similarity.                   |
+| `gridgraph` | 2D lattice graph generation with neighborhood and obstacle-style workflows.                                                                         | Avoids manual wiring for pathfinding maps and teaching graphs.                                                 | Grid routing, maps, demos, benchmark fixtures.                               |
+| `matrix`    | Dense row-major matrices, adjacency/incidence, metric closure, APSP, algebra, LU/QR/Eigen, covariance/correlation, sanitation.                      | Connects graph topology to numeric workflows without losing zero/`+Inf`/metric semantics.                      | Spectral analysis, graph features, routing matrices, risk/ML preprocessing.  |
+| `tsp`       | Tour optimization toolkit: practical approximation/local search/exact small-instance strategies.                                                    | Bridges exactness and practicality for route planning.                                                         | Delivery tours, inspection routes, metric routing experiments.               |
+| `builder`   | Deterministic graph and data generators.                                                                                                            | Produces reproducible examples, tests, and benchmarks.                                                         | Golden tests, performance fixtures, tutorials.                               |
 
 ---
 
 ## Current contract documentation
 
-| Layer                | File                                                       | Purpose                                                                                     |
-|:---------------------|:-----------------------------------------------------------|:--------------------------------------------------------------------------------------------|
-| Tutorial             | [`docs/TUTORIAL.md`](docs/TUTORIAL.md)                     | First guided entry into graph/matrix concepts, package roles, examples, and best practices. |
-| Core spec            | [`docs/CORE.md`](docs/CORE.md)                             | Graph model, capability law, deterministic enumeration, locks, topology invariants.         |
-| BFS spec             | [`docs/BFS.md`](docs/BFS.md)                               | Hop-distance math, BFS result semantics, partial results, weak components.                  |
-| DFS spec             | [`docs/DFS.md`](docs/DFS.md)                               | Post-order semantics, cycle witnesses, DFS forest, topological sort.                        |
-| Dijkstra spec        | [`docs/DIJKSTRA.md`](docs/DIJKSTRA.md)                     | Weighted routing, `+Inf`, strict improvement, path tracking, wall/cutoff policy.            |
-| MST spec             | [`docs/PRIM_&_KRUSKAL.md`](docs/PRIM_%26_KRUSKAL.md)       | Cut/cycle properties, Kruskal/Prim, deterministic MST construction.                         |
-| Flow spec            | [`docs/FLOW.md`](docs/FLOW.md)                             | Max-flow/min-cut math, residual networks, Ford-Fulkerson, Edmonds-Karp, Dinic.              |
-| DTW spec             | [`docs/DTW.md`](docs/DTW.md)                               | Dynamic programming alignment, windows, penalties, memory modes, path recovery.             |
-| Grid spec            | [`docs/GRID_GRAPH.md`](docs/GRID_GRAPH.md)                 | Grid/lattice graph modeling and pathfinding-oriented construction.                          |
-| Matrix spec          | [`docs/MATRICES.md`](docs/MATRICES.md)                     | Dense matrix model, graph adapters, metric closure, zero-shape/statistics/numeric policy.   |
-| TSP spec             | [`docs/TRAVELING_SALESMAN.md`](docs/TRAVELING_SALESMAN.md) | Tour optimization, exact vs approximate methods, metric assumptions.                        |
-| Engineering standard | [`docs/lvlath_UES.md`](docs/lvlath_UES.md)                 | Repository engineering standard and quality expectations.                                   |
-| FAQ                  | [`docs/FAQ_&_TIPS.md`](docs/FAQ_%26_TIPS.md)               | Troubleshooting, common pitfalls, usage tips.                                               |
-| Contribution guide   | [`CONTRIBUTING.md`](CONTRIBUTING.md)                       | Branching, tests, linting, coverage, PR rules.                                              |
+| Layer                | File                                         | Purpose                                                                                     |
+|:---------------------|:---------------------------------------------|:--------------------------------------------------------------------------------------------|
+| Tutorial             | [`docs/TUTORIAL.md`](docs/TUTORIAL.md)       | First guided entry into graph/matrix concepts, package roles, examples, and best practices. |
+| Core spec            | [`docs/CORE.md`](docs/CORE.md)               | Graph model, capability law, deterministic enumeration, locks, topology invariants.         |
+| BFS spec             | [`docs/BFS.md`](docs/BFS.md)                 | Hop-distance math, BFS result semantics, partial results, weak components.                  |
+| DFS spec             | [`docs/DFS.md`](docs/DFS.md)                 | Post-order semantics, cycle witnesses, DFS forest, topological sort.                        |
+| Dijkstra spec        | [`docs/DIJKSTRA.md`](docs/DIJKSTRA.md)       | Weighted routing, `+Inf`, strict improvement, path tracking, wall/cutoff policy.            |
+| MST spec             | [`docs/MST.md`](docs/MST.md)    | Cut/cycle properties, Kruskal/Prim, deterministic MST construction.                         |
+| Flow spec            | [`docs/FLOW.md`](docs/FLOW.md)               | Max-flow/min-cut math, residual networks, Ford-Fulkerson, Edmonds-Karp, Dinic.              |
+| DTW spec             | [`docs/DTW.md`](docs/DTW.md)                 | Dynamic programming alignment, windows, penalties, memory modes, path recovery.             |
+| Grid spec            | [`docs/GRID_GRAPH.md`](docs/GRID_GRAPH.md)   | Grid/lattice graph modeling and pathfinding-oriented construction.                          |
+| Matrix spec          | [`docs/MATRICES.md`](docs/MATRICES.md)       | Dense matrix model, graph adapters, metric closure, zero-shape/statistics/numeric policy.   |
+| TSP spec             | [`docs/TSP.md`](docs/TSP.md)  | Tour optimization, exact vs approximate methods, metric assumptions.                        |
+| Engineering standard | [`docs/lvlath_UES.md`](docs/lvlath_UES.md)   | Repository engineering standard and quality expectations.                                   |
+| FAQ                  | [`docs/FAQ_&_TIPS.md`](docs/FAQ_%26_TIPS.md) | Troubleshooting, common pitfalls, usage tips.                                               |
+| Contribution guide   | [`CONTRIBUTING.md`](CONTRIBUTING.md)         | Branching, tests, linting, coverage, PR rules.                                              |
 
 ---
 
@@ -267,7 +278,7 @@ This is the first visual example: a graph is not only “nodes and edges”; it 
 
 The old `lvlath` letter sketch is preserved, but the implementation style is updated to current error-returning constructors and deterministic package contracts.
 
-```text
+~~~text
 Six disconnected glyph components:
 
    l₁            v           l₂            a               t             h
@@ -279,9 +290,9 @@ Six disconnected glyph components:
 
 Expected component count: 6
 Expected cycle count:     1   // the internal cycle in the letter “a”
-```
+~~~
 
-```go
+~~~go
 package main
 
 import (
@@ -399,7 +410,7 @@ func main() {
 		fmt.Printf("degree[%s]=%.0f\n", id, degree[am.VertexIndex[id]])
 	}
 }
-```
+~~~
 
 What this demonstrates:
 
@@ -414,7 +425,7 @@ What this demonstrates:
 
 The classic weighted Hexagram example is the compact demonstration of `lvlath` as a multi-package toolkit: BFS-style shells on an unweighted view, Dijkstra weighted routing, MST backbone extraction, and TSP preparation through a metric matrix.
 
-```text
+~~~text
                                [A]
                               / | \
                   (C-H:9)   3/  |7 \4   (D-F:7)
@@ -432,11 +443,11 @@ The classic weighted Hexagram example is the compact demonstration of `lvlath` a
                   (J-H:7)   2\  |  /3   (K-F:8)
                               \ | /
                                [M]
-```
+~~~
 
 Use this kind of graph when you want one fixture that is complex enough for real algorithms but still small enough to reason about visually.
 
-```go
+~~~go
 package main
 
 import (
@@ -448,7 +459,7 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dijkstra"
 	"github.com/katalvlaran/lvlath/matrix"
-	"github.com/katalvlaran/lvlath/prim_kruskal"
+	"github.com/katalvlaran/lvlath/mst"
 )
 
 func main() {
@@ -508,12 +519,12 @@ func main() {
 	fmt.Println("I-to-L-path:", pathL)
 
 	// MST gives the cheapest connected backbone.
-	_, mstWeight, err := prim_kruskal.Kruskal(g)
+	mstResult, err := mst.Kruskal(g)
 	if err != nil {
 		fmt.Println(err)
 		return
 	}
-	fmt.Println("mst-weight:", mstWeight)
+	fmt.Println("mst-weight:", mstResult.TotalWeight)
 
 	// Matrix metric closure prepares an all-pairs distance surface for routing or TSP.
 	opts, err := matrix.NewMatrixOptions(matrix.WithUndirected(), matrix.WithWeighted())
@@ -529,7 +540,7 @@ func main() {
 	_ = closure
 	_ = context.Background()
 }
-```
+~~~
 
 ---
 
@@ -537,7 +548,7 @@ func main() {
 
 This is the practical infrastructure example: a directed weighted network where edge weights can represent latency/cost for routing, and another capacity graph can represent throughput for flow analysis.
 
-```text
+~~~text
 Weighted service graph for routing and matrix analysis:
 
  [edge] ────2────▶ [auth] ──1──▶ [profile] ──2──▶ [db]
@@ -555,9 +566,9 @@ Key checks:
   - Matrix: preserve zero-weight db -> backup.
   - Metric closure: publish all-pairs shortest distances.
   - Flow: compute capacity from ingress to storage tier on a related network.
-```
+~~~
 
-```go
+~~~go
 package main
 
 import (
@@ -655,7 +666,7 @@ func main() {
 	fmt.Println("max-flow-ingress-storage:", maxFlow)
 	fmt.Println("residual-vertices:", residual.VertexCount())
 }
-```
+~~~
 
 ---
 
@@ -663,58 +674,82 @@ func main() {
 
 ### Determinism
 
-Determinism is not only “sort the output.” It is a cross-package rule:
+Determinism is not “sort something at the end.” It is a cross-package contract.
 
-* `core` owns the graph-surface order;
-* BFS preserves neighbor order and defines visit as dequeue;
-* DFS defines returned `Order` as finish order;
-* Dijkstra adds heap tie-breaking and strict-improvement predecessor updates;
-* matrix kernels use fixed loop orders and deterministic graph adapter publication;
-* flow algorithms publish residual graphs after deterministic build policies.
+* `core` owns deterministic graph surfaces: vertices, edges, neighbors.
+* `bfs` preserves neighbor order and defines observable traversal state through result fields.
+* `dfs` defines returned `Order` as finish order and publishes deterministic cycle witnesses.
+* `dijkstra` uses deterministic frontier behavior and strict-improvement updates so equal-cost alternatives do not randomly overwrite witnesses.
+* `mst` snapshots graph data, Kruskal stable-sorts finite edges, and Prim orders heap candidates by finite weight plus edge identity.
+* `flow` builds and consumes residual state through deterministic algorithm policy.
+* `matrix` uses fixed row-major loops and deterministic graph-adapter publication.
+* `dtw` runs row-major DP and backtracks ties as diagonal, then vertical/up, then horizontal/left.
+* `tsp` uses matrix order, deterministic solver tie-breaks, explicit seed-governed local search, and result fields that report exactness, timeout, and approximation status.
+* `builder` and `gridgraph` produce reproducible input topologies instead of hiding randomness inside examples.
+
+The purpose is practical: stable examples, golden tests, CI logs, witness paths, component roots, DP paths, MST edges, tours, and failure classes.
+
 
 ### Error handling
 
 Prefer:
 
-```go
+~~~go
 if errors.Is(err, dijkstra.ErrTargetNotFound) {
 	// unknown target: not the same as known but unreachable
 }
-```
+~~~
 
 Avoid:
 
-```go
+~~~go
 if strings.Contains(err.Error(), "target") {
 	// brittle and not part of the public contract
 }
-```
+~~~
 
 ### Weighted vs unweighted algorithms
 
-Use BFS for hop distance. Use Dijkstra for non-negative weighted cost. Use matrix metric closure for all-pairs distance. Use flow for capacity throughput. These are different mathematical objectives.
+Do not choose by package popularity. Choose by mathematical objective.
 
 ```text
-Question                             Correct primitive
-────────────────────────────────────────────────────────────
-Fewest edges?                        bfs
-Fewest weighted cost?                dijkstra
-All-pairs weighted distances?        matrix.BuildMetricClosure
-Maximum throughput under capacity?   flow.Dinic / EdmondsKarp
-Cheapest connected backbone?         prim_kruskal
-Shortest tour visiting all nodes?    tsp
+Question                                      Correct primitive
+────────────────────────────────────────────────────────────────────────────
+Fewest edges / hop layers?                    bfs
+Deep traversal / finish order / cycles?       dfs
+Cheapest non-negative route from one source?  dijkstra
+Cheapest acyclic connected backbone?          mst
+Maximum feasible throughput?                  flow
+All-pairs shortest distances?                 matrix.BuildMetricClosure
+Dense topology/statistics/spectral features?  matrix
+Temporal alignment with phase drift?          dtw
+Closed tour through every vertex?             tsp
+Generated lattice topology?                   gridgraph
+Repeatable benchmark/test fixtures?           builder
 ```
+
+Important distinctions:
+
+* BFS minimizes edge count, not cost.
+* Dijkstra minimizes non-negative path cost, not throughput.
+* MST minimizes selected backbone cost, not route distance.
+* Flow maximizes capacity, not shortest path.
+* Metric closure creates a distance artifact, not original graph topology.
+* DTW aligns time-warped sequences, not graph routes.
+* TSP solves a closed tour over a complete finite cost model, not sparse reachability.
+
+---
 
 ### Matrix semantics
 
 `matrix` intentionally does not pretend that every dense numeric array means the same thing.
 
-```text
+~~~text
 normal adjacency:       0 can mean “no edge”
 zero-preserving mode:   finite 0 can mean “real zero-cost edge”; +Inf means absence
 metric closure:         cell means shortest-path distance, not an original edge
 incidence matrix:       columns are edge identities, not vertex-pair weights
-```
+~~~
 
 ### Concurrency
 
@@ -726,32 +761,52 @@ incidence matrix:       columns are edge identities, not vertex-pair weights
 
 ### By question type
 
-| You ask                                         | Use                                 | Why                                                       |
-|:------------------------------------------------|:------------------------------------|:----------------------------------------------------------|
-| “Which services are within 2 hops?”             | `bfs.BFS(..., bfs.WithMaxDepth(2))` | Hop layers are BFS territory.                             |
-| “Which disconnected islands exist?”             | `bfs.Components`                    | Weak component discovery is explicit and deterministic.   |
-| “What execution order respects dependencies?”   | `dfs.TopologicalSort`               | DAG ordering is a DFS-style finish-order problem.         |
-| “Where is the dependency loop?”                 | `dfs.DetectCycles`                  | Returns deterministic cycle witnesses.                    |
-| “What is the cheapest route by latency/cost?”   | `dijkstra.Dijkstra`                 | Weighted non-negative single-source routing.              |
-| “What if some links are operationally blocked?” | `dijkstra.WithInfEdgeThreshold`     | Runtime policy without topology mutation.                 |
-| “What is the cheapest connected backbone?”      | `prim_kruskal.Kruskal` or Prim      | MST solves connected backbone minimization.               |
-| “How much traffic can this network carry?”      | `flow.Dinic` / `flow.EdmondsKarp`   | Flow solves capacity feasibility and bottlenecks.         |
-| “How do I compare two jittery signals?”         | `dtw.DTW`                           | DTW aligns sequences with non-linear timing.              |
-| “How do I turn topology into features?”         | `matrix`                            | Adjacency, incidence, degree, metric closure, statistics. |
-| “How do I route a full inspection tour?”        | `tsp`                               | TSP solves tour construction and refinement.              |
-| “How do I build reproducible tests?”            | `builder` / `gridgraph`             | Deterministic fixtures and generated topology.            |
+| You ask                                                                       | Use                                                               | Why                                                                       |
+|:------------------------------------------------------------------------------|:------------------------------------------------------------------|:--------------------------------------------------------------------------|
+| “Which vertices are within `k` hops?”                                         | `bfs.BFS` with depth policy                                       | Hop layers are unweighted traversal.                                      |
+| “Which weak islands exist?”                                                   | `bfs.Components`                                                  | Component membership is not a route-cost problem.                         |
+| “What dependency order is valid?”                                             | `dfs.TopologicalSort`                                             | DAG ordering is finish-order semantics.                                   |
+| “Where is the cycle?”                                                         | `dfs.DetectCycles`                                                | You need a deterministic witness, not all simple cycles.                  |
+| “What is the cheapest route from this source?”                                | `dijkstra.Dijkstra`                                               | Non-negative weighted shortest path.                                      |
+| “Which targets are outside a runtime budget?”                                 | `dijkstra.WithMaxDistance`                                        | Cutoff policy without deleting topology.                                  |
+| “Which links form the cheapest connected backbone?”                           | `mst.MinimumSpanningTree`, `mst.Kruskal`, `mst.Prim`              | MST/MSF solves acyclic connectivity, not routing.                         |
+| “What if the graph is disconnected but I still need per-component backbones?” | `mst.WithForest`                                                  | Forest mode is explicit, not a hidden fallback.                           |
+| “What is the max source-to-sink capacity?”                                    | `flow.Dinic` or `flow.EdmondsKarp`                                | Flow algorithms reason over residual capacity.                            |
+| “How do I compare two jittery sensor signatures?”                             | `dtw.Align`                                                       | Scalar DTW aligns timing drift.                                           |
+| “How do I align model-provided frame costs?”                                  | `dtw.AlignCostMatrix`                                             | Caller owns the local-cost surface.                                       |
+| “How do I align multivariate sequences?”                                      | `dtw.AlignMatrix`                                                 | Rows are time steps, columns are features.                                |
+| “How do I compute topology features?”                                         | `matrix.NewAdjacencyMatrix`, `NewIncidenceMatrix`, `DegreeVector` | Matrix artifacts preserve topology policy.                                |
+| “How do I compute all-pairs route distances?”                                 | `matrix.BuildMetricClosure`                                       | Floyd-Warshall distance artifact with `+Inf` semantics.                   |
+| “How do I solve a complete inspection/delivery tour?”                         | `tsp.SolveMatrix`                                                 | TSP kernels consume matrix cost models.                                   |
+| “How do I solve TSP from graph topology?”                                     | `tsp.SolveGraph`                                                  | Graph is adapted at the facade boundary, then solved as a matrix problem. |
+| “How do I get exact TSP for a small instance?”                                | `tsp.ExactHeldKarp` / `tsp.BranchAndBound` policy                 | Exactness is explicit and guarded.                                        |
+| “How do I get a metric symmetric approximation?”                              | `tsp.Christofides` + `tsp.BlossomMatch`                           | The `1.5` ratio requires exact matching and metric assumptions.           |
+| “How do I build repeatable graphs?”                                           | `builder` / `gridgraph`                                           | Generated fixtures should be deterministic.                               |
 
 ### By failure mode you need to avoid
 
-| Risk                                             | lvlath answer                                        |
-|:-------------------------------------------------|:-----------------------------------------------------|
-| Unstable traversal order                         | Deterministic graph surface + package tie-break law. |
-| Confusing missing target with unreachable target | Dijkstra target-domain state separation.             |
-| Losing partial work on cancellation              | BFS partial result; DFS safe partial metadata.       |
-| Treating metric distances as original edges      | Matrix metric-closure export refusal.                |
-| Overwriting equal-cost witnesses                 | Dijkstra strict-improvement predecessor law.         |
-| Using dense adjacency as an edge ledger          | Incidence matrix for edge identity.                  |
-| Random benchmark fixtures                        | `builder` deterministic generators.                  |
+| Risk                                                 | lvlath answer                                                                                         |
+|:-----------------------------------------------------|:------------------------------------------------------------------------------------------------------|
+| Map-order flakiness in examples/tests                | `core` deterministic surfaces and package tie-break laws.                                             |
+| Invalid topology reaches algorithms                  | Graph capability validation and package-level input validators.                                       |
+| BFS used for weighted routing                        | Separate BFS hop semantics from Dijkstra weighted semantics.                                          |
+| DFS order misread as discovery order                 | `DFSResult.Order` is documented finish order.                                                         |
+| Unknown target treated as unreachable                | Dijkstra keeps target-domain errors separate from `+Inf` distances.                                   |
+| Runtime route policy deletes graph structure         | Dijkstra thresholds/cutoffs model the run without mutating topology.                                  |
+| Disconnected MST silently becomes forest             | `mst.WithForest` is explicit; strict MST returns disconnection.                                       |
+| Non-finite MST weights corrupt sorting/heap behavior | MST rejects `NaN`, `+Inf`, `-Inf` before kernel execution.                                            |
+| Flow output hides residual state                     | Flow result includes residual-network semantics.                                                      |
+| DTW path requested from rolling memory               | DTW memory/path policy is explicit; path needs full accumulated storage.                              |
+| DTW over-warps a signal                              | Use window and slope penalty deliberately.                                                            |
+| Feature scale dominates multivariate DTW             | Normalize before `dtw.AlignMatrix`; it uses squared L2 row cost.                                      |
+| Zero-weight edge disappears in matrix adjacency      | Use zero-preserving matrix policy; absence becomes `+Inf`.                                            |
+| Metric closure exported as fake topology             | Matrix refuses metric-closure export as ordinary graph topology.                                      |
+| TSP receives sparse unresolved `+Inf` matrix         | Use metric closure only when indirect travel is domain-valid; final kernels need finite completeness. |
+| Christofides ratio claimed with greedy matching      | `tsp.BlossomMatch` is required for the formal `1.5` ratio.                                            |
+| Branch-and-Bound timeout is mistaken for optimality  | Inspect `TSPResult.TimedOut` and `TSPResult.Optimal`.                                                 |
+| Local-search TSP treated as proof                    | 2-opt/3-opt improve tours; they do not certify global optimum.                                        |
+| Randomized tests/benchmarks drift                    | Use fixed seeds or deterministic `builder` fixtures.                                                  |
+| Docs describe fictional APIs                         | `{package}/doc.go`, `docs/{PACKAGE}.md`, examples, and tests must stay synchronized.                  |
 
 ---
 

@@ -1259,6 +1259,8 @@ func main() {
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MST_VLSI_global_routing_baseline-blue?logo=go)](https://go.dev/play/p/03e_35hMHgC)
+
 ### 6.8.2. Space-mesh minimum spanning forest
 
 The graph models disconnected orbital communication groups. Strict MST would be false; explicit forest mode publishes one minimum tree per reachable mesh.
@@ -1317,6 +1319,8 @@ func main() {
     // algorithm=prim mode=forest satellites=11 links=8 components=3 roots=[Arctic-1 Equator-1 Pacific-1] total=38
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MST_Space_mesh_minimum_spanning_forest-blue?logo=go)](https://go.dev/play/p/zgSGcKIVerE)
 
 ### 6.8.3. Embedding clustering by cutting MST bridges
 
@@ -1387,6 +1391,8 @@ func main() {
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MST_Embedding_clustering_by_cutting_MST_bridges-blue?logo=go)](https://go.dev/play/p/df1IH3FAYFl)
+
 ### 6.8.4. Smart-grid sentinel classification
 
 The graph mixes undirected physical power links with a directed telemetry/control relation. MST rejects the directed edge-level override before tree construction.
@@ -1431,6 +1437,9 @@ func main() {
     // invalid=true directed_edge=true
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-MST_Smart_grid_sentinel_classification-blue?logo=go)](https://go.dev/play/p/N0nkAyGUd17)
+
 
 ---
 

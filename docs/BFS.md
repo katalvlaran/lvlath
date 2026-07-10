@@ -583,6 +583,7 @@ func main() {
     }
 }
 ```
+[![Go Playground](https://img.shields.io/badge/Go_Playground-BFS-blue?logo=go)](https://go.dev/play/p/C8qwk3-CVHW)
 
 **What this example teaches:**
 - deterministic traversal from `gateway`,

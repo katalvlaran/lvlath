@@ -47,14 +47,15 @@ For formal package contracts, read `{package}/doc.go`. For theory, diagrams, and
 6. [Matrix FAQ](#6-matrix-faq)
 7. [Flow FAQ](#7-flow-faq)
 8. [DTW FAQ](#8-dtw-faq)
-9. [MST and TSP FAQ](#9-mst-and-tsp-faq)
-10. [Builder and gridgraph tips](#10-builder-and-gridgraph-tips)
-11. [Errors and diagnostics](#11-errors-and-diagnostics)
-12. [Determinism and concurrency](#12-determinism-and-concurrency)
-13. [Testing tips](#13-testing-tips)
-14. [Benchmark tips](#14-benchmark-tips)
-15. [Documentation tips](#15-documentation-tips)
-16. [Quick recipes](#16-quick-recipes)
+9. [MST FAQ](#9-mst-faq)
+10. [TSP FAQ](#10-tsp-faq)
+11. [Builder and gridgraph tips](#10-builder-and-gridgraph-tips)
+12. [Errors and diagnostics](#11-errors-and-diagnostics)
+13. [Determinism and concurrency](#12-determinism-and-concurrency)
+14. [Testing tips](#13-testing-tips)
+15. [Benchmark tips](#14-benchmark-tips)
+16. [Documentation tips](#15-documentation-tips)
+17. [Quick recipes](#16-quick-recipes)
 
 ---
 
@@ -72,7 +73,7 @@ Start with the question, not the algorithm name.
 | “Does this graph contain a cycle?” | `dfs.DetectCycles` | Returns deterministic witness cycles. |
 | “What order can I execute a DAG?” | `dfs.TopologicalSort` | Topological order is a directed acyclic graph contract. |
 | “What is the cheapest route by weight?” | `dijkstra` | Dijkstra minimizes non-negative total cost. |
-| “What is the cheapest connected backbone?” | `prim_kruskal` | MST solves minimum connected spanning structure. |
+| “What is the cheapest connected backbone?” | `mst` | MST solves minimum connected spanning structure. |
 | “What is the maximum throughput?” | `flow` | Flow solves capacity-constrained source-to-sink movement. |
 | “How do I turn graph topology into numeric features?” | `matrix` | Adjacency, incidence, degree vector, metric closure, algebra. |
 | “How do I model a grid map?” | `gridgraph` | Generates lattice topology instead of manual wiring. |
@@ -509,83 +510,533 @@ Residual state is part of the algorithm result, not just debug output.
 
 ## 8. DTW FAQ
 
-### Q8.1. Why is DTW slow on long sequences?
+### Q8.1. Which DTW facade should I use: `Align`, `AlignCostMatrix`, or `AlignMatrix`?
 
-Classic Dynamic Time Warping is dynamic programming over an `n × m` grid.
+Use the facade that matches the shape of your domain data.
+
+| Input shape                   | Use                   | Why                                                                          |
+| :---------------------------- | :-------------------- | :--------------------------------------------------------------------------- |
+| `[]float64` vs `[]float64`    | `dtw.Align`           | Scalar signal alignment: price impulse, temperature, amplitude, trend score. |
+| precomputed local-cost matrix | `dtw.AlignCostMatrix` | Another model already computed frame-to-frame costs.                         |
+| time-step × feature matrices  | `dtw.AlignMatrix`     | Multivariate alignment: OHLC candles, sensor vectors, gesture features.      |
+| old tuple-style code          | `dtw.DTW`             | Compatibility wrapper. New code should prefer canonical `Result` facades.    |
+
+`AlignMatrix` uses squared L2 row distance:
+
+$$ c(i,j)=|X_i-Y_j|_2^2 $$
+
+That is powerful but also dangerous if feature scales are not comparable. Normalize or standardize outside DTW when one feature would otherwise dominate the local-cost surface.
+
+### Q8.2. Why is DTW slow on long sequences?
+
+Classic DTW is dynamic programming over an `n × m` grid.
 
 ```text
-Time:  O(n*m)
-Space: O(n*m) for full matrix path recovery
+Scalar Align:
+  Time:  O(n*m)
+  Memory distance-only: O(m) rolling rows
+  Memory with path/accumulated matrix: O(n*m)
+
+AlignMatrix:
+  Local-cost construction: O(n*m*d)
+  DP recurrence:           O(n*m)
 ```
 
-Use a window constraint when domain knowledge says alignment should stay near the diagonal. Use a lower-memory mode when you need only distance and not the full path.
+A window can restrict admissible cells, but do not oversell it as a universal complexity fix. In the current contract, the rectangular DP structure remains `O(n*m)`; the window controls valid states and prevents unrealistic warping.
 
-### Q8.2. Why can’t I recover a path in rolling-memory mode?
+Use a smaller window when domain knowledge says the alignment should stay near the diagonal. Use distance-only mode when you do not need a path or diagnostic matrices.
 
-Path recovery needs enough history to backtrack. Rolling-row modes intentionally discard most of the matrix to save memory. Use the full matrix mode when you need the warping path.
+### Q8.3. Why does `WithWindow(0)` not mean “no window”?
 
-### Q8.3. Why did DTW return infinite or impossible alignment?
+Because the window has three distinct meanings:
+
+```text
+WithWindow(-1):
+  no Sakoe-Chiba constraint.
+
+WithWindow(0):
+  strict diagonal alignment only.
+  No temporal warping.
+
+WithWindow(w), w > 0:
+  allow cells where |i-j| <= w.
+```
+
+This is one of the easiest DTW mistakes. `0` is not “unlimited”; it is “no warping”.
+
+### Q8.4. Why can’t I recover a path in rolling-row mode?
+
+Path reconstruction needs predecessor history. Rolling rows intentionally discard most accumulated state to reduce memory.
+
+Use:
+
+```go
+res, err := dtw.Align(
+	a,
+	b,
+	dtw.WithReturnPath(true),
+	dtw.WithMemoryMode(dtw.FullMatrix),
+)
+```
+
+Rules of thumb:
+
+* distance-only scan → rolling rows;
+* explain one alignment → `FullMatrix` + `WithReturnPath(true)`;
+* debug DP behavior → add `WithReturnAccumulated(true)`;
+* inspect feature/cost scaling → add `WithReturnLocalCost(true)`.
+
+A path is one deterministic optimal path, not all optimal paths. Backtracking tie-break is diagonal first, then vertical/up, then horizontal/left.
+
+### Q8.5. Why did DTW return `Reachable=false` or `+Inf` distance?
+
+`+Inf` in DTW is not a dirty local cost. It means the final cell is unreachable under the active policy.
 
 Common causes:
 
 * window too narrow;
-* sequences too different under the chosen local cost;
-* invalid numeric input;
-* penalty/window combination excludes all valid routes.
+* strict diagonal mode for unequal or phase-shifted sequences;
+* local-cost matrix has no admissible route;
+* path requested but policy makes the endpoint unreachable;
+* slope/window combination blocks all practical paths.
 
-A safe starting point is to first run without a tight window, verify expected behavior, then tighten the window.
+A good debugging progression:
 
-### Q8.4. Should I normalize time-series data before DTW?
+```text
+1. Run with WithWindow(-1).
+2. Verify the distance is finite.
+3. Enable WithReturnPath(true) only when you need explanation.
+4. Tighten the window gradually.
+5. Add WithReturnAccumulated(true) if you need to see where reachability breaks.
+```
 
-Usually yes. DTW aligns shapes in time, but raw amplitude scale still matters. Normalize or standardize when comparing sensors or signals with different units or magnitudes.
+### Q8.6. Why does DTW reject `NaN`, `Inf`, or negative costs?
+
+DTW separates local costs from accumulated reachability states.
+
+Valid local costs:
+
+```text
+finite
+non-negative
+not NaN
+not +Inf
+not -Inf
+```
+
+`+Inf` belongs to accumulated DP states as “unreachable,” not to caller-provided local costs. `AlignCostMatrix` therefore rejects `NaN`, infinities, and negative costs. `AlignMatrix` validates finite matrix inputs. `Align` validates scalar inputs by default.
+
+### Q8.7. Should I normalize time-series data before DTW?
+
+Usually yes.
+
+DTW aligns timing; it does not magically fix feature scale. For scalar series, normalize when amplitude scale is not the signal you want to measure. For `AlignMatrix`, normalize columns/features before alignment when dimensions have different units.
+
+Examples:
+
+```text
+Good DTW inputs:
+  normalized amplitude contours
+  standardized sensor features
+  log-cost surfaces from probabilistic models
+  domain-weighted local-cost matrices
+
+Risky DTW inputs:
+  raw heterogeneous features
+  probabilities treated as distances
+  one huge-scale feature mixed with small-scale features
+```
+
+If a classifier gives probabilities, consider converting them to costs intentionally, for example with `-log(p)`, instead of passing probabilities directly as distances.
+
+### Q8.8. What is the correct way to read `Result`?
+
+Think of `dtw.Result` as an alignment artifact, not just a number.
+
+Important fields and meaning:
+
+```text
+Distance:
+  accumulated DTW cost.
+
+Reachable:
+  whether the final cell can be reached under active policy.
+
+PathTracked:
+  whether path tracking was requested.
+
+Path:
+  deterministic path only when tracking was requested and result is reachable.
+
+Window / SlopePenalty / MemoryMode:
+  policy that actually ran.
+
+Accumulated:
+  optional DP matrix artifact.
+
+LocalCost:
+  optional local-cost matrix artifact.
+```
+
+Use `PathOrError` when you need to distinguish nil result, unreachable result, and path-not-tracked state.
 
 ---
 
-## 9. MST and TSP FAQ
+## 9. MST FAQ
 
 ### Q9.1. Why does MST reject my graph?
 
-MST requires an undirected, connected, weighted graph under the package’s contract. Common problems:
+MST is defined for weighted, undirected graph connectivity. The package intentionally rejects graph models that would change the mathematical problem.
 
-* graph is directed;
+Common causes:
+
+* nil graph input;
 * graph is unweighted;
-* graph is disconnected;
-* loops or mixed edges are present in a way the MST package refuses;
-* weights are invalid.
+* graph is directed;
+* graph has directed edge-level overrides;
+* graph is empty;
+* graph is disconnected in strict tree mode;
+* an edge weight is `NaN`, `+Inf`, or `-Inf`;
+* Prim was requested without a required root in strict mode;
+* Prim root does not exist.
 
-MST is about connecting all vertices with minimum total weight. It is not a shortest-path algorithm.
+MST is not a shortest-path algorithm. It does not answer “how do I travel from A to B?” It answers:
 
-### Q9.2. Kruskal or Prim?
+> Which finite-cost acyclic backbone connects all vertices with minimum total selected edge weight?
 
-Use either when the package supports your graph shape, but understand the pattern:
+### Q9.2. Why does MST require a weighted undirected graph?
+
+Because MST optimizes a finite edge-cost backbone over undirected connectivity.
+
+```text
+Required:
+  weighted graph policy
+  undirected graph policy
+  finite edge weights
+
+Rejected:
+  unweighted graph
+  directed graph
+  directed edge-level overrides
+  NaN / +Inf / -Inf weights
+```
+
+Negative finite weights are valid for MST. Unlike Dijkstra, MST does not require non-negative weights. It only needs a finite ordering of candidate edges.
+
+Self-loops are ignored because they cannot connect two components. Parallel edges are allowed because the lighter useful candidate may be selected.
+
+### Q9.3. Why does strict MST fail on disconnected graphs instead of returning a forest?
+
+Because strict MST and minimum spanning forest are different publication contracts.
+
+```text
+Strict MST:
+  expects one connected component.
+  selected edges = |V| - 1.
+  disconnected graph => ErrDisconnected.
+
+Explicit MSF:
+  enabled with WithForest().
+  computes one MST per connected component.
+  selected edges = |V| - componentCount.
+```
+
+The package must not silently downgrade strict tree semantics into forest semantics. If you want a forest, request it explicitly.
+
+This matters in production: a disconnected network is often an incident, not a successful smaller tree.
+
+### Q9.4. Kruskal or Prim?
+
+Use either under the shared MST contract, but choose based on how you want to reason about the graph.
 
 ```text
 Kruskal:
-  global greedy over sorted edges + union-find.
-  Natural for sparse edge-list thinking.
+  Think globally.
+  Sort all finite candidate edges by weight.
+  Add the next safe edge if it joins two different components.
+
+  Best mental model:
+    "Build the cheapest backbone from a sorted edge ledger."
 
 Prim:
-  grows one tree from a root using cheapest frontier edges.
-  Natural for connected dense/frontier thinking.
+  Think from a root/frontier.
+  Start at one vertex.
+  Repeatedly take the cheapest edge leaving the grown tree.
+
+  Best mental model:
+    "Grow one connected service area from a chosen root."
 ```
 
-Both rely on the cut property and should be deterministic when tie-breaks are fixed.
+Current complexity contract:
 
-### Q9.3. Why does TSP need a complete distance matrix?
+```text
+Kruskal:
+  O(E log E + E*α(V)) time
+  O(E + V) space
 
-TSP asks for a tour that can move between every pair of cities. If your original graph is sparse, first convert it into an all-pairs distance matrix through metric closure, then run a TSP algorithm on that distance matrix if the package’s assumptions are satisfied.
+Prim:
+  O(E log E) time
+  O(E + V) space
+```
 
-### Q9.4. Why do approximation guarantees require metric assumptions?
+Do not document Prim as `O(E log V)` unless the implementation changes to a vertex-key decrease-key policy.
 
-Some TSP approximations rely on triangle inequality. If your distances do not satisfy metric properties, the algorithm may still produce a tour, but the theoretical guarantee may not apply.
+### Q9.5. What does `MSTResult` actually guarantee?
 
-Do not document or claim a guarantee outside its assumptions.
+`MSTResult` is the canonical result artifact.
+
+It tells you:
+
+```text
+Algorithm:
+  Kruskal or Prim.
+
+Mode:
+  strict tree or explicit forest.
+
+Root:
+  meaningful for Prim; deterministic component root in forest contexts.
+
+Edges:
+  detached selected edge values.
+
+TotalWeight:
+  sum of selected finite edge weights.
+
+VertexCount:
+  number of vertices in the validated snapshot.
+
+ComponentCount:
+  1 for strict MST success, >1 for explicit forest.
+
+ComponentRoots:
+  deterministic public roots for components.
+```
+
+The result does not retain live `*core.Edge` pointers into the source graph. Mutating the graph after the call must not mutate the published result.
+
+### Q9.6. Why does MST snapshot the graph?
+
+The package snapshots vertices and edges before kernel execution so the result can publish detached selected edges and stable metadata. This protects result ownership, but it is not a transaction against concurrent graph writers.
+
+Do not mutate the graph while snapshot construction is happening.
+
+### Q9.7. Why are `NaN` and infinities rejected instead of treated as walls?
+
+Because MST needs a total finite ordering of candidate edges. Infinities are not MST wall semantics in this package.
+
+Use another package or preprocess your graph if you need wall/unreachable semantics. For MST:
+
+```text
+finite negative weight: accepted
+finite zero weight:     accepted
+finite positive weight: accepted
+NaN:                    rejected
++Inf / -Inf:            rejected
+```
 
 ---
 
-## 10. Builder and gridgraph tips
+## 10. TSP FAQ
 
-### Q10.1. When should I use `builder`?
+### Q10.1. Why does TSP reject my matrix?
+
+Final TSP kernels require a complete, finite, square distance model.
+
+Common validation failures:
+
+* matrix is nil;
+* matrix is not square;
+* `n < 2`;
+* diagonal is not approximately zero;
+* a finite weight is negative;
+* a cell is `NaN`;
+* a cell is `-Inf`;
+* a `+Inf` missing edge remains after optional metric closure;
+* selected algorithm requires symmetry but the matrix is asymmetric;
+* `StartVertex` is out of range;
+* IDs do not match matrix size.
+
+TSP is matrix-backed in the current contract. Graph input is adapted at the facade boundary; solver kernels operate on matrix indices.
+
+### Q10.2. Should I use `SolveMatrix` or `SolveGraph`?
+
+Use `SolveMatrix` when your true domain is already a distance/cost matrix.
+
+Use `SolveGraph` when your source object is a `core.Graph` and you want the package to adapt it into the matrix-solving boundary.
+
+```text
+SolveMatrix:
+  canonical matrix facade.
+  Best for routing matrices, metric closure output, distance tables,
+  warehouse/city/inspection cost surfaces.
+
+SolveGraph:
+  graph adapter facade.
+  Best when topology starts as core.Graph.
+  After adaptation, solver semantics are matrix semantics.
+```
+
+Do not send `core.Graph` into internal solver thinking. TSP kernels solve over matrix coordinates.
+
+### Q10.3. Christofides, ExactHeldKarp, BranchAndBound, TwoOptOnly, or ThreeOptOnly?
+
+Choose by contract strength and runtime regime.
+
+| Algorithm        | Use when                                                                  | Result meaning                                                               |
+| :--------------- | :------------------------------------------------------------------------ | :--------------------------------------------------------------------------- |
+| `ExactHeldKarp`  | Small guarded instances where proof of optimality matters.                | Exact optimal result if accepted and completed.                              |
+| `BranchAndBound` | Exact search with pruning, good incumbents, and optional time budget.     | Exact only when completed; time limit may return incumbent + `ErrTimeLimit`. |
+| `Christofides`   | Symmetric complete metric TSP where an approximation certificate matters. | `1.5` ratio only with exact `BlossomMatch`.                                  |
+| `TwoOptOnly`     | You have a feasible tour and want deterministic local improvement.        | Heuristic local optimum in 2-opt/2-opt* neighborhood.                        |
+| `ThreeOptOnly`   | Symmetric local search where deeper neighborhood is worth more time.      | Heuristic local optimum; no global certificate.                              |
+
+Mental model:
+
+```text
+Need proof and n is small:
+  ExactHeldKarp.
+
+Need exact search with pruning / timeout governance:
+  BranchAndBound.
+
+Need scalable symmetric metric approximation:
+  Christofides + BlossomMatch.
+
+Need fast deterministic improvement:
+  TwoOptOnly.
+
+Need stronger local search and can pay more:
+  ThreeOptOnly.
+```
+
+Do not hide exact-to-heuristic fallback. If a caller selects exactness, failure or timeout must remain visible.
+
+### Q10.4. What is the Blossom vs Greedy matching law in Christofides?
+
+Christofides needs a minimum-weight perfect matching over odd-degree MST vertices.
+
+```text
+BlossomMatch:
+  exact MWPM.
+  Supports publishing the formal 1.5 approximation ratio.
+
+GreedyMatch:
+  deterministic weaker matching.
+  Useful when explicitly selected.
+  Does not publish the Christofides 1.5 ratio.
+```
+
+Never describe Greedy matching as preserving the Christofides proof. It may be useful engineering policy, but it is not the same theorem.
+
+### Q10.5. Why does TSP need a complete distance matrix?
+
+A TSP tour must be able to move from every selected vertex to the next vertex in the cycle. Missing edges break that assumption.
+
+If your source graph is sparse, first decide what missing edges mean:
+
+```text
+Missing edge means truly impossible:
+  TSP should reject or fail validation.
+
+Missing edge means indirect travel is allowed:
+  apply metric closure before final solving.
+```
+
+When `RunMetricClosure` is enabled, `+Inf` can act as a missing-edge sentinel before closure. Final solver kernels must still receive a complete finite matrix.
+
+### Q10.6. Why do approximation guarantees require metric assumptions?
+
+Christofides’ shortcut step relies on triangle inequality. Shortcutting an Eulerian circuit is safe only because a direct edge is no more expensive than the path it replaces.
+
+```text
+Metric requirement:
+  c(a,c) <= c(a,b) + c(b,c)
+
+If this fails:
+  shortcutting may increase cost unpredictably.
+  the 1.5 guarantee does not apply.
+```
+
+The package should not publish an approximation ratio unless the selected algorithm and matching policy justify it.
+
+### Q10.7. What does `TSPResult` tell me beyond `Tour` and `Cost`?
+
+`TSPResult` is the result contract. Use it instead of inferring behavior from the selected options.
+
+Important fields:
+
+```text
+Tour:
+  closed vertex-index cycle.
+
+Cost:
+  stabilized directed cycle cost.
+
+Algorithm:
+  selected algorithm after option finalization.
+
+Exact:
+  whether the algorithm is exact by design.
+
+Optimal:
+  whether this specific result is certified optimal.
+
+TimedOut:
+  whether a governed time limit stopped the search.
+
+ApproximationRatio:
+  formal ratio when valid; otherwise 0.
+
+MetricClosureApplied:
+  whether +Inf closure preparation was used.
+
+IDs:
+  detached labels aligned with matrix order.
+```
+
+Low cost is not proof of optimality. Read `Optimal`.
+
+### Q10.8. How should I handle Branch-and-Bound time limits?
+
+Branch-and-Bound is exact only when the search completes. With a time limit, it may return a feasible incumbent together with `ErrTimeLimit`.
+
+Correct handling:
+
+```go
+res, err := tsp.SolveMatrix(dist, ids, opts)
+if errors.Is(err, tsp.ErrTimeLimit) {
+	// res may contain the best incumbent found so far.
+	// It is feasible, but not certified optimal.
+	if res != nil && res.TimedOut && !res.Optimal {
+		// Decide whether the incumbent is acceptable for your application.
+	}
+}
+```
+
+Do not discard the result automatically, and do not mark it optimal.
+
+### Q10.9. What is different about ATSP local search?
+
+In ATSP, direction matters:
+
+$$ c(u,v) \ne c(v,u) $$
+
+That changes what local moves are legal. Symmetric 2-opt can reverse a segment. Directed 2-opt* preserves orientation by swapping tails. ATSP 3-opt in the package is restricted 3-opt*, not full arbitrary directed 3-opt.
+
+Do not document ATSP local search as if it were the symmetric TSP move set.
+
+### Q10.10. Why are costs rounded/stabilized?
+
+TSP compares many candidate tours and local-search moves. Tiny floating-point drift can create meaningless observable differences.
+
+The package stabilizes published costs so deterministic output does not depend on irrelevant last-bit noise. This does not mean invalid numeric input is tolerated: `NaN`, `-Inf`, negative finite weights, and unresolved final `+Inf` remain validation failures.
+
+---
+
+## 11. Builder and gridgraph tips
+
+### Q11.1. When should I use `builder`?
 
 Use `builder` when you need reproducible graph shapes for:
 
@@ -597,7 +1048,7 @@ Use `builder` when you need reproducible graph shapes for:
 
 Builder-generated fixtures should encode meaningful topology, not hide arbitrary setup.
 
-### Q10.2. When should I use `gridgraph`?
+### Q11.2. When should I use `gridgraph`?
 
 Use `gridgraph` when your domain is naturally a lattice:
 
@@ -609,7 +1060,7 @@ Use `gridgraph` when your domain is naturally a lattice:
 
 Do not manually wire large grids unless the example is specifically about low-level graph construction.
 
-### Q10.3. How should random fixtures be handled?
+### Q11.3. How should random fixtures be handled?
 
 Use fixed seeds and document the shape.
 
@@ -629,9 +1080,9 @@ Reproducibility is part of the benchmark/test contract.
 
 ---
 
-## 11. Errors and diagnostics
+## 12. Errors and diagnostics
 
-### Q11.1. Why are error sentinels so important?
+### Q12.1. Why are error sentinels so important?
 
 They let callers branch safely while still preserving helpful context.
 
@@ -643,7 +1094,7 @@ if errors.Is(err, matrix.ErrDimensionMismatch) {
 
 Error strings are for humans. They may change without changing the protocol.
 
-### Q11.2. How should wrapped errors behave?
+### Q12.2. How should wrapped errors behave?
 
 Wrapping should preserve sentinel identity.
 
@@ -655,7 +1106,7 @@ return fmt.Errorf("build adjacency: %w", matrix.ErrUnknownVertex)
 
 If an adapter needs to expose both an algorithm-level error and an underlying root cause, it should preserve both through the package’s chosen wrapping/join strategy.
 
-### Q11.3. How do I debug a failing algorithm call?
+### Q12.3. How do I debug a failing algorithm call?
 
 Ask in this order:
 
@@ -670,9 +1121,9 @@ Ask in this order:
 
 ---
 
-## 12. Determinism and concurrency
+## 13. Determinism and concurrency
 
-### Q12.1. What does “deterministic” mean in lvlath?
+### Q13.1. What does “deterministic” mean in lvlath?
 
 It means the observable result is stable for the same input state, options, and package version.
 
@@ -684,23 +1135,23 @@ Examples:
 * Matrix adapters use stable vertex/edge order and fixed loop order.
 * Components are sorted according to their contract.
 
-### Q12.2. Does determinism mean every mathematically valid answer is identical across packages?
+### Q13.2. Does determinism mean every mathematically valid answer is identical across packages?
 
 No. It means each package publishes its own deterministic choice among valid answers. For example, one shortest path may be selected as a witness, not all possible shortest paths.
 
-### Q12.3. Is `core.Graph` safe for concurrency?
+### Q13.3. Is `core.Graph` safe for concurrency?
 
 `core` is designed with internal locking for graph storage and controlled mutations. Algorithm reproducibility still requires stable topology while an algorithm runs unless the package explicitly documents snapshot isolation.
 
-### Q12.4. Is `matrix.Dense` safe for concurrency?
+### Q13.4. Is `matrix.Dense` safe for concurrency?
 
 Concurrent read-only access is safe when no goroutine mutates the matrix. Concurrent writes or read/write races require external synchronization. Views share storage with their base matrix.
 
 ---
 
-## 13. Testing tips
+## 14. Testing tips
 
-### Q13.1. What should a good package test suite contain?
+### Q14.1. What should a good package test suite contain?
 
 At minimum:
 
@@ -722,17 +1173,17 @@ error tests:
   errors.Is checks for every expected sentinel
 ```
 
-### Q13.2. Should tests use `testify`?
+### Q14.2. Should tests use `testify`?
 
 No. Use the standard library and package-specific helpers. This keeps failure messages precise and avoids dependency weight.
 
-### Q13.3. When is `reflect.DeepEqual` acceptable?
+### Q14.3. When is `reflect.DeepEqual` acceptable?
 
 Use explicit structural helpers when the domain matters. For example, prefer path comparison helpers, matrix cell checks, sorted domain checks, and numeric tolerance helpers.
 
 `reflect.DeepEqual` is acceptable only when it genuinely expresses the whole contract and produces understandable failure output.
 
-### Q13.4. How should numeric tests compare floats?
+### Q14.4. How should numeric tests compare floats?
 
 Use tolerances for computations that can accumulate floating-point error.
 
@@ -744,15 +1195,15 @@ if math.Abs(got-want) > tol {
 
 For matrix-wide comparison, use the package’s tolerant comparison surface where appropriate.
 
-### Q13.5. How should tests handle map output?
+### Q14.5. How should tests handle map output?
 
 Do not print or compare maps through unstable iteration. Extract keys, sort them, then compare or print stable output.
 
-### Q13.6. How should cancellation be tested?
+### Q14.6. How should cancellation be tested?
 
 Use deterministic hooks or contexts. Avoid timeouts as the primary mechanism in examples or unit tests.
 
-### Q13.7. What is a regression anchor?
+### Q14.7. What is a regression anchor?
 
 A regression anchor is a test named after the bug or contract it protects.
 
@@ -768,9 +1219,9 @@ A bug fix without a regression test is incomplete unless there is a clear reason
 
 ---
 
-## 14. Benchmark tips
+## 15. Benchmark tips
 
-### Q14.1. What should be inside the benchmark loop?
+### Q15.1. What should be inside the benchmark loop?
 
 Only the measured operation.
 
@@ -797,7 +1248,7 @@ for i := 0; i < b.N; i++ {
 }
 ```
 
-### Q14.2. What is a benchmark regime?
+### Q15.2. What is a benchmark regime?
 
 A regime is the real shape or pressure you are measuring.
 
@@ -814,21 +1265,21 @@ Examples:
 
 A benchmark name should reveal the regime.
 
-### Q14.3. Why must setup errors be checked in benchmarks?
+### Q15.3. Why must setup errors be checked in benchmarks?
 
 Because graph policy can reject edges. If setup silently fails, the benchmark may measure a smaller or different graph than intended.
 
 This is one of the easiest ways to produce meaningless performance numbers.
 
-### Q14.4. Should benchmarks use random data?
+### Q15.4. Should benchmarks use random data?
 
 Only with fixed seed and documented shape. Randomness without reproducibility is not acceptable for regression-sensitive performance work.
 
 ---
 
-## 15. Documentation tips
+## 16. Documentation tips
 
-### Q15.1. Which file should explain what?
+### Q16.1. Which file should explain what?
 
 | File | Responsibility |
 |:--|:--|
@@ -841,7 +1292,7 @@ Only with fixed seed and documented shape. Randomness without reproducibility is
 | `example_test.go` | Executable package examples with deterministic output. |
 | `CONTRIBUTING.md` | Contribution workflow and quality gates. |
 
-### Q15.2. What is documentation drift?
+### Q16.2. What is documentation drift?
 
 Documentation drift happens when docs, examples, tests, and code describe different behavior.
 
@@ -855,7 +1306,7 @@ Common drift patterns:
 
 Fix drift immediately. Do not leave “almost correct” docs in place.
 
-### Q15.3. Should docs include formulas?
+### Q16.3. Should docs include formulas?
 
 Yes, when the formula explains real implemented semantics.
 
@@ -871,7 +1322,7 @@ Good formulas:
 
 Bad formulas are decorative and should be removed.
 
-### Q15.4. Should docs include ASCII diagrams?
+### Q16.4. Should docs include ASCII diagrams?
 
 Yes, when they clarify topology, memory layout, residual flow, traversal order, or matrix encoding.
 
@@ -879,7 +1330,7 @@ A good ASCII diagram should make the next paragraph easier to understand.
 
 ---
 
-## 16. Quick recipes
+## 17. Quick recipes
 
 ### Recipe A. Hop blast radius
 

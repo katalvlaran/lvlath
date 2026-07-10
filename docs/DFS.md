@@ -322,143 +322,475 @@ Reversal (O(V)):      [Build]  -> [Test] -> [Deploy]
 
 ## 4.8. Go Example Scenarios
 
-The examples below demonstrate verified, production-grade usage of `lvlath/dfs`.
+The examples below demonstrate production-grade usage of `lvlath/dfs`.
+They are intentionally scenario-driven: each one models a realistic graph, uses the package as an actual pipeline, and explains how to consume the returned result safely and meaningfully.
+
+> [!NOTE]
+> The snippets below are repository-level teaching bridges: they stay faithful to the real public API, avoid flaky output, and show how a caller should actually consume DFS results in operational code.
 
 ### 4.8.1. Infrastructure Inspection
-Demonstrates single-source traversal, `WithFilterNeighbor` to simulate a quarantine boundary, and hook-based audit tracing.
 
 ```go
-func ExampleDFS_infrastructureInspection() {
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Scenario:
+//   A platform team is auditing a service dependency tree rooted at the ingress gateway.
+//   One branch leads into a quarantine zone that must remain present in topology,
+//   but must not be traversed during this inspection run.
+//
+// What this example demonstrates:
+//   - deterministic single-source DFS,
+//   - policy filtering via WithFilterNeighbor,
+//   - entry tracing via WithOnVisit,
+//   - finish tracing via WithOnExit,
+//   - stable consumption of DFSResult.Order as post-order,
+//   - reproducible skipped-neighbor diagnostics.
+func main() {
+
+	// Stage 1: Build a directed infrastructure dependency graph.
+	// The graph intentionally includes a quarantine branch that stays visible in topology.
 	graph, _ := core.NewGraph(core.WithDirected(true))
 
 	_, _ = graph.AddEdge("gateway", "auth", 0)
 	_, _ = graph.AddEdge("gateway", "billing", 0)
+	_, _ = graph.AddEdge("gateway", "cache", 0)
+	_, _ = graph.AddEdge("gateway", "edge", 0)
+
 	_, _ = graph.AddEdge("auth", "profile", 0)
+	_, _ = graph.AddEdge("auth", "secrets", 0)
+	_, _ = graph.AddEdge("profile", "db", 0)
+
+	_, _ = graph.AddEdge("billing", "ledger", 0)
+	_, _ = graph.AddEdge("billing", "reports", 0)
+	_, _ = graph.AddEdge("ledger", "db", 0)
+	_, _ = graph.AddEdge("reports", "archive", 0)
+
+	_, _ = graph.AddEdge("cache", "replicas", 0)
+	_, _ = graph.AddEdge("cache", "warmer", 0)
+	_, _ = graph.AddEdge("warmer", "metrics", 0)
+
 	_, _ = graph.AddEdge("edge", "quarantine-lab", 0)
 	_, _ = graph.AddEdge("edge", "traffic", 0)
-	// (See example_test.go for full graph definition)
+	_, _ = graph.AddEdge("traffic", "metrics", 0)
 
+	// Stage 2: Prepare deterministic audit collectors.
+	// entered records pre-order entry events; finished records post-order exit events.
 	entered := make([]string, 0, graph.VertexCount())
+	finished := make([]string, 0, graph.VertexCount())
 
-	// Policy Firewall: Do not traverse quarantine boundaries
+	// Stage 3: Define traversal policy.
+	// The quarantine node remains in the graph, but the traversal policy blocks entry into it.
 	filter := func(vertexID string) bool {
 		return !strings.HasPrefix(vertexID, "quarantine-")
 	}
 
+	// Record deterministic entry order.
 	onVisit := func(vertexID string) error {
 		entered = append(entered, vertexID)
 		return nil
 	}
 
+	// Record deterministic finish order.
+	onExit := func(vertexID string) error {
+		finished = append(finished, vertexID)
+		return nil
+	}
+
+	// Stage 4: Run DFS from the infrastructure ingress.
 	result, err := dfs.DFS(
 		graph,
 		"gateway",
 		dfs.WithFilterNeighbor(filter),
 		dfs.WithOnVisit(onVisit),
+		dfs.WithOnExit(onExit),
 	)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
+	// Stage 5: Consume the result as an operational audit report.
+	// entered shows pre-order discovery, finished shows completion order,
+	// and result.Order is the authoritative DFS post-order returned by the package.
+	fmt.Println("entered:", strings.Join(entered, " -> "))
+	fmt.Println("finished:", strings.Join(finished, " -> "))
 	fmt.Println("skipped:", result.SkippedNeighbors)
 	fmt.Println("postorder:", strings.Join(result.Order, " -> "))
+
+	// Output:
+	// entered: gateway -> auth -> profile -> db -> secrets -> billing -> ledger -> reports -> archive -> cache -> replicas -> warmer -> metrics -> edge -> traffic
+	// finished: db -> profile -> secrets -> auth -> ledger -> archive -> reports -> billing -> replicas -> metrics -> warmer -> cache -> traffic -> edge -> gateway
+	// skipped: 1
+	// postorder: db -> profile -> secrets -> auth -> ledger -> archive -> reports -> billing -> replicas -> metrics -> warmer -> cache -> traffic -> edge -> gateway
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_Infrastructure_Inspection-blue?logo=go)](https://go.dev/play/p/svbZa_HnnRK)
+
+**Why the result looks like this:**
+- `entered` is a deterministic pre-order trace produced by `WithOnVisit`.
+- `finished` is a deterministic completion trace produced by `WithOnExit`.
+- `postorder` matches `finished` exactly because `DFSResult.Order` is a finish-order artifact, not a discovery-order artifact.
+- `quarantine-lab` remains part of the topology, but the filter blocks traversal into it; that rejected relation is reported through `SkippedNeighbors`.
+- This pattern is useful when policy must affect traversal behavior without mutating the underlying graph.
+
+---
+
 ### 4.8.2. Full Traversal Inventory Sweep
-Demonstrates `DFSForest` picking up disconnected islands and managing multiple roots.
 
 ```go
-func ExampleDFS_fullTraversalInventorySweep() {
-	graph, _ := core.NewGraph(core.WithDirected(true))
-	// 3 Isolated islands: zone-a, zone-m, zone-z
-	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-api", 0)
-	_, _ = graph.AddEdge("zone-m:0-gw", "zone-m:1-batch", 0)
-	_, _ = graph.AddEdge("zone-z:0-gw", "zone-z:1-web", 0)
+package main
 
+import (
+	"fmt"
+	"sort"
+	"strings"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Scenario:
+//   An inventory job must sweep all disconnected service islands in one run.
+//   The platform team wants deterministic DFS-forest coverage, explicit roots,
+//   and proof that depth resets independently for each disconnected region.
+//
+// What this example demonstrates:
+//   - DFSForest for disconnected topology,
+//   - deterministic forest traversal,
+//   - root detection via absence from Parent,
+//   - depth reset per forest root,
+//   - caller-side stabilization of map-derived reporting.
+func main() {
+
+	// Stage 1: Build three disconnected operational islands.
+	graph, _ := core.NewGraph(core.WithDirected(true))
+
+	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-api", 0)
+	_, _ = graph.AddEdge("zone-a:0-gw", "zone-a:1-auth", 0)
+	_, _ = graph.AddEdge("zone-a:1-api", "zone-a:2-db", 0)
+	_, _ = graph.AddEdge("zone-a:1-auth", "zone-a:2-cache", 0)
+	_, _ = graph.AddEdge("zone-a:1-auth", "zone-a:2-queue", 0)
+
+	_, _ = graph.AddEdge("zone-m:0-gw", "zone-m:1-batch", 0)
+	_, _ = graph.AddEdge("zone-m:0-gw", "zone-m:1-etl", 0)
+	_, _ = graph.AddEdge("zone-m:1-batch", "zone-m:2-warehouse", 0)
+	_, _ = graph.AddEdge("zone-m:1-etl", "zone-m:2-lake", 0)
+	_, _ = graph.AddEdge("zone-m:1-etl", "zone-m:2-report", 0)
+
+	_, _ = graph.AddEdge("zone-z:0-gw", "zone-z:1-web", 0)
+	_, _ = graph.AddEdge("zone-z:0-gw", "zone-z:1-worker", 0)
+	_, _ = graph.AddEdge("zone-z:1-web", "zone-z:2-cdn", 0)
+	_, _ = graph.AddEdge("zone-z:1-worker", "zone-z:2-jobs", 0)
+
+	// Stage 2: Run full-coverage DFS across all disconnected components.
 	result, err := dfs.DFSForest(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
-	roots :=[]string{}
+	// Stage 3: Derive forest roots from the public contract:
+	// visited vertices without parent entries are forest roots.
+	roots := make([]string, 0, 3)
 	for vertexID := range result.Visited {
 		if _, hasParent := result.Parent[vertexID]; !hasParent {
-			roots = append(roots, vertexID) // No parent = Root
+			roots = append(roots, vertexID)
 		}
 	}
 
-	// DFSForest resets depth at each root
-	fmt.Printf("zone-a:0-gw depth = %d\n", result.Depth["zone-a:0-gw"])
-	fmt.Printf("zone-m:0-gw depth = %d\n", result.Depth["zone-m:0-gw"])
+	// Stage 4: Stabilize caller-owned reporting.
+	// The traversal itself is deterministic, but Go map iteration is not a printable contract.
+	sort.Strings(roots)
+
+	// Stage 5: Print a compact inventory summary.
+	fmt.Println("roots:", strings.Join(roots, ", "))
+	fmt.Printf(
+		"root-depths: %s=%d, %s=%d, %s=%d\n",
+		roots[0], result.Depth[roots[0]],
+		roots[1], result.Depth[roots[1]],
+		roots[2], result.Depth[roots[2]],
+	)
+	fmt.Println(
+		"parent-samples:",
+		"zone-a:2-db<-"+result.Parent["zone-a:2-db"]+",",
+		"zone-m:2-lake<-"+result.Parent["zone-m:2-lake"]+",",
+		"zone-z:2-jobs<-"+result.Parent["zone-z:2-jobs"],
+	)
+	fmt.Println("visited:", len(result.Visited))
+
+	// Output:
+	// roots: zone-a:0-gw, zone-m:0-gw, zone-z:0-gw
+	// root-depths: zone-a:0-gw=0, zone-m:0-gw=0, zone-z:0-gw=0
+	// parent-samples: zone-a:2-db<-zone-a:1-api, zone-m:2-lake<-zone-m:1-etl, zone-z:2-jobs<-zone-z:1-worker
+	// visited: 17
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_Full_Traversal_Inventory_Sweep-blue?logo=go)](https://go.dev/play/p/eXn8Nbnn8av)
+
+**Why the result looks like this:**
+- `DFSForest` covers every disconnected island, not just one component.
+- Each new forest root starts with depth `0`.
+- Root vertices do not appear in `Parent`; that is the correct public way to identify forest roots from the result.
+- Sorting the derived `roots` slice is the caller’s responsibility because the roots are extracted from a map, while the package itself remains deterministic at traversal level.
+- This pattern is useful for indexers, inventory crawlers, and full-environment audits.
+
+---
+
 ### 4.8.3. Depth-Limited Blast Radius
-Simulates a bounded incident impact analysis.
 
 ```go
-func ExampleDFS_depthLimitedBlastRadius() {
-	graph, _ := core.NewGraph(core.WithDirected(true))
-	_, _ = graph.AddEdge("incident", "api", 0)
-	_, _ = graph.AddEdge("api", "auth", 0)
-	_, _ = graph.AddEdge("auth", "db", 0) // Depth 3
+package main
 
-	// Limit to depth 2: "db" will not be visited
-	result, err := dfs.DFS(graph, "incident", dfs.WithMaxDepth(2))
+import (
+	"fmt"
+	"strings"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Scenario:
+//   An incident commander wants a bounded blast-radius analysis around a compromised edge.
+//   The objective is to inspect the near field of the dependency tree while proving that
+//   deeper systems remain untouched by this particular run.
+//
+// What this example demonstrates:
+//   - DFS with WithMaxDepth,
+//   - inclusive depth-limit semantics,
+//   - deterministic bounded post-order,
+//   - operational use of Visited and Depth to audit the traversal frontier.
+func main() {
+
+	// Stage 1: Build a directed dependency graph around the incident entry point.
+	graph, _ := core.NewGraph(core.WithDirected(true))
+
+	_, _ = graph.AddEdge("incident-gateway", "auth", 0)
+	_, _ = graph.AddEdge("incident-gateway", "billing", 0)
+	_, _ = graph.AddEdge("incident-gateway", "edge", 0)
+
+	_, _ = graph.AddEdge("auth", "profile", 0)
+	_, _ = graph.AddEdge("auth", "secrets", 0)
+	_, _ = graph.AddEdge("profile", "db", 0)
+
+	_, _ = graph.AddEdge("billing", "ledger", 0)
+	_, _ = graph.AddEdge("billing", "reports", 0)
+	_, _ = graph.AddEdge("ledger", "archive", 0)
+
+	_, _ = graph.AddEdge("edge", "queue", 0)
+	_, _ = graph.AddEdge("edge", "traffic", 0)
+	_, _ = graph.AddEdge("queue", "workers", 0)
+	_, _ = graph.AddEdge("traffic", "metrics", 0)
+
+	// Stage 2: Run a bounded DFS.
+	// MaxDepth(2) means depth-2 vertices are still entered and finished,
+	// but traversal does not expand beyond them.
+	result, err := dfs.DFS(graph, "incident-gateway", dfs.WithMaxDepth(2))
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
-	fmt.Println("outer-ring-entered (db):", result.Visited["db"]) // Output: false
+	// Stage 3: Consume the result as a blast-radius report.
+	fmt.Println("visited:", len(result.Visited))
+	fmt.Println("postorder:", strings.Join(result.Order, " -> "))
+	fmt.Printf(
+		"depths: auth=%d, ledger=%d, traffic=%d\n",
+		result.Depth["auth"],
+		result.Depth["ledger"],
+		result.Depth["traffic"],
+	)
+	fmt.Printf(
+		"outer-ring-entered: archive=%t, db=%t, metrics=%t, workers=%t\n",
+		result.Visited["archive"],
+		result.Visited["db"],
+		result.Visited["metrics"],
+		result.Visited["workers"],
+	)
+
+	// Output:
+	// visited: 10
+	// postorder: profile -> secrets -> auth -> ledger -> reports -> billing -> queue -> traffic -> edge -> incident-gateway
+	// depths: auth=1, ledger=2, traffic=2
+	// outer-ring-entered: archive=false, db=false, metrics=false, workers=false
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_DepthLimited_Blast_Radius-blue?logo=go)](https://go.dev/play/p/vBQ2NvCWjOr)
+
+**Why the result looks like this:**
+- Depth limit `2` is inclusive: depth-2 vertices such as `ledger`, `reports`, `queue`, and `traffic` are still entered and appear in finish order.
+- Their children are not entered, which is why `archive`, `db`, `workers`, and `metrics` remain outside the visited set.
+- This gives a clean operational radius without mutating the graph or manually pruning topology.
+- The example also reinforces that DFS depth is a DFS-tree depth, not a shortest-path distance claim.
+
+---
+
 ### 4.8.4. Release Pipeline
-Validates deterministic topological sort execution plans for DAGs.
 
 ```go
-func ExampleTopologicalSort_releasePipeline() {
-	graph, _ := core.NewGraph(core.WithDirected(true))
-	_, _ = graph.AddEdge("01-spec-freeze", "02-schema-lock", 0)
-	_, _ = graph.AddEdge("02-schema-lock", "03-codegen", 0)
-	_, _ = graph.AddEdge("03-codegen", "04-unit-tests", 0)
+package main
 
+import (
+	"fmt"
+	"strings"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Scenario:
+//   A release orchestration system models specification, policy, code generation,
+//   testing, packaging, and promotion stages as a DAG.
+//   The engineering team needs one deterministic execution plan that is stable enough
+//   for CI logs, reviews, reproducible dry-runs, and deployment audits.
+//
+// What this example demonstrates:
+//   - TopologicalSort on a realistic DAG,
+//   - deterministic ordering under the package traversal law,
+//   - dependency convergence across multiple prerequisite branches,
+//   - direct consumption of the resulting release plan.
+func main() {
+
+	// Stage 1: Build a directed acyclic release graph.
+	graph, _ := core.NewGraph(core.WithDirected(true))
+
+	_, _ = graph.AddEdge("01-spec-freeze", "03-schema-lock", 0)
+	_, _ = graph.AddEdge("01-spec-freeze", "02-threat-model", 0)
+
+	_, _ = graph.AddEdge("02-threat-model", "04-auth-rules", 0)
+
+	_, _ = graph.AddEdge("03-schema-lock", "05-api-compat", 0)
+	_, _ = graph.AddEdge("03-schema-lock", "06-codegen", 0)
+
+	_, _ = graph.AddEdge("04-auth-rules", "07-config-render", 0)
+	_, _ = graph.AddEdge("05-api-compat", "06-codegen", 0)
+
+	_, _ = graph.AddEdge("06-codegen", "08-unit-tests", 0)
+	_, _ = graph.AddEdge("07-config-render", "08-unit-tests", 0)
+
+	_, _ = graph.AddEdge("08-unit-tests", "09-image-build", 0)
+	_, _ = graph.AddEdge("09-image-build", "10-smoke-tests", 0)
+	_, _ = graph.AddEdge("10-smoke-tests", "11-deploy-staging", 0)
+	_, _ = graph.AddEdge("11-deploy-staging", "12-promote-prod", 0)
+
+	// Stage 2: Compute the release order.
 	order, err := dfs.TopologicalSort(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
+	// Stage 3: Print the execution plan as a deterministic deployment pipeline.
 	fmt.Println("release-plan:", strings.Join(order, " -> "))
-	// Output: 01-spec-freeze -> 02-schema-lock -> 03-codegen -> 04-unit-tests
+
+	// Output:
+	// release-plan: 01-spec-freeze -> 02-threat-model -> 04-auth-rules -> 07-config-render -> 03-schema-lock -> 05-api-compat -> 06-codegen -> 08-unit-tests -> 09-image-build -> 10-smoke-tests -> 11-deploy-staging -> 12-promote-prod
 }
 ```
 
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_Release_Pipeline-blue?logo=go)](https://go.dev/play/p/NUx4m50lmp4)
+
+**Why the result looks like this:**
+- The graph is a DAG, so a topological plan exists.
+- The output is suitable for operational replay because every edge points forward in the final sequence.
+- The order is not presented as “some arbitrary valid order” here; it is consumed as the deterministic result produced by the current package contract.
+- This makes the snippet relevant for real release systems, migration planners, and staged deployment frameworks.
+
+---
+
 ### 4.8.5. Escalation Loop Witness
-Demonstrates `DetectCycles` retrieving canonical closed-loop representations.
 
 ```go
-func ExampleDetectCycles_escalationLoopWitness() {
+package main
+
+import (
+	"fmt"
+	"strings"
+
+	"github.com/katalvlaran/lvlath/core"
+	"github.com/katalvlaran/lvlath/dfs"
+)
+
+// Scenario:
+//   A governance workflow routes cases through triage, security, approvals,
+//   finance, legal, and procurement lanes.
+//   The organization needs to know whether escalation logic contains loops,
+//   and if so, it needs deterministic witness cycles that operators can inspect immediately.
+//
+// What this example demonstrates:
+//   - DetectCycles on a realistic workflow graph,
+//   - deterministic witness-set reporting,
+//   - canonical closed-cycle output,
+//   - honest consumption of CycleDetectionResult without implying exhaustive enumeration.
+func main() {
+
+	// Stage 1: Build a directed workflow graph with two independent loop zones.
 	graph, _ := core.NewGraph(core.WithDirected(true))
+
+	_, _ = graph.AddEdge("intake", "triage", 0)
 	_, _ = graph.AddEdge("triage", "security", 0)
 	_, _ = graph.AddEdge("security", "approvals", 0)
-	_, _ = graph.AddEdge("approvals", "triage", 0) // Loop back
+	_, _ = graph.AddEdge("approvals", "triage", 0)
 
+	_, _ = graph.AddEdge("approvals", "audit", 0)
+	_, _ = graph.AddEdge("audit", "archive", 0)
+	_, _ = graph.AddEdge("audit", "billing", 0)
+
+	_, _ = graph.AddEdge("billing", "finance", 0)
+	_, _ = graph.AddEdge("finance", "legal", 0)
+	_, _ = graph.AddEdge("legal", "procurement", 0)
+	_, _ = graph.AddEdge("procurement", "finance", 0)
+
+	_, _ = graph.AddEdge("legal", "notary", 0)
+	_, _ = graph.AddEdge("notary", "vault", 0)
+
+	// Stage 2: Detect cyclicity and retrieve canonical witness cycles.
 	result, err := dfs.DetectCycles(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
 	}
 
+	// Stage 3: Print the summary and the stable witness list.
 	fmt.Println("hasCycle:", result.HasCycle)
-	fmt.Println("witness:", strings.Join(result.Cycles[0], " -> "))
-	// Output: approvals -> triage -> security -> approvals
+	fmt.Println("witness-count:", len(result.Cycles))
+	fmt.Println("witness-1:", strings.Join(result.Cycles[0], " -> "))
+	fmt.Println("witness-2:", strings.Join(result.Cycles[1], " -> "))
+
+	// Output:
+	// hasCycle: true
+	// witness-count: 2
+	// witness-1: approvals -> triage -> security -> approvals
+	// witness-2: finance -> legal -> procurement -> finance
 }
 ```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_Escalation_Loop_Witness-blue?logo=go)](https://go.dev/play/p/Y016CxIXaz_o)
+
+**Why the result looks like this:**
+- `DetectCycles` returns a deterministic witness set, not an exhaustive listing of every simple-cycle encoding.
+- Each witness is returned as a closed cycle, which makes the loop explicit for human operators and log pipelines.
+- Canonicalization rotates each cycle to a stable representative, which is why the first cycle is printed from `approvals` rather than from another vertex in the same loop.
+- This is the right operational trade-off for workflow debugging, approval-loop audits, and deadlock-style escalation analysis.
+
+---
+
+These scenarios illustrate the intended professional use of `lvlath/dfs`:
+- use `DFS` when you need deterministic depth-first structural exploration,
+- use `DFSForest` when coverage must span disconnected regions,
+- use `WithMaxDepth` to bound operational blast radius,
+- use `TopologicalSort` for deterministic dependency execution plans,
+- use `DetectCycles` for fast, auditable loop witnesses rather than exhaustive cycle enumeration.
 
 ---
 

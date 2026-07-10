@@ -121,7 +121,7 @@ $$ Priority(v) = \langle candidateDistance(v), \text{VertexID}(v) \rangle $$
 ## 5.4. Public API & Result Contract
 
 ### 5.4.1. Public Entry Points & Wrapper Semantics
-~~~go
+```go
 // 1. Canonical Execution
 func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, error)
 
@@ -129,19 +129,19 @@ func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, 
 func Distances(g *core.Graph, sourceID string, opts ...Option) (map[string]float64, error)
 func DistanceTo(g *core.Graph, sourceID, targetID string, opts ...Option) (float64, error)
 func ShortestPathTo(g *core.Graph, sourceID, targetID string, opts ...Option) ([]string, float64, error)
-~~~
+```
 *   `Distances(...)` publishes a detached distance map only.
 *   `DistanceTo(...)` is a point-query wrapper for isolated distance checks.
 *   `ShortestPathTo(...)` forces `WithPathTracking` internally and returns one witness.
 
 ### 5.4.2. Canonical Result Artifact
-~~~go
+```go
 type DijkstraResult struct {
 	SourceID  string
 	Distances map[string]float64
 	Prev      map[string]string
 }
-~~~
+```
 
 Field semantics:
 
@@ -196,11 +196,11 @@ Options are explicit runtime policy inputs, not hidden mutable state.
 - invalid explicit option input fails before traversal begins.
 
 Public policy surface:
-~~~go
+```go
 WithPathTracking()
 WithMaxDistance(max)
 WithInfEdgeThreshold(threshold)
-~~~
+```
 
 Default runtime policy:
 
@@ -219,9 +219,9 @@ Exported sentinels are the single source of truth for protocol matching.
 
 Callers must use:
 
-~~~
+```
 errors.Is(err, ...)
-~~~
+```
 
 and must not parse error strings.
 
@@ -262,9 +262,9 @@ Determinism is a package-level contract.
 
 ### 5.6.1. Vertex-Domain Initialization
 The known result domain is initialized by iterating:
-~~~go
+```go
 g.Vertices()
-~~~
+```
 
 as surfaced by `core.Graph`.
 
@@ -272,9 +272,9 @@ as surfaced by `core.Graph`.
 
 Relaxation processes candidate relations in the exact order returned by:
 
-~~~go
+```go
 g.Neighbors(u)
-~~~
+```
 
 The package does not inject a second hidden neighbor-sorting layer.
 
@@ -320,7 +320,7 @@ the package publishes stable:
 
 The implementation utilizes a **Lazy Decrease-Key Min-Heap** bounded by a strict **Visited-Finalization** loop. Duplicates are allowed in the heap; non-authoritative frontier entries are discarded cleanly by the visited-finalization model.
 
-~~~text
+```text
 FUNCTION Dijkstra(g, sourceID, opts...):
 
   Stage 1: Validate Admission
@@ -371,7 +371,7 @@ FUNCTION Dijkstra(g, sourceID, opts...):
 
   Stage 5: Publish Result
     - Return detached DijkstraResult ONLY after successful completion.
-~~~
+```
 
 ---
 
@@ -380,7 +380,7 @@ FUNCTION Dijkstra(g, sourceID, opts...):
 ### 5.8.1. Complex 11-Vertex Logistics & Policy Network
 This diagram demonstrates how thresholds, cutoffs, and +Inf semantics interact with a complex topology.
 
-~~~text
+```text
          [Gateway](1) ──2──▶[Hub:N](2) ──3──▶ [Sort:River](4) ──2──▶[City:Aurora](8)
               │                   │                   │
               4                   5                   2
@@ -394,14 +394,14 @@ This diagram demonstrates how thresholds, cutoffs, and +Inf semantics interact w
                                   1
                                   ▼
                             [Backup:2](7) ──2─▶ [City:Isolated](11)
-~~~
+```
 
 *   **Scenario A (Unlimited):** All vertices reached. `City:Ember` is reached via `Sort:Valley` (Cost: $4+2+3 = 9$).
 *   **Scenario B (`WithInfEdgeThreshold(8.0)`):** `Hub:S -> Backup:1` is a wall. `Backup:1`, `Backup:2`, and `City:Isolated` are now Known but Unreachable (`+Inf`).
 *   **Scenario C (`WithMaxDistance(7.0)`):** `Gateway -> Hub:N -> Sort:River -> City:Aurora` finishes at cost $7.0$. `City:Delta` requires cost $9.0$, which exceeds $7.0$, so it remains `+Inf` (Policy Cutoff).
 
 ### 5.8.2. Equal-Cost Determinism
-~~~text
+```text
                 [relay:alpha]
                /             \
 (c=2)         / (c=2)        (c=2)
@@ -411,11 +411,11 @@ This diagram demonstrates how thresholds, cutoffs, and +Inf semantics interact w
 (c=2)         \ (c=2)        (c=2)
                \             /
                  [relay:beta]
-~~~
+```
 Equal candidate distance to `target` (cost $4$) occurs through both `relay:alpha` and `relay:beta`. The heap tie-break on `VertexID` processes `alpha` first. When `beta` is processed, $4 \not< 4$ (Strict Improvement Law). `Prev` is **not** overwritten. The witness `[start -> relay:alpha -> target]` is universally stable.
 
 ### 5.8.3. Endpoint Law on Undirected Storage
-~~~text
+```text
 Stored edge record in core.Graph:
   From: "B", To: "A", Directed: false
 
@@ -427,10 +427,10 @@ Wrong interpretation (Silent failure):
 
 Correct interpretation (lvlath endpoint law):
   v = otherEndpoint(edge, "A") = "B"
-~~~
+```
 
 ### 5.8.4. Result-State Distinctions
-~~~text
+```text
 Target query state machine:
 
   [targetID is empty]
@@ -454,7 +454,7 @@ Target query state machine:
                -> HasPathTo  = false
                -> PathTo     = ErrNoPath OR ErrPathTrackingDisabled
 
-~~~
+```
 
 ---
 
@@ -465,7 +465,7 @@ The package examples are intentionally scenario-driven, modeling real pipelines:
 ### 5.9.1. The Unified Master Pipeline (Expanded)
 Demonstrates graph construction, dynamic wall thresholds, rigorous error handling, and stable witness extraction.
 
-~~~go
+```go
 package main
 
 import (
@@ -486,19 +486,19 @@ func main() {
 		fmt.Println("Build error:", err)
 		return
 	}
-	g.AddEdge("gateway", "hub:south", 4.0, core.WithEdgeDirected(true))
-	g.AddEdge("hub:north", "sort:river", 3.0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("gateway", "hub:south", 4.0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("hub:north", "sort:river", 3.0, core.WithEdgeDirected(true))
 
 	// Degraded Highway (Cost: 10.0)
-	g.AddEdge("hub:south", "backup:node", 10.0, core.WithEdgeDirected(true))
-	g.AddEdge("backup:node", "city:isolated", 1.0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("hub:south", "backup:node", 10.0, core.WithEdgeDirected(true))
+	_, _ = g.AddEdge("backup:node", "city:isolated", 1.0, core.WithEdgeDirected(true))
 
 	// Local Streets (Undirected)
-	g.AddEdge("sort:river", "city:aurora", 2.0, core.WithEdgeDirected(false))
-	g.AddEdge("hub:south", "city:aurora", 4.0, core.WithEdgeDirected(false))
+	_, _ = g.AddEdge("sort:river", "city:aurora", 2.0, core.WithEdgeDirected(false))
+	_, _ = g.AddEdge("hub:south", "city:aurora", 4.0, core.WithEdgeDirected(false))
 
 	// 2. Runtime Policy Assembly
-	opts :=[]dijkstra.Option{
+	opts := []dijkstra.Option{
 		dijkstra.WithPathTracking(),        // Required for PathTo()
 		dijkstra.WithInfEdgeThreshold(8.0), // The "Wall"
 	}
@@ -522,16 +522,22 @@ func main() {
 	if math.IsInf(isolatedCost, 1) {
 		fmt.Printf("Target %q is known but walled off by policy (+Inf).\n", isolatedTarget)
 	}
+
+	// Output:
+	// Route to city:aurora: gateway -> hub:north -> sort:river -> city:aurora (Cost: 7)
+	// Target "city:isolated" is known but walled off by policy (+Inf).
 }
-~~~
+```
+
+[![Go Playground](https://img.shields.io/badge/Go_Playground-Dijkstra_Unified_Master_Pipeline-blue?logo=go)](https://go.dev/play/p/FoZ3eIIvaYM)
 
 ### 5.9.2. Scenario Capsules
 
 The package examples are intentionally scenario-driven and follow the same practical pipeline:
 
-~~~text
+```text
 build -> dijkstra -> consume
-~~~
+```
 
 ### 1) Logistics Routing
 
@@ -673,4 +679,4 @@ Examples should:
 
 ---
 
-> Next:[6. Minimum Spanning Trees: Prim & Kruskal ->](PRIM_%26_KRUSKAL.md)
+> Next:[6. Minimum Spanning Trees: Prim & Kruskal ->](MST.md)

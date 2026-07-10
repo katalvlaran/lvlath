@@ -433,7 +433,7 @@ func main() {
 	fmt.Printf("View Weight (Kyiv-Lviv): %.0f\n", viewEdge.Weight) // 0
 }
 ```
-[![Playground - Core](https://img.shields.io/badge/Go_Playground-Core-blue?logo=go)](https://go.dev/play/p/r5MFWaecYsV)
+[![Playground - Core](https://img.shields.io/badge/Go_Playground-Core-blue?logo=go)](https://go.dev/play/p/sjcxoMWV4SF)
 ---
 
 ## 2.8. Pitfalls & Best Practices (Architectural Mastery)

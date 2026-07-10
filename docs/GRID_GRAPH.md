@@ -105,51 +105,147 @@ Consider the following 5×5 height map (`0`=water, `1`=land):
 package main
 
 import (
-    "fmt"
-  
-    "github.com/katalvlaran/lvlath/gridgraph"
+	"fmt"
+	"log"
+	"sort"
+
+	"github.com/katalvlaran/lvlath/gridgraph"
 )
 
 func main() {
-    // 5×5 height map (with 2 islands)
-    heights := [][]int{
-        {0, 1, 1, 0, 0},
-        {1, 1, 0, 1, 1},
-        {0, 0, 1, 1, 0},
-        {1, 1, 0, 0, 0},
-        {0, 0, 0, 1, 1},
-    }
-  
-    // Build GridGraph with 8-connectivity
-    gg, err := gridgraph.From2D(heights, gridgraph.Conn8)
-    if err != nil {
-        panic(err)
-    }
-  
-    // 1) Find islands
-    comps := gg.ConnectedComponents()
-    fmt.Printf("Found %d island(s) with Conn8:\n", len(comps))
-    for i, comp := range comps {
-        fmt.Printf(" Island %d cells: %v\n", i+1, comp)
-    }
-    // Found 2 island(s) with Conn8:
-    // Island 1 cells: [1 2 6 5 8 12 9 13 16 15]
-    // Island 2 cells: [23 24]
-  
-    // 2) Bridge from island 0 to island 1
-    if len(comps) >= 2 {
-        path, cost, err := gg.ExpandIsland(0, 1)
-        if err != nil {
-            panic(err)
-        }
-        fmt.Printf("Min-cost bridge path: %v (cost=%d)\n", path, cost)
-    }
-    // Min-cost bridge path: [16 17 23] (cost=1)
-}
+	// Emergency island-routing map, 8×8.
+	//
+	// Values:
+	//   0 = water / blocked cell
+	//   1 = logistics road islands that must be connected
+	//   2 = hospital district
+	//   3 = port district
+	//   4 = power station
+	//   5 = warehouse zone
+	//   6 = rail yard
+	//   7 = repair depot
+	//   8 = command center
+	//
+	// Conn4 is intentionally used:
+	// city movement is orthogonal, so diagonal touching is NOT a road connection.
+	grid := [][]int{
+		{1, 1, 0, 0, 0, 0, 1, 1},
+		{1, 1, 0, 2, 2, 0, 1, 1},
+		{0, 0, 0, 2, 2, 0, 0, 0},
+		{3, 3, 0, 0, 0, 0, 4, 4},
+		{3, 0, 0, 5, 5, 0, 0, 4},
+		{3, 3, 0, 5, 5, 0, 4, 4},
+		{0, 0, 0, 0, 0, 0, 0, 0},
+		{6, 6, 0, 7, 7, 0, 8, 8},
+	}
 
+	opts := gridgraph.DefaultGridOptions()
+	opts.Conn = gridgraph.Conn4
+	opts.LandThreshold = 1
+
+	gg, err := gridgraph.NewGridGraph(grid, opts)
+	if err != nil {
+		log.Fatalf("build grid graph: %v", err)
+	}
+
+	// 1) Detect all dry connected regions, grouped by their terrain value.
+	//
+	// ConnectedComponents returns:
+	//   map[value][][]Cell
+	//
+	// Meaning:
+	//   components[1] is a list of all disconnected logistics-road regions.
+	//   components[2] is a list of all disconnected hospital regions.
+	//   etc.
+	components := gg.ConnectedComponents()
+
+	values := make([]int, 0, len(components))
+	totalRegions := 0
+	for value, regions := range components {
+		values = append(values, value)
+		totalRegions += len(regions)
+	}
+	sort.Ints(values)
+
+	fmt.Printf("Detected %d terrain value(s), %d connected region(s):\n", len(values), totalRegions)
+
+	for _, value := range values {
+		regions := components[value]
+
+		// Deterministic example output:
+		// sort regions by their first top-left cell, and sort cells inside each region.
+		for _, region := range regions {
+			sort.Slice(region, func(i, j int) bool {
+				if region[i].Y != region[j].Y {
+					return region[i].Y < region[j].Y
+				}
+				return region[i].X < region[j].X
+			})
+		}
+		sort.Slice(regions, func(i, j int) bool {
+			a, b := regions[i][0], regions[j][0]
+			if a.Y != b.Y {
+				return a.Y < b.Y
+			}
+			return a.X < b.X
+		})
+
+		fmt.Printf("  value=%d: %d region(s)\n", value, len(regions))
+		for i, region := range regions {
+			fmt.Printf("    region %d: %d cells:", i, len(region))
+			for _, cell := range region {
+				fmt.Printf(" (%d,%d)", cell.X, cell.Y)
+			}
+			fmt.Println()
+		}
+	}
+
+	// 2) Connect two disconnected logistics-road islands.
+	//
+	// We deliberately connect components[1][0] and components[1][1]:
+	// both are value=1 logistics regions, but they are separated by water.
+	logisticsRegions := components[1]
+	if len(logisticsRegions) < 2 {
+		log.Fatalf("need at least two disconnected logistics regions, got %d", len(logisticsRegions))
+	}
+
+	src := logisticsRegions[0]
+	dst := logisticsRegions[1]
+
+	path, cost, err := gg.ExpandIsland(src, dst)
+	if err != nil {
+		log.Fatalf("expand logistics island: %v", err)
+	}
+
+	fmt.Println()
+	fmt.Println("Minimum-cost emergency bridge:")
+	fmt.Printf("  converted water cells: %d\n", cost)
+	fmt.Printf("  path length: %d cells\n", len(path))
+	fmt.Print("  path:")
+
+	for _, cell := range path {
+		mark := "dry"
+		if cell.Value < opts.LandThreshold {
+			mark = "water→bridge"
+		}
+		fmt.Printf(" (%d,%d:%s)", cell.X, cell.Y, mark)
+	}
+
+	fmt.Println()
+
+	// Example interpretation:
+	//
+	// If cost=2, then the planner found a route where only two flooded cells
+	// need conversion. Dry infrastructure already present on the path costs 0.
+	//
+	// This is exactly what 0–1 BFS is good at:
+	//   - step into dry land:   cost 0
+	//   - step into water:      cost 1
+	//   - total bridge cost:    number of water cells converted
+}
 ```
 
-[![Go Playground](https://img.shields.io/badge/Go_Playground-GridGraph-blue?logo=go)](https://go.dev/play/p/FQ5oviAYt0I)
+[![Go Playground](https://img.shields.io/badge/Go_Playground-GridGraph-blue?logo=go)](https://go.dev/play/p/NH0UW0MPJUu)
 
 ---
 

@@ -145,7 +145,7 @@ func mustEqualString(t *testing.T, got string, want string, op string) {
 	}
 }
 
-func mustValidStrictMST(t *testing.T, graph *core.Graph, result *mst.MSTResult, wantWeight float64) {
+func mustValidStrictMST(t *testing.T, graph *core.Graph, result *mst.Result, wantWeight float64) {
 	t.Helper()
 
 	if result == nil {
@@ -163,7 +163,7 @@ func mustValidStrictMST(t *testing.T, graph *core.Graph, result *mst.MSTResult, 
 	mustResultWeightMatchesEdges(t, result, "strict MST")
 }
 
-func mustValidForest(t *testing.T, graph *core.Graph, result *mst.MSTResult, wantComponents int, wantWeight float64) {
+func mustValidForest(t *testing.T, graph *core.Graph, result *mst.Result, wantComponents int, wantWeight float64) {
 	t.Helper()
 
 	if result == nil {
@@ -234,7 +234,7 @@ func mustConnectedSelectedEdges(t *testing.T, vertices []string, edges []core.Ed
 	}
 }
 
-func mustResultWeightMatchesEdges(t *testing.T, result *mst.MSTResult, op string) {
+func mustResultWeightMatchesEdges(t *testing.T, result *mst.Result, op string) {
 	t.Helper()
 
 	var total float64

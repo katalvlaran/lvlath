@@ -12,7 +12,7 @@
 //   - DFS(g, startID, opts...)
 //     Deterministic single-source depth-first traversal.
 //
-//   - DFSForest(g, opts...)
+//   - Forest(g, opts...)
 //     Deterministic full-graph DFS forest traversal across disconnected topology.
 //
 //   - DetectCycles(g)
@@ -27,7 +27,7 @@
 //   - TopologicalSortContext(ctx, g)
 //     Convenience wrapper for TopologicalSort with explicit cancellation context.
 //
-// DFSResult is the public traversal artifact. It exposes:
+// Result is the public traversal artifact. It exposes:
 //
 //   - Order            - DFS finish order (post-order), not discovery order.
 //   - Depth            - DFS-tree depth.
@@ -52,7 +52,7 @@
 //     inventing hidden sorting rules or accidental traversal tie-breaks.
 //
 //   - Post-Order Is a Public Contract:
-//     DFSResult.Order is authoritative finish order, which makes downstream uses
+//     Result.Order is authoritative finish order, which makes downstream uses
 //     such as dependency unwinding, stack-safe teardown planning, and topo-style
 //     reasoning reproducible and auditable.
 //
@@ -129,7 +129,7 @@
 //     dfs itself does not inject hidden fallback sorting.
 //
 //  3. Finish-order semantics
-//     DFSResult.Order records finish order only.
+//     Result.Order records finish order only.
 //     It is appended when a vertex exits, not when it is discovered.
 //
 //  4. Cycle witness ordering
@@ -145,7 +145,7 @@
 // DFS is a depth-first traversal that builds a DFS tree, or a DFS forest when
 // full traversal is enabled.
 //
-// Public DFSResult semantics:
+// Public Result semantics:
 //
 //   - Order
 //     Finish order (post-order).
@@ -181,7 +181,7 @@
 //
 // Once DFS execution begins, aborting runtime failures may return:
 //
-//   - partial *DFSResult
+//   - partial *Result
 //   - plus a non-nil error
 //
 // This applies to:
@@ -337,7 +337,7 @@
 // -----------------------------------------------------------------------------
 // -- COMPLEXITY SUMMARY -------------------------------------------------------
 //
-//   - DFS / DFSForest
+//   - DFS / Forest
 //     Time O(V+E), Space O(V), excluding hook and filter cost.
 //
 //   - DetectCycles
@@ -360,7 +360,7 @@
 //     current vertex context.
 //
 //   - Finish Order:
-//     DFSResult.Order is post-order finish order, not discovery order.
+//     Result.Order is post-order finish order, not discovery order.
 //
 //   - Witness Contract:
 //     DetectCycles returns witness cycles, not an exhaustive cycle listing.
@@ -389,7 +389,7 @@
 //
 //   - docs/DFS.md for repository-level tutorial, formulas, diagrams, examples,
 //     witness semantics, and operational guidance.
-//   - package GoDoc on DFS, DFSForest, DetectCycles, HasCycle, TopologicalSort,
-//     TopologicalSortContext, DFSResult, and CycleDetectionResult for per-symbol
+//   - package GoDoc on DFS, Forest, DetectCycles, HasCycle, TopologicalSort,
+//     TopologicalSortContext, Result, and CycleDetectionResult for per-symbol
 //     contract details.
 package dfs

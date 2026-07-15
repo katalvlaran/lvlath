@@ -113,8 +113,6 @@ func TestMaxFlowRejectsInvalidEpsilon(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			result, err := flow.MaxFlow(g, "S", "T", flow.WithEpsilon(tt.epsilon))
 
@@ -154,8 +152,6 @@ func TestCoreRejectsNaNInfWeightsBeforeFlow(t *testing.T) {
 	}
 
 	for _, tt := range tests {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(true), core.WithWeighted())
 			mustAddVertex(t, g, "S")

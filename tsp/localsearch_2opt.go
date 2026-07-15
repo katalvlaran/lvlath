@@ -40,7 +40,7 @@ import (
 // Implementation:
 //   - Stage 1: Force the internal algorithm identity to TwoOptOnly.
 //   - Stage 2: Run twoOptKernel to validate input and improve the current tour.
-//   - Stage 3: Publish localSearchResult as TSPResult without IDs or metric-closure metadata.
+//   - Stage 3: Publish localSearchResult as Result without IDs or metric-closure metadata.
 //   - Stage 4: Preserve ErrTimeLimit when a valid current tour exists.
 //
 // Behavior highlights:
@@ -54,7 +54,7 @@ import (
 //   - opts: local-search policy.
 //
 // Returns:
-//   - *TSPResult: improved or timeout-current tour result.
+//   - *Result: improved or timeout-current tour result.
 //   - error: nil or sentinel-classified failure.
 //
 // Errors:
@@ -75,7 +75,7 @@ import (
 // AI-Hints:
 //   - Do not publish Exact=true or Optimal=true.
 //   - Do not drop timeout results when local.hasTour() is true.
-func twoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+func twoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error) {
 	solverOptions := opts
 	solverOptions.Algo = TwoOptOnly
 
@@ -138,6 +138,10 @@ func twoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult,
 // AI-Hints:
 //   - Do not return nil tour on ErrTimeLimit after a valid current tour exists.
 //   - Do not let +Inf into final local-search kernels.
+//   - High complexity is required to maintain the ultra-tight inner loop execution speed.
+//   - Function calls inside this kernel would severely degrade TSP optimization performance.
+//
+// nolint:gocyclo
 func twoOptKernel(dist matrix.Matrix, initTour []int, opts Options) (localSearchResult, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return localSearchResult{}, err

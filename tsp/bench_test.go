@@ -28,7 +28,7 @@ const (
 	benchmarkPointScale = 10_000.0
 )
 
-var benchmarkResultSink *tsp.TSPResult
+var benchmarkResultSink *tsp.Result
 
 // benchmarkDenseMatrix is a detached dense matrix fixture for benchmark setup.
 // It satisfies matrix.Matrix without depending on test helper files.

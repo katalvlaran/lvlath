@@ -29,7 +29,7 @@ var (
 	//   - Use ErrInvalidTour for malformed non-nil tours.
 	ErrNilTour = errors.New("tsp: tour is nil")
 
-	// ErrNilResult reports method calls on a nil *TSPResult receiver.
+	// ErrNilResult reports method calls on a nil *Result receiver.
 	//
 	// AI-Hints:
 	//   - Result helper methods must classify nil access with this sentinel.
@@ -108,7 +108,7 @@ var (
 	// has no attached matrix-index-to-ID mapping.
 	//
 	// AI-Hints:
-	//   - Use this from TSPResult.VertexTour when IDs are absent.
+	//   - Use this from Result.VertexTour when IDs are absent.
 	//   - Do not collapse this into ErrInvalidIDs; missing IDs and malformed IDs are different contracts.
 	ErrMissingVertexIDs = errors.New("tsp: vertex ids are missing")
 

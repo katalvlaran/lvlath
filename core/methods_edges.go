@@ -259,7 +259,7 @@ func (g *Graph) AddEdge(from, to string, weight float64, opts ...EdgeOption) (st
 		if _, exists := g.edges[e.ID]; exists {
 			return "", ErrEdgeIDConflict
 		}
-		if num, ok := matchesAutoIDPattern(e.ID); ok && num >= 0 {
+		if num, ok := matchesAutoIDPattern(e.ID); ok {
 			bumpNextEdgeIDToAtLeast(g, num)
 		}
 	}
@@ -474,7 +474,7 @@ func (g *Graph) SetEdgeID(oldID, newID string) error {
 	cleanupAdjacency(g)
 
 	// If the new ID matches canonical auto-ID form "eN", bump the counter.
-	if num, ok := matchesAutoIDPattern(newID); ok && num >= 0 {
+	if num, ok := matchesAutoIDPattern(newID); ok {
 		bumpNextEdgeIDToAtLeast(g, num)
 	}
 

@@ -9,7 +9,7 @@
 //     algorithmic semantics beyond their explicitly documented policy.
 //
 // AI-Hints:
-//   - Use DFSForest when the intent is component coverage rather than single-root traversal.
+//   - Use Forest when the intent is component coverage rather than single-root traversal.
 //   - Use HasCycle when only cyclicity matters and witness-cycle details are not needed.
 //   - TopologicalSort is valid only for directed graphs.
 //   - TopologicalSortContext is a convenience wrapper over WithCancelContext(ctx), not a distinct algorithm.
@@ -39,7 +39,7 @@ import (
 //   - opts: ordered DFS option builders; last-writer-wins by construction order.
 //
 // Returns:
-//   - *DFSResult: traversal result, including visited flags, parent links, depths, finish order,
+//   - *Result: traversal result, including visited flags, parent links, depths, finish order,
 //     and diagnostics.
 //   - error: nil on success, or a traversal/configuration failure.
 //
@@ -65,13 +65,13 @@ import (
 //
 // AI-Hints:
 //   - Order is post-order finish order, not shortest-path layering.
-//   - Prefer DFSForest when the goal is to cover every disconnected component.
+//   - Prefer Forest when the goal is to cover every disconnected component.
 //   - Do not assume undirected or mixed-edge traversal can be reduced to edge.To semantics.
-func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
+func DFS(g *core.Graph, startID string, opts ...Option) (*Result, error) {
 	return runDFS(g, startID, opts...)
 }
 
-// DFSForest performs deterministic DFS-forest traversal over all graph components.
+// Forest performs deterministic DFS-forest traversal over all graph components.
 //
 // Implementation:
 //   - Stage 1: Prepend WithFullTraversal() to the caller-provided options.
@@ -86,7 +86,7 @@ func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
 //   - opts: DFS option builders applied after enabling full traversal.
 //
 // Returns:
-//   - *DFSResult: DFS-forest traversal result.
+//   - *Result: DFS-forest traversal result.
 //   - error: nil on success, or a traversal/configuration failure.
 //
 // Errors:
@@ -102,9 +102,9 @@ func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
 //   - startID is intentionally omitted because forest traversal is root-driven by graph order.
 //
 // AI-Hints:
-//   - Prefer DFSForest when the intent is full component coverage rather than single-root reachability.
+//   - Prefer Forest when the intent is full component coverage rather than single-root reachability.
 //   - In forest mode, Depth is measured from each DFS-tree root, not from a single global origin.
-func DFSForest(g *core.Graph, opts ...Option) (*DFSResult, error) {
+func Forest(g *core.Graph, opts ...Option) (*Result, error) {
 	fullTraversalOptions := make([]Option, 0, len(opts)+1)
 	fullTraversalOptions = append(fullTraversalOptions, WithFullTraversal())
 	fullTraversalOptions = append(fullTraversalOptions, opts...)

@@ -14,8 +14,6 @@ func TestBlossomLargeDenseScalesDeterministically(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			problem := internalSeededMatchingProblem(tc.k, tc.seed)
 
@@ -98,8 +96,6 @@ func TestBlossomLargeDenseK192K256Smoke(t *testing.T) {
 		{name: "k192", k: 192, seed: 19200},
 		{name: "k256", k: 256, seed: 25600},
 	} {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			problem := internalSeededMatchingProblem(tc.k, tc.seed)
 

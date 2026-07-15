@@ -14,7 +14,7 @@
     - Determinism rules described here are part of the public contract.
     - Numeric-policy rules described here are part of the public contract.
     - Error-classification rules described here are part of the public contract.
-    - MSTResult ownership and nilability rules described here are part of the public contract.
+    - Result ownership and nilability rules described here are part of the public contract.
     - Any incompatible change must be explicit, documented, tested, and versioned.
 
   Scope:
@@ -22,7 +22,7 @@
     - Minimum spanning forest computation through explicit forest mode.
     - Deterministic Kruskal and Prim algorithm selection.
     - Strict graph-policy validation before kernel execution.
-    - Detached result publication through MSTResult.
+    - Detached result publication through Result.
 
   License:
     The lvlath repository is licensed under AGPL-3.0-only. See LICENSE.
@@ -32,7 +32,7 @@
 
 > **Package:** `lvlath/mst` | **Focus:** Deterministic MST/MSF Kernels, Strict Graph Policy, Sentinel-First Errors, Detached Results
 
-The `lvlath/mst` package is a deterministic, contract-driven minimum-spanning connectivity kernel for `core.Graph`. It is not a casual graph snippet, not a topology mutator, and not a hidden fallback layer for disconnected systems. It validates graph semantics, assembles explicit runtime policy, snapshots candidate edges into detached storage, applies a precise greedy kernel, and publishes a canonical `MSTResult` artifact.
+The `lvlath/mst` package is a deterministic, contract-driven minimum-spanning connectivity kernel for `core.Graph`. It is not a casual graph snippet, not a topology mutator, and not a hidden fallback layer for disconnected systems. It validates graph semantics, assembles explicit runtime policy, snapshots candidate edges into detached storage, applies a precise greedy kernel, and publishes a canonical `Result` artifact.
 
 The package answers one foundational question:
 
@@ -137,7 +137,7 @@ This is required for roots that start at the stored `To` endpoint of an undirect
 
 #### Law 5: Result Ownership
 
-`MSTResult` is the canonical result artifact.
+`Result` is the canonical result artifact.
 
 It stores detached `core.Edge` values and does not retain live `*core.Edge` pointers into `core.Graph`. Callers can clone, serialize, reorder copies, or consume metadata without mutating the source graph.
 
@@ -161,7 +161,7 @@ The package solves these problems:
 2. explicit MSF over disconnected weighted undirected `*core.Graph`,
 3. deterministic Kruskal selection through global candidate ordering and DSU merging,
 4. deterministic Prim selection through root-based frontier expansion,
-5. detached result publication through `MSTResult`.
+5. detached result publication through `Result`.
 
 ### 6.2.2. Supported graph model
 
@@ -328,14 +328,14 @@ The current Prim implementation is an edge-frontier heap implementation. It must
 ### 6.4.1. Public entry points
 
 ```go
-func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error)
+func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*Result, error)
 
-func Kruskal(graph *core.Graph) (*MSTResult, error)
+func Kruskal(graph *core.Graph) (*Result, error)
 
-func Prim(graph *core.Graph, root string) (*MSTResult, error)
+func Prim(graph *core.Graph, root string) (*Result, error)
 ```
 
-`MinimumSpanningTree` is the canonical facade. It assembles options, validates the graph through the snapshot adapter, dispatches to exactly one kernel, and returns `MSTResult` on success.
+`MinimumSpanningTree` is the canonical facade. It assembles options, validates the graph through the snapshot adapter, dispatches to exactly one kernel, and returns `Result` on success.
 
 `Kruskal` and `Prim` are focused wrappers over the facade. They do not contain independent algorithm logic.
 
@@ -384,7 +384,7 @@ func WithStrictTree() Option
 ### 6.4.4. Result artifact
 
 ```go
-type MSTResult struct {
+type Result struct {
     Algorithm Algorithm
     Mode      Mode
     Root      string
@@ -401,9 +401,9 @@ type MSTResult struct {
 Helper methods:
 
 ```go
-func (r *MSTResult) IsNil() bool
-func (r *MSTResult) Clone() *MSTResult
-func (r *MSTResult) EdgeValues() ([]core.Edge, error)
+func (r *Result) IsNil() bool
+func (r *Result) Clone() *Result
+func (r *Result) EdgeValues() ([]core.Edge, error)
 ```
 
 ### 6.4.5. Field contract
@@ -425,8 +425,8 @@ func (r *MSTResult) EdgeValues() ([]core.Edge, error)
 
 | State                    | Result               | Error                                      | Meaning                                         |
 |:-------------------------|:---------------------|:-------------------------------------------|:------------------------------------------------|
-| Valid strict tree        | non-nil `*MSTResult` | nil                                        | Connected graph successfully spanned.           |
-| Valid explicit forest    | non-nil `*MSTResult` | nil                                        | Forest requested and published.                 |
+| Valid strict tree        | non-nil `*Result` | nil                                        | Connected graph successfully spanned.           |
+| Valid explicit forest    | non-nil `*Result` | nil                                        | Forest requested and published.                 |
 | Invalid graph policy     | nil                  | sentinel error                             | Graph cannot enter MST snapshot domain.         |
 | Missing Prim root        | nil                  | `ErrEmptyRoot` or `core.ErrVertexNotFound` | Prim root policy failed.                        |
 | Disconnected strict tree | nil                  | `ErrDisconnected`                          | Strict tree cannot span all vertices.           |
@@ -588,7 +588,7 @@ Nil option values return `ErrNilOption`. Nil result data access returns `ErrNilR
               │
               ▼
 ┌───────────────────────────┐
-│ MSTResult publication     │
+│ Result publication     │
 │ detached result artifact  │
 └───────────────────────────┘
 ```
@@ -680,7 +680,7 @@ FUNCTION newMSTSnapshot(graph):
 
 ```text
 FUNCTION kruskalKernel(snapshot, cfg):
-    result = MSTResult{
+    result = Result{
         Algorithm: AlgorithmKruskal
         Mode: cfg.Mode
         VertexCount: len(snapshot.vertices)
@@ -720,7 +720,7 @@ FUNCTION kruskalKernel(snapshot, cfg):
 
 ```text
 FUNCTION primKernel(snapshot, cfg):
-    result = MSTResult{
+    result = Result{
         Algorithm: AlgorithmPrim
         Mode: cfg.Mode
         Root: cfg.Root
@@ -1133,8 +1133,8 @@ Failure caused by the wrong shortcut:
 Complete endpoint-law edge catalog:
 
 | Edge ID | Stored `From` | Stored `To` | Weight | Correct target from `A` | Correct target from `B` |
-|:--|:--|:--|--:|:--|:--|
-| `U01` | `A` | `B` | 7 | `B` | `A` |
+|:--------|:--------------|:------------|-------:|:------------------------|:------------------------|
+| `U01`   | `A`           | `B`         |      7 | `B`                     | `A`                     |
 
 ### 6.7.6. Kruskal merge timeline
 
@@ -1449,15 +1449,15 @@ func main() {
 
 The public result is detached.
 
-`MSTResult.Edges` stores `core.Edge` values, not `*core.Edge` pointers.
+`Result.Edges` stores `core.Edge` values, not `*core.Edge` pointers.
 
 The snapshot adapter also copies edge values before kernel execution.
 
 Consequences:
 
 - mutating returned edge values does not mutate the source graph,
-- `MSTResult.Clone()` deep-copies slice fields,
-- `MSTResult.EdgeValues()` returns a caller-owned slice,
+- `Result.Clone()` deep-copies slice fields,
+- `Result.EdgeValues()` returns a caller-owned slice,
 - callers may serialize or transform results safely after return.
 
 ### 6.9.2. Clone Law
@@ -1465,7 +1465,7 @@ Consequences:
 `Clone()` is nil-safe.
 
 ```go
-var result *mst.MSTResult
+var result *mst.Result
 clone := result.Clone()
 fmt.Println(clone == nil)
 ```
@@ -1486,7 +1486,7 @@ For non-nil results, `Clone()` preserves scalar metadata and deep-copies:
 `EdgeValues()` classifies nil receiver access with `ErrNilResult`.
 
 ```go
-var result *mst.MSTResult
+var result *mst.Result
 edges, err := result.EdgeValues()
 ```
 
@@ -1577,7 +1577,7 @@ Forest mode is not a partial result. It is an explicit publication mode selected
 
 > #### Anti-pattern 9: Discarding result metadata too early
 > 
-> Do not immediately convert `MSTResult` into a raw edge slice unless the downstream stage truly does not need algorithm, mode, root, component, or total-weight metadata.
+> Do not immediately convert `Result` into a raw edge slice unless the downstream stage truly does not need algorithm, mode, root, component, or total-weight metadata.
 
 ### 6.10.2. Best practices
 
@@ -1667,6 +1667,6 @@ if errors.Is(err, mst.ErrDirectedEdge) {
 
 ---
 
-**lvlath/mst**: deterministic by contract, strict in graph semantics, finite in numeric policy, and safe to compose through detached `MSTResult` artifacts.
+**lvlath/mst**: deterministic by contract, strict in graph semantics, finite in numeric policy, and safe to compose through detached `Result` artifacts.
 
 > Next: [7. Max-Flow: Ford-Fulkerson / Edmonds-Karp / Dinic →](FLOW.md)

@@ -87,7 +87,6 @@ func TestNewDense_ZeroShapesAreValid(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
 		t.Run(fmt.Sprintf("%dx%d", tc.rows, tc.cols), func(t *testing.T) {
 			t.Parallel()
 
@@ -471,7 +470,7 @@ func TestInducedCoversZeroSizedAndBounds(t *testing.T) {
 	}
 }
 
-// TestView_PolicyEnforced ensures MatrixView.Set respects the base allowInfDistances policy.
+// TestView_PolicyEnforced ensures View.Set respects the base allowInfDistances policy.
 func TestView_PolicyEnforced(t *testing.T) {
 	t.Run("DefaultPolicyRejectsInf", func(t *testing.T) {
 		m, err := matrix.NewDense(2, 2)
@@ -526,7 +525,7 @@ func TestApplyAndDo(t *testing.T) {
 		}
 	}
 	// Apply a safe transform
-	if err = m.Apply(func(i, j int, v float64) float64 { return v * 2 }); err != nil {
+	if err = m.Apply(func(_, _ int, v float64) float64 { return v * 2 }); err != nil {
 		t.Fatalf("Apply safe: %v", err)
 	}
 	// Apply that yields NaN at a certain position
@@ -542,7 +541,7 @@ func TestApplyAndDo(t *testing.T) {
 
 	// Do walks in row-major order and can stop early.
 	seen := 0
-	m.Do(func(i, j int, v float64) bool {
+	m.Do(func(_, _ int, _ float64) bool {
 		seen++
 		return seen < 2 // stop after visiting 2 elements
 	})
@@ -566,7 +565,7 @@ func TestApply_AllowsPosInfWhenConfigured(t *testing.T) {
 		t.Fatalf("Set finite: %v", err)
 	}
 	// Identity Apply must not fail on +Inf under distance policy.
-	if err = m.Apply(func(i, j int, v float64) float64 { return v }); err != nil {
+	if err = m.Apply(func(_, _ int, v float64) float64 { return v }); err != nil {
 		t.Fatalf("Apply identity (allowInfDistances): %v", err)
 	}
 }

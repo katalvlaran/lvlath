@@ -4,6 +4,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"testing"
 )
@@ -53,7 +54,7 @@ func TestBlossomFlipRejectsNonAlternatingPathBeforeMutation(t *testing.T) {
 	beforeMate := append([]int(nil), engine.mate...)
 	beforeMateEdge := append([]int(nil), engine.mateEdge...)
 
-	if err := engine.flipAugmentingPath([]int{first, second}); err != ErrInvalidMatching {
+	if err = engine.flipAugmentingPath([]int{first, second}); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("non-alternating path got %v", err)
 	}
 

@@ -116,7 +116,7 @@ func TestChristofidesBlossomMetricFuzzSeedN16Seed2(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ChristofidesSolve: %v", err)
 	}
-	if err = validateTSPResultForTest(result, n, opts.StartVertex, Christofides); err != nil {
+	if err = validateResultForTest(result, n, opts.StartVertex, Christofides); err != nil {
 		t.Fatalf("result: %v result=%+v", err, result)
 	}
 }

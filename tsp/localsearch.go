@@ -57,13 +57,13 @@ const (
 var localSearchNow = time.Now
 
 // localSearchResult carries the internal result of a local-search kernel.
-// It is intentionally private because canonical public callers consume TSPResult,
-// while public callers consume canonical TSPResult metadata.
+// It is intentionally private because canonical public callers consume Result,
+// while public callers consume canonical Result metadata.
 //
 // Implementation:
 //   - Stage 1: Kernels fill tour, cost, and iteration count after successful finalization.
 //   - Stage 2: Timeout paths set timedOut=true and still carry a valid current tour.
-//   - Stage 3: solvePreparedMatrix publishes this state into TSPResult.
+//   - Stage 3: solvePreparedMatrix publishes this state into Result.
 //
 // Behavior highlights:
 //   - tour is detached from caller input.
@@ -212,7 +212,7 @@ func finishLocalSearchCurrent(
 	}, nil
 }
 
-// publishLocalSearchResult converts a finalized local-search result to TSPResult.
+// publishLocalSearchResult converts a finalized local-search result to Result.
 // It is used by top-level local-search-only dispatcher branches.
 //
 // Implementation:
@@ -233,7 +233,7 @@ func finishLocalSearchCurrent(
 //   - metricClosureApplied: whether the facade applied APSP closure.
 //
 // Returns:
-//   - *TSPResult: detached canonical local-search result.
+//   - *Result: detached canonical local-search result.
 //
 // Errors:
 //   - None. The caller must pass a finalized localSearchResult.
@@ -256,8 +256,8 @@ func publishLocalSearchResult(
 	opts Options,
 	algorithm Algorithm,
 	metricClosureApplied bool,
-) *TSPResult {
-	return &TSPResult{
+) *Result {
+	return &Result{
 		Tour:                 append([]int(nil), local.tour...),
 		Cost:                 local.cost,
 		IDs:                  append([]string(nil), ids...),
@@ -272,7 +272,7 @@ func publishLocalSearchResult(
 	}
 }
 
-// attachLocalSearchProgress applies a finalized local-search result to an existing TSPResult.
+// attachLocalSearchProgress applies a finalized local-search result to an existing Result.
 // It is used by Christofides post-passes because Christofides already published a feasible
 // Hamiltonian tour and local search only improves or partially improves that tour.
 //
@@ -309,7 +309,7 @@ func publishLocalSearchResult(
 // AI-Hints:
 //   - Do not clear approximation metadata here; local search improves a feasible route but does not prove a new ratio.
 //   - Do not drop partial local-search progress on ErrTimeLimit.
-func attachLocalSearchProgress(result *TSPResult, local localSearchResult) {
+func attachLocalSearchProgress(result *Result, local localSearchResult) {
 	if result == nil || !local.hasTour() {
 		return
 	}

@@ -61,7 +61,7 @@ const (
 	ModeForest Mode = "forest"
 )
 
-// MSTResult is the canonical result artifact for minimum spanning tree and forest computation.
+// Result is the canonical result artifact for minimum spanning tree and forest computation.
 // It captures not only selected edges and total weight, but also the algorithm, mode,
 // root policy, vertex count, and component count used to interpret the result.
 //
@@ -102,9 +102,9 @@ const (
 //   - EdgeValues classifies nil access with ErrNilResult.
 //
 // AI-Hints:
-//   - Do not expose raw internal edge pointers through MSTResult.
+//   - Do not expose raw internal edge pointers through Result.
 //   - Do not treat ComponentRoots as arbitrary DSU roots; they are public interpretation metadata.
-type MSTResult struct {
+type Result struct {
 	// Algorithm is the algorithm selected by the canonical facade.
 	Algorithm Algorithm
 
@@ -154,7 +154,7 @@ type MSTResult struct {
 //
 // AI-Hints:
 //   - Prefer IsNil over comparing helper-returned data when result ownership is unclear.
-func (r *MSTResult) IsNil() bool {
+func (r *Result) IsNil() bool {
 	return r == nil
 }
 
@@ -171,7 +171,7 @@ func (r *MSTResult) IsNil() bool {
 //   - No *core.Edge pointers are introduced.
 //
 // Returns:
-//   - *MSTResult: nil for a nil receiver; otherwise a detached result copy.
+//   - *Result: nil for a nil receiver; otherwise a detached result copy.
 //
 // Determinism:
 //   - Slice order is preserved exactly.
@@ -181,11 +181,11 @@ func (r *MSTResult) IsNil() bool {
 //
 // Notes:
 //   - This is a result-copy helper, not a graph-copy helper.
-//   - The input graph is not referenced by MSTResult, so Clone never touches core.Graph.
+//   - The input graph is not referenced by Result, so Clone never touches core.Graph.
 //
 // AI-Hints:
 //   - Do not replace append-copy with direct slice assignment; that would reintroduce aliasing.
-func (r *MSTResult) Clone() *MSTResult {
+func (r *Result) Clone() *Result {
 	if r == nil {
 		return nil
 	}
@@ -218,7 +218,7 @@ func (r *MSTResult) Clone() *MSTResult {
 //   - error: ErrNilResult for nil receiver.
 //
 // Errors:
-//   - ErrNilResult when called on a nil *MSTResult.
+//   - ErrNilResult when called on a nil *Result.
 //
 // Determinism:
 //   - Edge order is identical to r.Edges.
@@ -231,7 +231,7 @@ func (r *MSTResult) Clone() *MSTResult {
 //
 // AI-Hints:
 //   - Do not expose r.Edges directly from helper methods; preserve result ownership guarantees.
-func (r *MSTResult) EdgeValues() ([]core.Edge, error) {
+func (r *Result) EdgeValues() ([]core.Edge, error) {
 	if r == nil {
 		return nil, ErrNilResult
 	}

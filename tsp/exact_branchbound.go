@@ -16,7 +16,7 @@
 //     all complete instances. A good UB strengthens pruning but never changes
 //     exactness or correctness.
 //     UB costs are stored unrounded inside the search state; display rounding
-//     happens only when publishing TSPResult.
+//     happens only when publishing Result.
 //  3. Search uses DFS with a degree-1 relaxation lower bound:
 //     - For vertices whose outgoing edge is not yet fixed, add minOut[v].
 //     - For vertices whose incoming edge is not yet fixed, add minIn[v].
@@ -191,7 +191,7 @@ func (e *bbEngine) initWeights(weights weightBuffer) error {
 
 // tourCost computes an unrounded tour cost from the engine weight buffer.
 // It is used for incumbent bounds; display stabilization happens only when
-// publishing TSPResult.
+// publishing Result.
 //
 // Implementation:
 //   - Stage 1: Validate closed-tour length and fixed start.
@@ -414,7 +414,7 @@ func (e *bbEngine) buildNeighborOrder() {
 
 // recordUB commits a new incumbent upper bound without rounding its cost.
 // The bound participates in pruning, so cost must remain the raw accumulated
-// value; round1e9 is applied only when publishing TSPResult.
+// value; round1e9 is applied only when publishing Result.
 //
 // Implementation:
 //   - Stage 1: Copy the candidate tour into the engine-owned incumbent buffer.
@@ -869,7 +869,7 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 	}
 }
 
-// result publishes the current Branch-and-Bound incumbent as a canonical TSPResult.
+// result publishes the current Branch-and-Bound incumbent as a canonical Result.
 // Implementation:
 //   - Stage 1: Detach the best tour.
 //   - Stage 2: Stabilize cost.
@@ -880,15 +880,15 @@ func (e *bbEngine) dfs(last int, depth int, costSoFar float64) {
 //   - Does not mutate engine state.
 //
 // Returns:
-//   - *TSPResult: detached result snapshot.
+//   - *Result: detached result snapshot.
 //
 // Complexity:
 //   - Time O(n), Space O(n).
 //
 // AI-Hints:
-//   - Do not expose engine pointers or mutable slices through TSPResult.
-func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
-	return &TSPResult{
+//   - Do not expose engine pointers or mutable slices through Result.
+func (e *bbEngine) result(optimal bool, timedOut bool) *Result {
+	return &Result{
 		Tour:          append([]int(nil), e.bestTour...),
 		Cost:          round1e9(e.bestCost),
 		Algorithm:     BranchAndBound,
@@ -910,7 +910,7 @@ func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
 //
 // Behavior highlights:
 //   - Exact when completed without timeout.
-//   - On timeout, returns a partial TSPResult only if a feasible incumbent exists.
+//   - On timeout, returns a partial Result only if a feasible incumbent exists.
 //   - Canonical callers preserve timeout and search telemetry metadata.
 //
 // Inputs:
@@ -918,7 +918,7 @@ func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
 //   - opts: finalized solver policy.
 //
 // Returns:
-//   - *TSPResult: optimal or partial result.
+//   - *Result: optimal or partial result.
 //   - error: nil, ErrTimeLimit, ErrIncompleteGraph, or validation sentinel.
 //
 // Errors:
@@ -939,7 +939,7 @@ func (e *bbEngine) result(optimal bool, timedOut bool) *TSPResult {
 // AI-Hints:
 //   - Do not clear a valid incumbent on timeout.
 //   - Do not mark timed-out results as Optimal.
-func branchAndBound(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func branchAndBound(dist matrix.Matrix, opts Options) (*Result, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
 	}

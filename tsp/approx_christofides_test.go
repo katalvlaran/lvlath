@@ -54,7 +54,7 @@ func TestChristofidesBlossomHexagon_ValidTourAndRatio(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, n, startV, tsp.Christofides)
+	mustValidResult(t, result, n, startV, tsp.Christofides)
 
 	limit := tsp.ChristofidesApproximationRatio * mstWeight(t, dist)
 	if result.Cost > limit+epsLoose {
@@ -88,14 +88,14 @@ func TestChristofidesBlossomDeterministicRepeat(t *testing.T) {
 
 	first, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, first, n, startV, tsp.Christofides)
+	mustValidResult(t, first, n, startV, tsp.Christofides)
 
 	firstOpen := normalizeClosedToOpen(t, first.Tour)
 
 	Repeat(t, 5, func(t *testing.T) {
 		got, runErr := tsp.ChristofidesSolve(dist, opts)
 		mustNoError(t, runErr)
-		mustValidTSPResult(t, got, n, startV, tsp.Christofides)
+		mustValidResult(t, got, n, startV, tsp.Christofides)
 
 		gotOpen := normalizeClosedToOpen(t, got.Tour)
 		if !slices.Equal(gotOpen, firstOpen) {
@@ -161,7 +161,7 @@ func TestSolveMatrixChristofidesLocalSearchNotWorseThanRawChristofides(t *testin
 
 	polishedResult, err := tsp.SolveMatrix(dist, nil, polished)
 	mustNoError(t, err)
-	mustValidTSPResult(t, polishedResult, n, startV, tsp.Christofides)
+	mustValidResult(t, polishedResult, n, startV, tsp.Christofides)
 
 	if polishedResult.Cost > rawResult.Cost+epsTiny {
 		t.Fatalf("local search worsened result: raw=%.12f polished=%.12f", rawResult.Cost, polishedResult.Cost)
@@ -182,7 +182,7 @@ func TestChristofidesGreedyPublishesNoApproximationRatio(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 12, startV, tsp.Christofides)
+	mustValidResult(t, result, 12, startV, tsp.Christofides)
 
 	mustEqualFloat(t, result.ApproximationRatio, tsp.NoApproximationRatio, epsTiny, "greedy Christofides ratio")
 }
@@ -199,7 +199,7 @@ func TestChristofidesBlossomPublishesOnePointFiveRatio(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 12, 0, tsp.Christofides)
+	mustValidResult(t, result, 12, 0, tsp.Christofides)
 	mustEqualFloat(t, result.ApproximationRatio, 1.5, epsTiny, "approximation ratio")
 }
 
@@ -237,7 +237,7 @@ func TestChristofidesBlossomLargeKNoSizeRefusal(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 128, 0, tsp.Christofides)
+	mustValidResult(t, result, 128, 0, tsp.Christofides)
 }
 
 func TestChristofidesBlossomLargeDenseK128K192(t *testing.T) {
@@ -252,8 +252,6 @@ func TestChristofidesBlossomLargeDenseK128K192(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			dist := seededSymmetricComplete(tc.k, tc.seed)
 
@@ -266,7 +264,7 @@ func TestChristofidesBlossomLargeDenseK128K192(t *testing.T) {
 
 			result, err := tsp.ChristofidesSolve(dist, opts)
 			mustNoError(t, err)
-			mustValidTSPResult(t, result, tc.k, tc.start, tsp.Christofides)
+			mustValidResult(t, result, tc.k, tc.start, tsp.Christofides)
 			mustEqualFloat(t, result.ApproximationRatio, tsp.ChristofidesApproximationRatio, epsTiny, "ratio")
 		})
 	}
@@ -283,7 +281,7 @@ func TestChristofidesBlossomLargeDenseRegressionK128Seed424242(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 128, 0, tsp.Christofides)
+	mustValidResult(t, result, 128, 0, tsp.Christofides)
 	mustEqualFloat(t, result.ApproximationRatio, tsp.ChristofidesApproximationRatio, epsTiny, "ratio")
 }
 
@@ -299,7 +297,7 @@ func TestChristofidesBlossomLargeDenseRegressionK192(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 192, 7, tsp.Christofides)
+	mustValidResult(t, result, 192, 7, tsp.Christofides)
 	mustEqualFloat(t, result.ApproximationRatio, tsp.ChristofidesApproximationRatio, epsTiny, "ratio")
 }
 
@@ -319,7 +317,7 @@ func TestChristofidesBlossomLargeDenseK256Smoke(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 256, 11, tsp.Christofides)
+	mustValidResult(t, result, 256, 11, tsp.Christofides)
 	mustEqualFloat(t, result.ApproximationRatio, tsp.ChristofidesApproximationRatio, epsTiny, "ratio")
 }
 
@@ -334,12 +332,12 @@ func TestChristofidesBlossomLargeDenseDeterministicRepeatK128(t *testing.T) {
 
 	first, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, first, 128, 0, tsp.Christofides)
+	mustValidResult(t, first, 128, 0, tsp.Christofides)
 
 	for run := 0; run < 10; run++ {
 		got, runErr := tsp.ChristofidesSolve(dist, opts)
 		mustNoError(t, runErr)
-		mustValidTSPResult(t, got, 128, 0, tsp.Christofides)
+		mustValidResult(t, got, 128, 0, tsp.Christofides)
 
 		mustEqualInts(t, got.Tour, first.Tour)
 		mustEqualFloat(t, got.Cost, first.Cost, epsTiny, "deterministic large Christofides Blossom cost")

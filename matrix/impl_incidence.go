@@ -4,15 +4,15 @@
 // Package matrix - incidence builders (dense) with strict invariants.
 //
 // Deliverables (per TA-MATRIX):
-//   1) Error-first lightweight getters (no panics): VertexCount/EdgeCount validate receiver and shape
-//      and return sentinel errors (ErrNilMatrix, ErrDimensionMismatch) instead of panicking.
-//   2) Clarified signs: directed uses −1 at source and +1 at target; undirected uses +1/+1;
-//      self-loop in directed sums (−1 + +1) in the *same row* ⇒ algebraic zero; the builder MUST
-//      skip such zero columns; in undirected a loop contributes +2 in the single incident row
-//      (both half-edges touch the same vertex).
-//   3) AllowMulti=false ⇒ first-edge-wins policy (directed: ordered (u,v); undirected: unordered {min,max}).
-//   4) Deterministic order: vertices follow provided order; edge columns follow stable core edge order.
-//   5) Sentinel errors unified (ErrGraphNil, ErrUnknownVertex, ErrDimensionMismatch, ErrNilMatrix).
+//  1. Error-first lightweight getters (no panics): VertexCount/EdgeCount validate receiver and shape
+//     and return sentinel errors (ErrNilMatrix, ErrDimensionMismatch) instead of panicking.
+//  2. Clarified signs: directed uses −1 at source and +1 at target; undirected uses +1/+1;
+//     self-loop in directed sums (−1 + +1) in the *same row* ⇒ algebraic zero; the builder MUST
+//     skip such zero columns; in undirected a loop contributes +2 in the single incident row
+//     (both half-edges touch the same vertex).
+//  3. AllowMulti=false ⇒ first-edge-wins policy (directed: ordered (u,v); undirected: unordered {min,max}).
+//  4. Deterministic order: vertices follow provided order; edge columns follow stable core edge order.
+//  5. Sentinel errors unified (ErrGraphNil, ErrUnknownVertex, ErrDimensionMismatch, ErrNilMatrix).
 //
 // AI-Hints:
 //   - Use AllowMulti=false when you need a canonical incidence (no duplicate columns).
@@ -26,12 +26,10 @@
 //     Options.Weighted may be present for API symmetry but does not affect entries (only -1/0/+1, and +2 for undirected loops).
 //   - Directed self-loops algebraically sum (-1 + +1) in the same row to a zero column. We do not materialize zero columns:
 //     the builder MUST skip such columns to keep the incidence basis minimal and deterministic.
-
 package matrix
 
 import (
 	"fmt"
-	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
 )
@@ -377,51 +375,4 @@ func (im *IncidenceMatrix) EdgeEndpoints(j int) (fromID, toID string, err error)
 	e := im.Edges[j] // column-aligned edge metadata
 
 	return e.From, e.To, nil // endpoints as stored by core
-}
-
-// --- Dense incidence builder convenience -----------------------------------------------------------
-
-// buildDenseIncidenceFromGraph CONVENIENCE wrapper for callers that have only *core.Graph*.
-// Implementation:
-//   - Stage 1: validate g (ErrGraphNil).
-//   - Stage 2: pull vertex IDs, enforce lexicographic order if needed (canonical layouts).
-//   - Stage 3: pull edges in stable core order and delegate to BuildDenseIncidence.
-//
-// Behavior highlights:
-//   - Guarantees canonical row order independent of upstream vertex insertion order.
-//
-// Returns:
-//   - idx (VertexIndex), cols (Edges), mat (*Dense), error.
-//
-// Errors:
-//   - ErrGraphNil, plus BuildDenseIncidence errors wrapped with context.
-//
-// Determinism:
-//   - Stable rows/columns by design.
-//
-// Complexity:
-//   - Time O(|V| log |V| + |E|), Space O(|V| + |E|).
-//
-// Notes:
-//   - The public constructor NewIncidenceMatrix trusts core’s order for performance; tests may use this wrapper.
-//
-// AI-Hints:
-//   - Prefer this helper in golden tests when vertex order must be strictly lexicographic.
-func buildDenseIncidenceFromGraph(g *core.Graph, opts Options) (map[string]int, []*core.Edge, *Dense, error) {
-	// Validate graph argument.
-	if g == nil {
-		return nil, nil, nil, fmt.Errorf("buildDenseIncidenceFromGraph: %w", ErrGraphNil)
-	}
-
-	// Pull vertex IDs and enforce lexicographic order for canonical layouts in tests.
-	ids := g.Vertices()
-	if !isLexSorted(ids) {
-		cp := make([]string, len(ids))
-		copy(cp, ids)
-		sort.Strings(cp)
-		ids = cp
-	}
-
-	// Pull edges in stable order and delegate to the main builder.
-	return BuildDenseIncidence(ids, g.Edges(), opts)
 }

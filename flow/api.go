@@ -121,7 +121,7 @@ func MaxFlow(g *core.Graph, source, sink string, opts ...Option) (*MaxFlowResult
 // New code should prefer MaxFlow with WithAlgorithm(AlgorithmDinic).
 //
 // Implementation:
-//   - Stage 1: Convert FlowOptions into canonical Option values.
+//   - Stage 1: Convert Options into canonical Option values.
 //   - Stage 2: Force AlgorithmDinic for the canonical dispatcher.
 //   - Stage 3: Delegate to MaxFlow through runMaxFlowLegacy.
 //   - Stage 4: Project MaxFlowResult into the historical tuple shape.
@@ -136,7 +136,7 @@ func MaxFlow(g *core.Graph, source, sink string, opts ...Option) (*MaxFlowResult
 //   - g: weighted capacity graph.
 //   - source: non-empty source vertex ID.
 //   - sink: non-empty sink vertex ID different from source.
-//   - opts: legacy FlowOptions.
+//   - opts: legacy Options.
 //
 // Returns:
 //   - float64: max-flow value or partial pushed value on interruption.
@@ -161,7 +161,7 @@ func MaxFlow(g *core.Graph, source, sink string, opts ...Option) (*MaxFlowResult
 func Dinic(
 	g *core.Graph,
 	source, sink string,
-	opts FlowOptions,
+	opts Options,
 ) (maxFlow float64, residualGraph *core.Graph, err error) {
 	return runMaxFlowLegacy(g, source, sink, opts, AlgorithmDinic)
 }
@@ -170,7 +170,7 @@ func Dinic(
 // New code should prefer MaxFlow with WithAlgorithm(AlgorithmEdmondsKarp).
 //
 // Implementation:
-//   - Stage 1: Convert FlowOptions into canonical Option values.
+//   - Stage 1: Convert Options into canonical Option values.
 //   - Stage 2: Force AlgorithmEdmondsKarp for the canonical dispatcher.
 //   - Stage 3: Delegate to MaxFlow through runMaxFlowLegacy.
 //   - Stage 4: Project MaxFlowResult into the historical tuple shape.
@@ -184,7 +184,7 @@ func Dinic(
 //   - g: weighted capacity graph.
 //   - source: non-empty source vertex ID.
 //   - sink: non-empty sink vertex ID different from source.
-//   - opts: legacy FlowOptions.
+//   - opts: legacy Options.
 //
 // Returns:
 //   - float64: max-flow value or partial pushed value on interruption.
@@ -209,7 +209,7 @@ func Dinic(
 func EdmondsKarp(
 	g *core.Graph,
 	source, sink string,
-	opts FlowOptions,
+	opts Options,
 ) (maxFlow float64, residualGraph *core.Graph, err error) {
 	return runMaxFlowLegacy(g, source, sink, opts, AlgorithmEdmondsKarp)
 }
@@ -218,7 +218,7 @@ func EdmondsKarp(
 // New code should prefer MaxFlow with WithAlgorithm(AlgorithmFordFulkerson).
 //
 // Implementation:
-//   - Stage 1: Convert FlowOptions into canonical Option values.
+//   - Stage 1: Convert Options into canonical Option values.
 //   - Stage 2: Force AlgorithmFordFulkerson for the canonical dispatcher.
 //   - Stage 3: Delegate to MaxFlow through runMaxFlowLegacy.
 //   - Stage 4: Project MaxFlowResult into the historical tuple shape.
@@ -232,7 +232,7 @@ func EdmondsKarp(
 //   - g: weighted capacity graph.
 //   - source: non-empty source vertex ID.
 //   - sink: non-empty sink vertex ID different from source.
-//   - opts: legacy FlowOptions.
+//   - opts: legacy Options.
 //
 // Returns:
 //   - float64: max-flow value or partial pushed value on interruption.
@@ -257,7 +257,7 @@ func EdmondsKarp(
 func FordFulkerson(
 	g *core.Graph,
 	source, sink string,
-	opts FlowOptions,
+	opts Options,
 ) (maxFlow float64, residualGraph *core.Graph, err error) {
 	return runMaxFlowLegacy(g, source, sink, opts, AlgorithmFordFulkerson)
 }
@@ -500,7 +500,7 @@ func notifyAugmentation(ctx context.Context, cfg options, event AugmentationEven
 // It preserves source compatibility while preventing duplicated algorithmic logic.
 //
 // Implementation:
-//   - Stage 1: Convert FlowOptions into canonical Option values.
+//   - Stage 1: Convert Options into canonical Option values.
 //   - Stage 2: Force the requested legacy algorithm explicitly.
 //   - Stage 3: Delegate to MaxFlow.
 //   - Stage 4: Project MaxFlowResult into the legacy tuple shape.
@@ -514,7 +514,7 @@ func notifyAugmentation(ctx context.Context, cfg options, event AugmentationEven
 //   - g: weighted capacity graph.
 //   - source: source vertex ID.
 //   - sink: sink vertex ID.
-//   - legacy: old FlowOptions value.
+//   - legacy: old Options value.
 //   - algorithm: algorithm forced by the legacy wrapper.
 //
 // Returns:
@@ -542,7 +542,7 @@ func notifyAugmentation(ctx context.Context, cfg options, event AugmentationEven
 func runMaxFlowLegacy(
 	g *core.Graph,
 	source, sink string,
-	legacy FlowOptions,
+	legacy Options,
 	algorithm Algorithm,
 ) (float64, *core.Graph, error) {
 	// Delegate to the canonical facade with explicit algorithm selection.

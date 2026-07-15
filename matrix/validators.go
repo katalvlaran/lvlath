@@ -26,10 +26,6 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// zeroTol is a tiny tolerance used only internally for guards where appropriate.
-// We keep it explicit to avoid "magic numbers" inline.
-const zeroTol = 0.0
-
 // distanceMatrixAllowsInfByDefault fixes the distance/APSP convention:
 //
 //   - ordinary Dense matrices reject +Inf by default;
@@ -75,24 +71,6 @@ func isNonFinite(v float64) bool {
 // isNaNOrNegInf REPORTS whether v is NaN or -Inf (allows +Inf as "no path").
 func isNaNOrNegInf(v float64) bool {
 	return math.IsNaN(v) || math.IsInf(v, -1)
-}
-
-// isNaNOrPosInf REPORTS whether v is NaN or +Inf.
-//
-// Implementation:
-//   - Stage 1: math.IsNaN(v).
-//   - Stage 2: math.IsInf(v, +1).
-//
-// Behavior highlights:
-//   - Used by adjacency-style scans that intentionally skip NaN/+Inf as
-//     non-contributing values.
-//   - This helper does NOT declare -Inf valid. Callers that cannot tolerate -Inf
-//     must reject it explicitly or use isNonFinite.
-//
-// AI-Hints:
-//   - Do not document -Inf as a no-path sentinel in matrix; distance no-path is +Inf.
-func isNaNOrPosInf(v float64) bool {
-	return math.IsNaN(v) || math.IsInf(v, 1)
 }
 
 // validateTol NORMALIZES a tolerance to a non-negative finite value.

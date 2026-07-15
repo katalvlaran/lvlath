@@ -29,7 +29,7 @@ import (
 //   - cfg: finalized option policy.
 //
 // Returns:
-//   - *MSTResult: canonical detached result.
+//   - *Result: canonical detached result.
 //   - error: ErrDisconnected in strict tree mode when not all vertices connect.
 //
 // Errors:
@@ -44,10 +44,10 @@ import (
 //
 // AI-Hints:
 //   - Do not replace stable sort with an unstable sort; equal-weight MST representatives would drift.
-func kruskalKernel(snapshot *mstSnapshot, cfg Options) (*MSTResult, error) {
+func kruskalKernel(snapshot *mstSnapshot, cfg Options) (*Result, error) {
 	vertexCount := len(snapshot.vertices)
 
-	result := &MSTResult{
+	result := &Result{
 		Algorithm:   AlgorithmKruskal,
 		Mode:        cfg.Mode,
 		Edges:       make([]core.Edge, 0, maxMSTEdgeCapacity(vertexCount)),

@@ -23,7 +23,7 @@ import (
 // Behavior highlights:
 //   - dist is the final matrix consumed by solver kernels.
 //   - n is cached to avoid repeated Rows calls across dispatcher policy.
-//   - metricClosureApplied is published into TSPResult.
+//   - metricClosureApplied is published into Result.
 //
 // Inputs:
 //   - Produced only by prepareSolverDistanceMatrix.
@@ -55,12 +55,12 @@ type preparedMatrix struct {
 	n int
 
 	// metricClosureApplied records whether APSP closure produced dist.
-	// The facade publishes this value into TSPResult.
+	// The facade publishes this value into Result.
 	metricClosureApplied bool
 }
 
 // publishKernelResult attaches facade-owned metadata to a result-native solver output.
-// It is the only solver-level publisher used after kernels return canonical TSPResult.
+// It is the only solver-level publisher used after kernels return canonical Result.
 //
 // Implementation:
 //   - Stage 1: Return nil when the selected kernel returned nil.
@@ -81,7 +81,7 @@ type preparedMatrix struct {
 //   - metricClosureApplied: true when APSP closure was applied before solving.
 //
 // Returns:
-//   - *TSPResult: detached canonical facade result.
+//   - *Result: detached canonical facade result.
 //
 // Errors:
 //   - None. Inputs are assumed validated by caller-owned facade stages.
@@ -100,8 +100,8 @@ type preparedMatrix struct {
 // AI-Hints:
 //   - Do not infer Optimal from Cost.
 //   - Do not clear timeout or search telemetry fields.
-//   - Do not attach live matrix, graph, or engine references to TSPResult.
-func publishKernelResult(result *TSPResult, ids []string, opts Options, metricClosureApplied bool) *TSPResult {
+//   - Do not attach live matrix, graph, or engine references to Result.
+func publishKernelResult(result *Result, ids []string, opts Options, metricClosureApplied bool) *Result {
 	if result == nil {
 		return nil
 	}
@@ -242,7 +242,7 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (preparedMatr
 //   - Stage 2: Run the chosen kernel.
 //   - Stage 3: Apply local-search post-pass where the selected policy permits it.
 //   - Stage 4: Attach facade metadata to the result-native solver output.
-//   - Stage 5: Publish a detached TSPResult with canonical metadata.
+//   - Stage 5: Publish a detached Result with canonical metadata.
 //
 // Behavior highlights:
 //   - Assumes prepareSolverDistanceMatrix and validateIDs already ran.
@@ -258,7 +258,7 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (preparedMatr
 //   - metricClosureApplied: true when the facade or adapter applied APSP closure.
 //
 // Returns:
-//   - *TSPResult: canonical successful or partial solver result.
+//   - *Result: canonical successful or partial solver result.
 //   - error: sentinel-classified failure.
 //
 // Errors:
@@ -275,7 +275,11 @@ func prepareSolverDistanceMatrix(dist matrix.Matrix, opts Options) (preparedMatr
 // AI-Hints:
 //   - Do not call this from public code.
 //   - Do not add validation here except final invariant checks; public facades own validation.
-func solvePreparedMatrix(prepared preparedMatrix, ids []string, opts Options) (*TSPResult, error) {
+//   - High complexity is due to strict option branching and pipeline orchestration.
+//   - Splitting this routing logic would make tracking the overall execution flow harder.
+//
+// nolint:gocyclo
+func solvePreparedMatrix(prepared preparedMatrix, ids []string, opts Options) (*Result, error) {
 	switch opts.Algo {
 	case Christofides:
 		result, err := christofides(prepared.dist, opts)
@@ -471,7 +475,7 @@ func chooseAlgorithm(n int, opts Options) Algorithm {
 //   - Stage 1: Delegate nil, typed-nil, and square shape checks to matrix.ValidateSquare.
 //   - Stage 2: Return handled=false for normal n>=2 instances.
 //   - Stage 3: Validate the single diagonal value and optional ID mapping.
-//   - Stage 4: Publish an exact canonical TSPResult with detached slices.
+//   - Stage 4: Publish an exact canonical Result with detached slices.
 //
 // Behavior highlights:
 //   - Does not run metric closure; n==1 closure is a no-op.
@@ -484,7 +488,7 @@ func chooseAlgorithm(n int, opts Options) Algorithm {
 //   - opts: caller policy already checked by validateOptionsStandalone.
 //
 // Returns:
-//   - *TSPResult: degenerate exact result when handled.
+//   - *Result: degenerate exact result when handled.
 //   - bool: true when n==1 or when shape validation produced a terminal error.
 //   - error: nil on valid n==1 or sentinel-classified failure.
 //
@@ -510,7 +514,7 @@ func chooseAlgorithm(n int, opts Options) Algorithm {
 // AI-Hints:
 //   - Do not route n==1 through Held-Karp or local search.
 //   - Do not treat empty matrix as a zero-cost tour.
-func solveDegenerateIfAny(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, bool, error) {
+func solveDegenerateIfAny(dist matrix.Matrix, ids []string, opts Options) (*Result, bool, error) {
 	if err := matrix.ValidateSquare(dist); err != nil {
 		if errors.Is(err, matrix.ErrNilMatrix) {
 			return nil, true, errors.Join(ErrNilDistanceMatrix, err)
@@ -557,7 +561,7 @@ func solveDegenerateIfAny(dist matrix.Matrix, ids []string, opts Options) (*TSPR
 		return nil, true, err
 	}
 
-	return &TSPResult{
+	return &Result{
 		Tour:                 []int{0, 0},
 		Cost:                 0,
 		IDs:                  append([]string(nil), ids...),

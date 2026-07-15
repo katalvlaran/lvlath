@@ -225,7 +225,7 @@ func WithRoot(root string) Option {
 }
 
 // WithForest enables explicit minimum spanning forest mode.
-// Disconnected graphs return an MSTResult containing one tree per connected component.
+// Disconnected graphs return an Result containing one tree per connected component.
 //
 // Implementation:
 //   - Stage 1: Set Options.Mode to ModeForest.

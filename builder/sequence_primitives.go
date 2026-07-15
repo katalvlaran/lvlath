@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // impl_sequences_shared.go - shared defaults and helpers for sequence builders.
@@ -53,6 +55,9 @@ type edgePair struct {
 
 // rngFrom returns cfg.rng if present (shared stream), else a local rand
 // seeded by 'seed'. This keeps determinism across composed calls.
+// This is not used for security-sensitive operations or cryptography.
+//
+//nolint:gosec // G404: weak random provider is required for mathematical simulations
 func rngFrom(cfg builderConfig, seed int64) *rand.Rand {
 	if cfg.rng != nil {
 		return cfg.rng

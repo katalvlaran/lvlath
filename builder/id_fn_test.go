@@ -64,7 +64,6 @@ func TestIDFns(t *testing.T) {
 	// iterate over each test case in the table
 	var got string
 	for _, tc := range tests {
-		tc := tc // capture the current value for the parallel subtest
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel() // allow subtests to run in parallel
 			if tc.shouldPanic {

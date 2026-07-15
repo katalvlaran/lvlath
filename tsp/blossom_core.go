@@ -97,7 +97,7 @@ type blossomOptions struct {
 //   - Public ApproximationRatio and Exact/Optimal flags must not depend on these counters.
 //
 // AI-Hints:
-//   - Do not expose blossomStats through TSPResult without a public compatibility decision.
+//   - Do not expose blossomStats through Result without a public compatibility decision.
 //   - Do not use Shrinks==0 as proof that Blossom was unnecessary; some valid instances need no contraction.
 type blossomStats struct {
 	// Augmentations counts successful augmenting-path applications.
@@ -437,7 +437,7 @@ type blossomEngine struct {
 	dual []float64
 
 	// stats records private deterministic telemetry for tests and benchmarks.
-	// It is not part of the public TSPResult contract.
+	// It is not part of the public Result contract.
 	stats blossomStats
 }
 

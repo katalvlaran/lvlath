@@ -13,7 +13,6 @@
 // Notes:
 //   - Implementations live in dedicated kernel files (same package) to keep roles clean.
 //   - All kernels must use central validators and return plain sentinels or wrapped via matrixErrorf at the facade.
-
 package matrix
 
 import (
@@ -682,6 +681,11 @@ func MatVec(m Matrix, x []float64) ([]float64, error) {
 // AI-Hints:
 //   - Good defaults: tol≈1e-10, maxIter≈100..300 for n≤128;
 //   - Precondition by symmetrizing if input comes from numerically noisy ops.
+//   - High cyclomatic complexity is intentional to avoid splitting the core mathematical
+//     logic (state machine and convergence loop) into fragmented helper functions,
+//     which improves both performance (by reducing call overhead) and readability.
+//
+// nolint:gocyclo
 func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 	// Validate: notNil; Square; Symmetric;
 	if err := ValidateSymmetric(m, tol); err != nil {
@@ -712,7 +716,7 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 		maxOff, off        float64 // maxOff - current max |A[p,q]|; off - temporary
 		app, aqq           float64 // diagonal entries A[p,p], A[q,q]
 		aip, aiq, qip, qiq float64 // temporaries for A[i,p], A[i,q] and Q[i,p], Q[i,q]
-		new_ip, new_iq     float64 // updated values for A[i,p] and A[i,q]
+		newIP, newIQ       float64 // updated values for A[i,p] and A[i,q]
 		apq                float64 // off-diagonal entry A[p,q]
 		theta, t           float64 // intermediate rotation parameters
 		c, s               float64 // cosine and sine of the rotation angle
@@ -800,11 +804,11 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 				aip = Adense.data[i*n+p]
 				aiq = Adense.data[i*n+q]
 				// new values
-				new_ip = c*aip - s*aiq
-				new_iq = s*aip + c*aiq
+				newIP = c*aip - s*aiq
+				newIQ = s*aip + c*aiq
 				// assign symmetrically to [i,p] and [p,i], [i,q] and [q,i]
-				Adense.data[i*n+p], Adense.data[p*n+i] = new_ip, new_ip
-				Adense.data[i*n+q], Adense.data[q*n+i] = new_iq, new_iq
+				Adense.data[i*n+p], Adense.data[p*n+i] = newIP, newIP
+				Adense.data[i*n+q], Adense.data[q*n+i] = newIQ, newIQ
 			}
 			// update diagonals and zero out A[p,q], A[q,p]
 			Adense.data[p*n+p] = c*c*app - 2*c*s*apq + s*s*aqq
@@ -824,18 +828,18 @@ func Eigen(m Matrix, tol float64, maxIter int) ([]float64, Matrix, error) {
 				if err != nil {
 					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("At(%d,%d): %w", i, q, err))
 				}
-				new_ip = c*aip - s*aiq
-				new_iq = s*aip + c*aiq
-				if err = aRaw.Set(i, p, new_ip); err != nil {
+				newIP = c*aip - s*aiq
+				newIQ = s*aip + c*aiq
+				if err = aRaw.Set(i, p, newIP); err != nil {
 					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", i, p, err))
 				}
-				if err = aRaw.Set(p, i, new_ip); err != nil {
+				if err = aRaw.Set(p, i, newIP); err != nil {
 					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", p, i, err))
 				}
-				if err = aRaw.Set(i, q, new_iq); err != nil {
+				if err = aRaw.Set(i, q, newIQ); err != nil {
 					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", i, q, err))
 				}
-				if err = aRaw.Set(q, i, new_iq); err != nil {
+				if err = aRaw.Set(q, i, newIQ); err != nil {
 					return nil, nil, matrixErrorf(opEigen, fmt.Errorf("Set(%d,%d): %w", q, i, err))
 				}
 			}
@@ -996,14 +1000,14 @@ func Inverse(m Matrix) (Matrix, error) {
 	Ud, okU := Umat.(*Dense)
 	if okL && okU {
 		// row‐major stride
-		var baseUi, baseLi int
+		var baseUI, baseLI int
 		for col = 0; col < n; col++ {
 			// 4.1 Forward substitution: L*y = e_col
 			for i = 0; i < n; i++ {
 				sum = ZeroSum
-				baseLi = i * n
+				baseLI = i * n
 				for k = 0; k < i; k++ {
-					sum += Ld.data[baseLi+k] * y[k]
+					sum += Ld.data[baseLI+k] * y[k]
 				}
 				if i == col {
 					y[i] = 1.0 - sum
@@ -1014,11 +1018,11 @@ func Inverse(m Matrix) (Matrix, error) {
 			// 4.2 Backward substitution: U*x = y
 			for i = n - 1; i >= 0; i-- {
 				sum = ZeroSum
-				baseUi = i * n
+				baseUI = i * n
 				for k = i + 1; k < n; k++ {
-					sum += Ud.data[baseUi+k] * x[k]
+					sum += Ud.data[baseUI+k] * x[k]
 				}
-				pivot = Ud.data[baseUi+i]
+				pivot = Ud.data[baseUI+i]
 				if pivot == ZeroPivot {
 					return nil, matrixErrorf(opInverse, ErrSingular)
 				}
@@ -1271,6 +1275,11 @@ func LU(m Matrix) (Matrix, Matrix, error) {
 //
 // AI-Hints:
 //   - For tall-skinny, prefer blocked/TSQR variants outside this package when cache behavior matters more.
+//   - The core mathematical operations (Householder reflections or Gram-Schmidt)
+//     are kept in a single monolithic block to ensure optimal CPU cache locality
+//     and clear top-to-bottom step alignment with standard mathematical textbooks.
+//
+// nolint:gocyclo
 func QR(m Matrix) (Matrix, Matrix, error) {
 	// Validate input non‐nil and square
 	if err := ValidateNotNil(m); err != nil {

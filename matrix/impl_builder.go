@@ -11,7 +11,7 @@
 // Policy & Contracts:
 //   - Adjacency: 0/weight; metric-closure toggles to distances (+Inf as “no edge”, diag=0) then APSP.
 //   - Incidence: directed (−1 on source, +1 on target; directed self-loop ⇒ skipped column),
-//                undirected (+1/+1; self-loop ⇒ +2 in the single incident row).
+//     undirected (+1/+1; self-loop ⇒ +2 in the single incident row).
 //
 // Determinism:
 //   - First-edge-wins when AllowMulti=false (ordered or unordered key by directedness).
@@ -20,7 +20,6 @@
 // AI-Hints:
 //   - If you need lex order, pre-sort vertices in the caller.
 //   - For sparse graphs, consider future sparse adapters; these are dense by design.
-
 package matrix
 
 import (
@@ -188,21 +187,6 @@ func inspectEdgeWeights(edges []*core.Edge) (edgeWeightProfile, error) {
 	return p, nil
 }
 
-// allZeroWeights reports whether no inspected edge has a non-zero weight.
-//
-// Notes:
-//   - Kept as a compatibility/internal readability helper.
-//   - Nil edge slots make the input invalid; this helper returns false in that case
-//     because callers that need diagnostics should use inspectEdgeWeights directly.
-func allZeroWeights(edges []*core.Edge) bool {
-	p, err := inspectEdgeWeights(edges)
-	if err != nil {
-		return false
-	}
-
-	return !p.hasNonZero
-}
-
 // orderedPair builds (u,v) key for directed de-duplication.
 // Complexity: O(1).
 func orderedPair(u, v int) pairKey { return pairKey{u: u, v: v} }
@@ -225,19 +209,6 @@ func lookupIndex(idx map[string]int, id string) (int, error) {
 	}
 
 	return 0, fmt.Errorf("matrix: unknown vertex %q: %w", id, ErrUnknownVertex)
-}
-
-// isLexSorted returns true if s is non-decreasing in lexicographic order.
-// Used defensively for vertex-list order enforcement in wrapper.
-// Complexity: O(n).
-func isLexSorted(s []string) bool {
-	for i := 1; i < len(s); i++ {
-		if s[i-1] > s[i] {
-			return false
-		}
-	}
-
-	return true
 }
 
 // resolveAdjacencyBuildPolicy derives the exact dense adjacency encoding.
@@ -484,6 +455,11 @@ func normalizeInfNoEdgeDistanceDiagonal(d *Dense) error {
 //
 // AI-Hints:
 //   - Use MetricClosure to turn adjacency into distances (+Inf as unreachable), diag forced to 0.
+//   - Complex structural checks, edge case handling, and multi-dimensional matrix
+//     memory mappings are bundled together to ensure all graph validation logic
+//     happens in one place, avoiding state leakage across multiple sub-functions.
+//
+// nolint:gocyclo
 func BuildDenseAdjacency(
 	vertices []string,
 	edges []*core.Edge,
@@ -869,8 +845,8 @@ func BuildDenseIncidence(
 	var j, su, sv int
 	for j = 0; j < Ep; j++ {
 		e = eff[j]
-		su, _ = idx[e.From]
-		sv, _ = idx[e.To]
+		su = idx[e.From]
+		sv = idx[e.To]
 
 		if directed {
 			// Directed incidence: su!=sv (directed loops already skipped).

@@ -45,7 +45,7 @@ import (
 //   - Stage 2: Build a complete symmetric Euclidean distance matrix in kilometers.
 //   - Stage 3: Configure Christofides with exact Blossom matching.
 //   - Stage 4: Execute tsp.SolveMatrix through the canonical public matrix facade.
-//   - Stage 5: Project vertex indices back to waypoint names with TSPResult.VertexTour.
+//   - Stage 5: Project vertex indices back to waypoint names with Result.VertexTour.
 //   - Stage 6: Interpret the route against a validated one-sortie distance envelope.
 //
 // Behavior highlights:

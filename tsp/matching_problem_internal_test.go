@@ -4,6 +4,7 @@
 package tsp
 
 import (
+	"errors"
 	"math"
 	"math/rand"
 	"slices"
@@ -236,13 +237,13 @@ func TestBuildMatchingProblemCopiesLocalCostsInOddOrder(t *testing.T) {
 func TestBuildMatchingProblemRejectsMalformedOddSet(t *testing.T) {
 	dist := internalMatrixFromRows(internalCompleteRows(4))
 
-	if _, err := buildMatchingProblem([]int{0, 1, 2}, dist); err != ErrInvalidMatching {
+	if _, err := buildMatchingProblem([]int{0, 1, 2}, dist); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("odd cardinality: got %v", err)
 	}
-	if _, err := buildMatchingProblem([]int{0, 1, 1, 2}, dist); err != ErrInvalidMatching {
+	if _, err := buildMatchingProblem([]int{0, 1, 1, 2}, dist); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("duplicate odd vertex: got %v", err)
 	}
-	if _, err := buildMatchingProblem([]int{0, 1, 2, 9}, dist); err != ErrInvalidMatching {
+	if _, err := buildMatchingProblem([]int{0, 1, 2, 9}, dist); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("out of range odd vertex: got %v", err)
 	}
 }

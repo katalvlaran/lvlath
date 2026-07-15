@@ -19,7 +19,7 @@ import (
 //
 // Behavior highlights:
 //   - Determinism: traversal preserves the neighbor order provided by core.Graph.NeighborIDs.
-//   - Partial result: on early exit (cancel, neighbor fetch error, hook error), returns a partial BFSResult with error.
+//   - Partial result: on early exit (cancel, neighbor fetch error, hook error), returns a partial Result with error.
 //
 // Inputs:
 //   - g: graph instance; must be non-nil.
@@ -27,7 +27,7 @@ import (
 //   - opts: functional options; last-writer-wins.
 //
 // Returns:
-//   - *BFSResult: traversal result (may be partial on error).
+//   - *Result: traversal result (may be partial on error).
 //   - error: sentinel-classified error (use errors.Is).
 //
 // Errors:
@@ -51,7 +51,7 @@ import (
 //   - Hooks are observers; do not mutate the graph or you risk violating graph invariants.
 //   - If you need weighted shortest paths, use a dedicated algorithm (e.g., Dijkstra); BFS is edge-count distance.
 //   - Avoid time-based cancellation in Examples; use WithCancel + deterministic trigger.
-func BFS(g *core.Graph, startID string, opts ...Option) (*BFSResult, error) {
+func BFS(g *core.Graph, startID string, opts ...Option) (*Result, error) {
 	// Stage 1: Validate graph pointer first.
 	if g == nil {
 		return nil, ErrGraphNil

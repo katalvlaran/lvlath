@@ -19,11 +19,11 @@ func TestEwBroadcastSubCols_FastAndFallback_Match(t *testing.T) {
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 10, 20, 30})
 	colMeans := []float64{4, 5, 6}
 
-	gotFast, err := matrix.EwBroadcastSubCols_TestOnly(X, colMeans)
+	gotFast, err := matrix.EwBroadcastSubColsTestOnly(X, colMeans)
 	if err != nil {
 		t.Fatalf("fast: %v", err)
 	}
-	gotSlow, err := matrix.EwBroadcastSubCols_TestOnly(hide{X}, colMeans)
+	gotSlow, err := matrix.EwBroadcastSubColsTestOnly(hide{X}, colMeans)
 	if err != nil {
 		t.Fatalf("slow: %v", err)
 	}
@@ -46,7 +46,7 @@ func TestEwBroadcastSubCols_FastAndFallback_Match(t *testing.T) {
 func TestEwBroadcastSubCols_DimMismatch_Err(t *testing.T) {
 	t.Parallel()
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 4, 5, 6})
-	_, err := matrix.EwBroadcastSubCols_TestOnly(X, []float64{0, 0})
+	_, err := matrix.EwBroadcastSubColsTestOnly(X, []float64{0, 0})
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
 	}
@@ -60,11 +60,11 @@ func TestEwBroadcastSubRows_FastAndFallback_Match(t *testing.T) {
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 10, 20, 30})
 	rowMeans := []float64{2, 20}
 
-	gotFast, err := matrix.EwBroadcastSubRows_TestOnly(X, rowMeans)
+	gotFast, err := matrix.EwBroadcastSubRowsTestOnly(X, rowMeans)
 	if err != nil {
 		t.Fatalf("fast: %v", err)
 	}
-	gotSlow, err := matrix.EwBroadcastSubRows_TestOnly(hide{X}, rowMeans)
+	gotSlow, err := matrix.EwBroadcastSubRowsTestOnly(hide{X}, rowMeans)
 	if err != nil {
 		t.Fatalf("slow: %v", err)
 	}
@@ -87,7 +87,7 @@ func TestEwBroadcastSubRows_FastAndFallback_Match(t *testing.T) {
 func TestEwBroadcastSubRows_DimMismatch_Err(t *testing.T) {
 	t.Parallel()
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 4, 5, 6})
-	_, err := matrix.EwBroadcastSubRows_TestOnly(X, []float64{0})
+	_, err := matrix.EwBroadcastSubRowsTestOnly(X, []float64{0})
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
 	}
@@ -101,11 +101,11 @@ func TestEwScaleCols_FastAndFallback_Match(t *testing.T) {
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, -1, -2, -3})
 	scale := []float64{10, 0.5, -2}
 
-	gotFast, err := matrix.EwScaleCols_TestOnly(X, scale)
+	gotFast, err := matrix.EwScaleColsTestOnly(X, scale)
 	if err != nil {
 		t.Fatalf("fast: %v", err)
 	}
-	gotSlow, err := matrix.EwScaleCols_TestOnly(hide{X}, scale)
+	gotSlow, err := matrix.EwScaleColsTestOnly(hide{X}, scale)
 	if err != nil {
 		t.Fatalf("slow: %v", err)
 	}
@@ -128,7 +128,7 @@ func TestEwScaleCols_FastAndFallback_Match(t *testing.T) {
 func TestEwScaleCols_DimMismatch_Err(t *testing.T) {
 	t.Parallel()
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 4, 5, 6})
-	_, err := matrix.EwScaleCols_TestOnly(X, []float64{1, 2})
+	_, err := matrix.EwScaleColsTestOnly(X, []float64{1, 2})
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
 	}
@@ -142,11 +142,11 @@ func TestEwScaleRows_FastAndFallback_Match(t *testing.T) {
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, -1, -2, -3})
 	scale := []float64{3, -0.5}
 
-	gotFast, err := matrix.EwScaleRows_TestOnly(X, scale)
+	gotFast, err := matrix.EwScaleRowsTestOnly(X, scale)
 	if err != nil {
 		t.Fatalf("fast: %v", err)
 	}
-	gotSlow, err := matrix.EwScaleRows_TestOnly(hide{X}, scale)
+	gotSlow, err := matrix.EwScaleRowsTestOnly(hide{X}, scale)
 	if err != nil {
 		t.Fatalf("slow: %v", err)
 	}
@@ -169,7 +169,7 @@ func TestEwScaleRows_FastAndFallback_Match(t *testing.T) {
 func TestEwScaleRows_DimMismatch_Err(t *testing.T) {
 	t.Parallel()
 	X := NewFilledDense(t, 2, 3, []float64{1, 2, 3, 4, 5, 6})
-	_, err := matrix.EwScaleRows_TestOnly(X, []float64{1})
+	_, err := matrix.EwScaleRowsTestOnly(X, []float64{1})
 	if !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("want ErrDimensionMismatch, got %v", err)
 	}
@@ -185,7 +185,7 @@ func TestEwReplaceInfNaN_ReplacesNonFinite(t *testing.T) {
 	bad := []float64{0, math.Inf(1), math.Inf(-1), math.NaN(), 1.5, -2.0}
 	X, _ := matrix.NewPreparedDense(2, 3, matrix.WithNoValidateNaNInf())
 	MustFillRowMajor(t, X, bad)
-	got, err := matrix.EwReplaceInfNaN_TestOnly(X, repl)
+	got, err := matrix.EwReplaceInfNaNTestOnly(X, repl)
 	if err != nil {
 		t.Fatalf("ReplaceInfNaN: %v", err)
 	}
@@ -205,10 +205,10 @@ func TestEwReplaceInfNaN_InvalidReplacement_Err(t *testing.T) {
 	t.Parallel()
 
 	X := NewFilledDense(t, 1, 1, []float64{0})
-	if _, err := matrix.EwReplaceInfNaN_TestOnly(X, math.NaN()); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwReplaceInfNaNTestOnly(X, math.NaN()); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("want ErrNaNInf, got %v", err)
 	}
-	if _, err := matrix.EwReplaceInfNaN_TestOnly(X, math.Inf(1)); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwReplaceInfNaNTestOnly(X, math.Inf(1)); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("want ErrNaNInf, got %v", err)
 	}
 }
@@ -220,11 +220,11 @@ func TestEwClipRange_ClampAndSwap(t *testing.T) {
 
 	X := NewFilledDense(t, 2, 3, []float64{-10, -1, 0, 1, 5, 10})
 
-	gotSwap, err := matrix.EwClipRange_TestOnly(X, 5, -1) // swap to [-1,5]
+	gotSwap, err := matrix.EwClipRangeTestOnly(X, 5, -1) // swap to [-1,5]
 	if err != nil {
 		t.Fatalf("swap: %v", err)
 	}
-	gotNorm, err := matrix.EwClipRange_TestOnly(X, -1, 5)
+	gotNorm, err := matrix.EwClipRangeTestOnly(X, -1, 5)
 	if err != nil {
 		t.Fatalf("norm: %v", err)
 	}
@@ -245,10 +245,10 @@ func TestEwClipRange_InvalidBounds_Err(t *testing.T) {
 	t.Parallel()
 
 	X := NewFilledDense(t, 1, 1, []float64{0})
-	if _, err := matrix.EwClipRange_TestOnly(X, math.Inf(1), 0); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwClipRangeTestOnly(X, math.Inf(1), 0); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("want ErrNaNInf, got %v", err)
 	}
-	if _, err := matrix.EwClipRange_TestOnly(X, -1, math.NaN()); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwClipRangeTestOnly(X, -1, math.NaN()); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("want ErrNaNInf, got %v", err)
 	}
 }
@@ -261,19 +261,19 @@ func TestEwAllClose_BasicTruthTable(t *testing.T) {
 	a := NewFilledDense(t, 2, 2, []float64{0, 0, 0, 0})
 	b := NewFilledDense(t, 2, 2, []float64{0, 0, 0, 0})
 
-	ok, err := matrix.EwAllClose_TestOnly(a, b, 1e-8, 1e-8)
+	ok, err := matrix.EwAllCloseTestOnly(a, b, 1e-8, 1e-8)
 	if err != nil || !ok {
 		t.Fatalf("identical: ok=%v err=%v", ok, err)
 	}
 
 	_ = b.Set(1, 1, 1e-10)
-	ok, err = matrix.EwAllClose_TestOnly(a, b, 1e-8, 1e-8)
+	ok, err = matrix.EwAllCloseTestOnly(a, b, 1e-8, 1e-8)
 	if err != nil || !ok {
 		t.Fatalf("within tol: ok=%v err=%v", ok, err)
 	}
 
 	_ = b.Set(0, 0, 1e-6)
-	ok, err = matrix.EwAllClose_TestOnly(a, b, 0, 1e-8)
+	ok, err = matrix.EwAllCloseTestOnly(a, b, 0, 1e-8)
 	if err != nil {
 		t.Fatalf("outside err: %v", err)
 	}
@@ -287,24 +287,24 @@ func TestEwAllClose_ErrorsAndNormalization(t *testing.T) {
 
 	a := NewFilledDense(t, 2, 2, []float64{0, 0, 0, 0})
 	b := NewFilledDense(t, 2, 3, []float64{0, 0, 0, 0, 0, 0})
-	if _, err := matrix.EwAllClose_TestOnly(a, b, 1e-6, 1e-6); !errors.Is(err, matrix.ErrDimensionMismatch) {
+	if _, err := matrix.EwAllCloseTestOnly(a, b, 1e-6, 1e-6); !errors.Is(err, matrix.ErrDimensionMismatch) {
 		t.Fatalf("dim mismatch: %v", err)
 	}
-	if _, err := matrix.EwAllClose_TestOnly(nil, a, 1e-6, 1e-6); !errors.Is(err, matrix.ErrNilMatrix) {
+	if _, err := matrix.EwAllCloseTestOnly(nil, a, 1e-6, 1e-6); !errors.Is(err, matrix.ErrNilMatrix) {
 		t.Fatalf("nil a: %v", err)
 	}
-	if _, err := matrix.EwAllClose_TestOnly(a, nil, 1e-6, 1e-6); !errors.Is(err, matrix.ErrNilMatrix) {
+	if _, err := matrix.EwAllCloseTestOnly(a, nil, 1e-6, 1e-6); !errors.Is(err, matrix.ErrNilMatrix) {
 		t.Fatalf("nil b: %v", err)
 	}
-	if _, err := matrix.EwAllClose_TestOnly(a, a, math.NaN(), 1e-6); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwAllCloseTestOnly(a, a, math.NaN(), 1e-6); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("rtol NaN: %v", err)
 	}
-	if _, err := matrix.EwAllClose_TestOnly(a, a, 1e-6, math.Inf(-1)); !errors.Is(err, matrix.ErrNaNInf) {
+	if _, err := matrix.EwAllCloseTestOnly(a, a, 1e-6, math.Inf(-1)); !errors.Is(err, matrix.ErrNaNInf) {
 		t.Fatalf("atol Inf: %v", err)
 	}
 
 	c := NewFilledDense(t, 1, 1, []float64{5e-6})
-	ok, err := matrix.EwAllClose_TestOnly(NewFilledDense(t, 1, 1, []float64{0}), c, -1e-5, 1e-5) // negatives abs-ed
+	ok, err := matrix.EwAllCloseTestOnly(NewFilledDense(t, 1, 1, []float64{0}), c, -1e-5, 1e-5) // negatives abs-ed
 	if err != nil {
 		t.Fatalf("neg tol err: %v", err)
 	}

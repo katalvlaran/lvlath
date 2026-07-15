@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 
 // Package builder provides deterministic, option-driven “builders” for graphs
 // (via lvlath/core) and numeric datasets (slices; optionally consumable by
@@ -47,7 +49,7 @@
 // Configuration (functional options)
 // -----------------------------------------------------------------------------
 //
-//   - BuilderOption mutates an internal builderConfig snapshot (immutable to impls).
+//   - Option mutates an internal builderConfig snapshot (immutable to impls).
 //     Typical fields (kept stable across implementations):
 //     – rng / seed               - for stochastic builders (rngFrom honors cfg.rng first)
 //     – idFn                     - vertex ID scheme for graph builders
@@ -175,7 +177,7 @@
 //  1. Implement it in its own impl_<name>.go and reuse shared defaults/helpers
 //     from sequence_primitives.go (rngFrom, shared constants).
 //  2. Keep determinism and validation rules identical to the existing trio.
-//  3. If options are required, route BuilderOption → builderConfig → extract*Params.
+//  3. If options are required, route Option → builderConfig → extract*Params.
 //
 // -----------------------------------------------------------------------------
 // Compatibility guarantees

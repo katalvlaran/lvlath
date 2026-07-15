@@ -539,6 +539,11 @@ func (e *blossomEngine) expand(node int) error {
 //   - Do not start from baseChildIndex blindly.
 //   - Do not label all cycle children.
 //   - Reparent the existing outer child from the contracted node to the base child.
+//   - Edmonds' Blossom algorithm is inherently branch-heavy due to multiple pointer and
+//     index manipulations for contracted/expanded nodes. Breaking this method apart
+//     introduces high risk of violating delicate graph invariants.
+//
+// nolint:gocyclo
 func (e *blossomEngine) expandInnerBlossomInForest(node int) error {
 	if node < e.problem.n || node >= len(e.cycles) {
 		return ErrInvalidMatching
@@ -1364,61 +1369,6 @@ func (e *blossomEngine) cycleSteps(node int) ([]blossomCycleStep, error) {
 	}
 
 	return steps, nil
-}
-
-// restoreAllContractedBlossoms expands every allocated contracted blossom after
-// a committed augmentation. This correctness-first cleanup prevents stale bases
-// and stale internal blossom matching structure from leaking into the next
-// augmentation search.
-//
-// Implementation:
-//   - Stage 1: Walk allocated blossom node IDs in reverse order so nested blossoms
-//     are restored before their parents are discarded.
-//   - Stage 2: Restore child top-level ownership for every still-allocated blossom.
-//   - Stage 3: Clear contracted node activity, labels, parent links, root links, and dual.
-//   - Stage 4: Leave mate[] and mateEdge[] untouched.
-//
-// Behavior highlights:
-//   - Does not mutate the committed original-vertex matching.
-//   - Does not require blossom labels to be meaningful.
-//   - Does not preserve blossom duals across augmentation attempts.
-//   - Makes the next forest search start from explicit current matching structure.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - error: nil after all allocated blossoms are restored.
-//
-// Errors:
-//   - ErrInvalidMatching for malformed cycle metadata or ownership corruption.
-//
-// Determinism:
-//   - Reverse node order gives deterministic nested cleanup.
-//
-// Complexity:
-//   - Time O(number of allocated blossom members), Space O(1).
-//
-// Notes:
-//   - This is deliberately conservative. It trades performance for correctness
-//     until persistent-blossom base update is implemented.
-//
-// AI-Hints:
-//   - Do not clear mate[] here.
-//   - Do not call resetForest instead of this; resetForest does not restore ownership.
-//   - Do not keep contracted blossoms after augmentation unless base updates are implemented.
-func (e *blossomEngine) restoreAllContractedBlossoms() error {
-	for node := e.nextNode - 1; node >= e.problem.n; node-- {
-		if !e.isAllocatedBlossom(node) {
-			continue
-		}
-
-		if err := e.restoreChildrenAsTopLevel(node); err != nil {
-			return err
-		}
-	}
-
-	return nil
 }
 
 // redirectForestThroughContractedBlossom rewires active forest nodes that still point

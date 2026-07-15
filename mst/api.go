@@ -2,7 +2,7 @@
 // Copyright (C) 2025-2026 katalvlaran
 
 // Package mst exposes the canonical MST facade and focused algorithm wrappers.
-// Public wrappers select an algorithm while preserving the MSTResult contract.
+// Public wrappers select an algorithm while preserving the Result contract.
 package mst
 
 import "github.com/katalvlaran/lvlath/core"
@@ -13,7 +13,7 @@ import "github.com/katalvlaran/lvlath/core"
 //   - Stage 1: Assemble and validate explicit options.
 //   - Stage 2: Adapt core.Graph into a detached deterministic mstSnapshot.
 //   - Stage 3: Dispatch to exactly one MST kernel.
-//   - Stage 4: Publish MSTResult with ownership and component metadata.
+//   - Stage 4: Publish Result with ownership and component metadata.
 //
 // Behavior highlights:
 //   - Default policy is Kruskal + strict tree.
@@ -26,7 +26,7 @@ import "github.com/katalvlaran/lvlath/core"
 //   - opts: explicit option list; nil options are rejected.
 //
 // Returns:
-//   - *MSTResult: canonical detached result artifact.
+//   - *Result: canonical detached result artifact.
 //   - error: sentinel-classified failure.
 //
 // Errors:
@@ -53,7 +53,7 @@ import "github.com/katalvlaran/lvlath/core"
 //
 // AI-Hints:
 //   - Do not add graph traversal logic to wrappers; the facade must remain the public single source.
-func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error) {
+func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*Result, error) {
 	cfg, err := ApplyOptions(opts...)
 	if err != nil {
 		return nil, err
@@ -80,7 +80,7 @@ func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error) 
 // Implementation:
 //   - Stage 1: Delegate to MinimumSpanningTree with WithAlgorithm(AlgorithmKruskal).
 //   - Stage 2: Reuse canonical option assembly, graph snapshot validation, and Kruskal kernel.
-//   - Stage 3: Return the canonical MSTResult without discarding metadata.
+//   - Stage 3: Return the canonical Result without discarding metadata.
 //
 // Behavior highlights:
 //   - Uses ModeStrictTree by default.
@@ -91,7 +91,7 @@ func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error) 
 //   - graph: non-nil weighted undirected *core.Graph with no directed edges.
 //
 // Returns:
-//   - *MSTResult: detached canonical Kruskal result.
+//   - *Result: detached canonical Kruskal result.
 //   - error: sentinel-classified failure from the canonical facade.
 //
 // Errors:
@@ -112,7 +112,7 @@ func MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error) 
 //
 // AI-Hints:
 //   - Do not bypass MinimumSpanningTree here; wrapper honesty requires one canonical facade.
-func Kruskal(graph *core.Graph) (*MSTResult, error) {
+func Kruskal(graph *core.Graph) (*Result, error) {
 	return MinimumSpanningTree(graph, WithAlgorithm(AlgorithmKruskal))
 }
 
@@ -122,7 +122,7 @@ func Kruskal(graph *core.Graph) (*MSTResult, error) {
 // Implementation:
 //   - Stage 1: Delegate to MinimumSpanningTree with WithAlgorithm(AlgorithmPrim) and WithRoot(root).
 //   - Stage 2: Reuse canonical option assembly, graph snapshot validation, and Prim kernel.
-//   - Stage 3: Return the canonical MSTResult without discarding metadata.
+//   - Stage 3: Return the canonical Result without discarding metadata.
 //
 // Behavior highlights:
 //   - Uses ModeStrictTree by default.
@@ -135,7 +135,7 @@ func Kruskal(graph *core.Graph) (*MSTResult, error) {
 //   - root: non-empty vertex ID used as the strict Prim start vertex.
 //
 // Returns:
-//   - *MSTResult: detached canonical Prim result.
+//   - *Result: detached canonical Prim result.
 //   - error: sentinel-classified failure from the canonical facade.
 //
 // Errors:
@@ -158,6 +158,6 @@ func Kruskal(graph *core.Graph) (*MSTResult, error) {
 //
 // AI-Hints:
 //   - Do not replace this wrapper with a second Prim implementation; that would split the kernel contract.
-func Prim(graph *core.Graph, root string) (*MSTResult, error) {
+func Prim(graph *core.Graph, root string) (*Result, error) {
 	return MinimumSpanningTree(graph, WithAlgorithm(AlgorithmPrim), WithRoot(root))
 }

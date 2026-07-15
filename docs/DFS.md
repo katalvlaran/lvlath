@@ -12,7 +12,7 @@
     - Behaviors described here are part of the public contract.
     - Determinism rules described here are part of the public contract.
     - Error-classification rules described here are part of the public contract.
-    - Result semantics for DFSResult and CycleDetectionResult are part of the public contract.
+    - Result semantics for Result and CycleDetectionResult are part of the public contract.
     - Any incompatible change must be explicit, documented, and versioned.
 
   Scope:
@@ -46,7 +46,7 @@ Why use `lvlath/dfs` instead of a handwritten recursive loop?
     *   *Lvlath:* Expands candidate relations in the exact order returned by `core.Graph.Neighbors(u)`. The package does not inject a hidden fallback sort during traversal. Cycle canonicalization yields byte-for-byte stable witness signatures, so the same graph produces the same traversal and witness output on every run.
 2. **Post-Order Semantics by Contract**
     *   *Others:* Blur the distinction between discovery, entry, and completion.
-    *   *Lvlath:* `DFSResult.Order` is strictly the *finish order* (post-order). Pre-order visibility is securely delegated to explicit `OnVisit` hooks.
+    *   *Lvlath:* DFS `Result.Order` is strictly the *finish order* (post-order). Pre-order visibility is securely delegated to explicit `OnVisit` hooks.
 3. **Witness Sets over Theorem Provers**
     *   *Others:* Attempt NP-hard exhaustive simple-cycle enumeration, leading to catastrophic exponential memory/time blowups in dense graphs.
     *   *Lvlath:* Cycle detection returns a deterministic *witness set* of canonical cycles. It proves cyclicity and locates logical loops without halting your production system.
@@ -87,7 +87,7 @@ For a directed acyclic graph (DAG), the final topological order guarantees that 
 $$ \forall (u \to v) \in E_{directed}, \quad \text{Index}(u) < \text{Index}(v) \text{ in Output} $$
 
 ### 4.2.7. Complexity Summary
-*   **DFS Traversal / DFSForest:** $T = O(V + E)$, $S = O(V)$, excluding hook and filter cost.
+*   **DFS Traversal / Forest:** $T = O(V + E)$, $S = O(V)$, excluding hook and filter cost.
 *   **Topological Sort:** $T = O(V + E)$, $S = O(V)$.
 *   **Cycle Detection:** $T = O(V + E + \sum |witness_i|)$, $S = O(V + L_{max} + \sum |witness_i|)$.
 ---
@@ -97,8 +97,8 @@ $$ \forall (u \to v) \in E_{directed}, \quad \text{Index}(u) < \text{Index}(v) \
 ### 4.3.1. Public Entry Points
 
 ```go
-func DFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error)
-func DFSForest(g *core.Graph, opts ...Option) (*DFSResult, error)
+func DFS(g *core.Graph, startID string, opts ...Option) (*Result, error)
+func Forest(g *core.Graph, opts ...Option) (*Result, error)
 
 func DetectCycles(g *core.Graph) (*CycleDetectionResult, error)
 func HasCycle(g *core.Graph) (bool, error)
@@ -107,10 +107,10 @@ func TopologicalSort(g *core.Graph, options ...TopoOption) ([]string, error)
 func TopologicalSortContext(ctx context.Context, g *core.Graph) ([]string, error)
 ```
 
-### 4.3.2. DFSResult Semantics
+### 4.3.2. Result Semantics
 
 ```go
-type DFSResult struct {
+type Result struct {
 	Order            []string
 	Depth            map[string]int
 	Parent           map[string]string
@@ -128,7 +128,7 @@ type DFSResult struct {
 | `SkippedNeighbors` | Count of explicitly filtered neighbors.     |           YES           | Diagnostic for policy boundaries.              |
 
 > [!IMPORTANT]
-> **Partial-Result Contract:** If traversal aborts due to `context.Canceled` or a hook error, `DFSResult` is returned alongside the error. The `Order` field is cleared (`nil`), but `Visited`, `Depth`, and `Parent` retain the structural progress up to the exact point of failure.
+> **Partial-Result Contract:** If traversal aborts due to `context.Canceled` or a hook error, DFS `Result` is returned alongside the error. The `Order` field is cleared (`nil`), but `Visited`, `Depth`, and `Parent` retain the structural progress up to the exact point of failure.
 
 ### 4.3.3. CycleDetectionResult
 
@@ -169,7 +169,7 @@ Options implement a last-writer-wins functional assembly. Invalid explicit optio
 *   `WithOnExit(fn)`: Executes right before a vertex is marked Black and pushed to `Order`.
 *   `WithMaxDepth(limit)`: The horizon cut. Enforced *before* entering deeper vertices. Use `NoDepthLimit (-1)` for unrestricted.
 *   `WithFilterNeighbor(fn)`: A policy firewall. Returning `false` blocks traversal into the candidate, treating the edge as non-existent for the current traversal.
-*   `WithFullTraversal()`: Transforms single-source search into a graph-wide DFS forest. Used implicitly by `DFSForest()`.
+*   `WithFullTraversal()`: Transforms single-source search into a graph-wide DFS forest. Used implicitly by `Forest()`.
 
 ### 4.4.2. Topological-Sort Options
 *   `WithCancelContext(ctx)`: Topo-sort is specialized and uses a narrower option surface `TopoOption`.
@@ -351,7 +351,7 @@ import (
 //   - policy filtering via WithFilterNeighbor,
 //   - entry tracing via WithOnVisit,
 //   - finish tracing via WithOnExit,
-//   - stable consumption of DFSResult.Order as post-order,
+//   - stable consumption of Result.Order as post-order,
 //   - reproducible skipped-neighbor diagnostics.
 func main() {
 
@@ -438,7 +438,7 @@ func main() {
 **Why the result looks like this:**
 - `entered` is a deterministic pre-order trace produced by `WithOnVisit`.
 - `finished` is a deterministic completion trace produced by `WithOnExit`.
-- `postorder` matches `finished` exactly because `DFSResult.Order` is a finish-order artifact, not a discovery-order artifact.
+- `postorder` matches `finished` exactly because `Result.Order` is a finish-order artifact, not a discovery-order artifact.
 - `quarantine-lab` remains part of the topology, but the filter blocks traversal into it; that rejected relation is reported through `SkippedNeighbors`.
 - This pattern is useful when policy must affect traversal behavior without mutating the underlying graph.
 
@@ -464,7 +464,7 @@ import (
 //   and proof that depth resets independently for each disconnected region.
 //
 // What this example demonstrates:
-//   - DFSForest for disconnected topology,
+//   - Forest for disconnected topology,
 //   - deterministic forest traversal,
 //   - root detection via absence from Parent,
 //   - depth reset per forest root,
@@ -492,7 +492,7 @@ func main() {
 	_, _ = graph.AddEdge("zone-z:1-worker", "zone-z:2-jobs", 0)
 
 	// Stage 2: Run full-coverage DFS across all disconnected components.
-	result, err := dfs.DFSForest(graph)
+	result, err := dfs.Forest(graph)
 	if err != nil {
 		fmt.Println("error:", err)
 		return
@@ -538,7 +538,7 @@ func main() {
 [![Go Playground](https://img.shields.io/badge/Go_Playground-DFS_Full_Traversal_Inventory_Sweep-blue?logo=go)](https://go.dev/play/p/eXn8Nbnn8av)
 
 **Why the result looks like this:**
-- `DFSForest` covers every disconnected island, not just one component.
+- `Forest` covers every disconnected island, not just one component.
 - Each new forest root starts with depth `0`.
 - Root vertices do not appear in `Parent`; that is the correct public way to identify forest roots from the result.
 - Sorting the derived `roots` slice is the caller’s responsibility because the roots are extracted from a map, while the package itself remains deterministic at traversal level.
@@ -787,7 +787,7 @@ func main() {
 
 These scenarios illustrate the intended professional use of `lvlath/dfs`:
 - use `DFS` when you need deterministic depth-first structural exploration,
-- use `DFSForest` when coverage must span disconnected regions,
+- use `Forest` when coverage must span disconnected regions,
 - use `WithMaxDepth` to bound operational blast radius,
 - use `TopologicalSort` for deterministic dependency execution plans,
 - use `DetectCycles` for fast, auditable loop witnesses rather than exhaustive cycle enumeration.
@@ -800,13 +800,13 @@ To use `lvlath/dfs` correctly in production pipelines, treat its traversal artif
 
 > [!CAUTION]
 > **1. Discovery vs. Finish Order**
-> `DFSResult.Order` strictly records the **Post-Order** (when vertices *finish* traversal).
+> `Result.Order` strictly records the **Post-Order** (when vertices *finish* traversal).
 > *   **The Pitfall:** Do not confuse this with entry/discovery order.
 > *   **The Solution:** If you need to track the discovery sequence, use the `WithOnVisit` hook to append vertices to your own slice.
 
 > [!CAUTION]
 > **2. Results on Aborting Failure**
-> When a traversal is aborted (e.g., via `context.Cancellation`), the `DFSResult.Order` is set to `nil`.
+> When a traversal is aborted (e.g., via `context.Cancellation`), the `Result.Order` is set to `nil`.
 > *   **Why:** A partial post-order is mathematically meaningless for most algorithms.
 > *   **The Practice:** Read `Visited`, `Depth`, or `Parent` instead to analyze the state of the graph reached before the crash.
 
@@ -838,7 +838,7 @@ To use `lvlath/dfs` correctly in production pipelines, treat its traversal artif
 
 > [!NOTE]
 > **8. Ownership & Determinism**
-> *   **Ownership:** Once returned, the maps and slices inside `DFSResult` belong entirely to the caller. The package does not retain or mutate them.
+> *   **Ownership:** Once returned, the maps and slices inside `Result` belong entirely to the caller. The package does not retain or mutate them.
 > *   **Determinism:** Treat it as a **contract**. If the output order changes for the same graph, it indicates a change in graph ordering or a regression in the implementation.
 
 ---

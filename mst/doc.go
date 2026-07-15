@@ -10,7 +10,7 @@
 //   - Explicit MSF: return one minimum spanning tree per connected component.
 //   - Algorithms: Kruskal and Prim.
 //   - Input model: *core.Graph with weighted, undirected graph policy.
-//   - Result model: MSTResult as the canonical public artifact.
+//   - Result model: Result as the canonical public artifact.
 //
 // What MST solves:
 //
@@ -70,17 +70,17 @@
 //
 // Public API:
 //
-//   - MinimumSpanningTree(graph *core.Graph, opts ...Option) (*MSTResult, error)
+//   - MinimumSpanningTree(graph *core.Graph, opts ...Option) (*Result, error)
 //     Canonical facade. It assembles options, validates graph policy, snapshots graph
 //     data, dispatches to one algorithm, and returns a detached result artifact.
 //
-//   - Kruskal(graph *core.Graph) (*MSTResult, error)
+//   - Kruskal(graph *core.Graph) (*Result, error)
 //     Focused strict-tree wrapper selecting AlgorithmKruskal.
 //
-//   - Prim(graph *core.Graph, root string) (*MSTResult, error)
+//   - Prim(graph *core.Graph, root string) (*Result, error)
 //     Focused strict-tree wrapper selecting AlgorithmPrim with an explicit root.
 //
-//   - MSTResult
+//   - Result
 //     Canonical result artifact containing Algorithm, Mode, Root, Edges,
 //     TotalWeight, VertexCount, ComponentCount, and ComponentRoots.
 //
@@ -166,10 +166,10 @@
 //
 // Result ownership:
 //
-//   - MSTResult contains detached core.Edge values.
+//   - Result contains detached core.Edge values.
 //   - No live *core.Edge pointers are retained in public results.
-//   - MSTResult.Clone returns detached slice fields.
-//   - MSTResult.EdgeValues returns a caller-owned edge slice.
+//   - Result.Clone returns detached slice fields.
+//   - Result.EdgeValues returns a caller-owned edge slice.
 //
 // Concurrency:
 //
@@ -179,7 +179,7 @@
 //
 // AI-Hints:
 //
-//   - Do not reintroduce tuple-return public APIs; MSTResult is the canonical result.
+//   - Do not reintroduce tuple-return public APIs; Result is the canonical result.
 //   - Do not use epsilon inside sort or heap comparators; reject NaN/Inf and compare finite weights directly.
 //   - Do not use edge.To as the next endpoint for undirected traversal; resolve endpoints relative to the source vertex.
 //   - Do not silently return a forest from strict tree mode; require WithForest.

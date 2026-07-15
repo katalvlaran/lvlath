@@ -7,7 +7,7 @@
 //   - Provide a cache-friendly row-major buffer with the explicit index formula i*cols + j.
 //   - Guarantee safety at the public surface: At/Set return errors instead of panicking.
 //   - Keep algorithmic determinism (fixed loop orders, no map iteration).
-//   - Support no-copy views (MatrixView) and copy-based submatrix extraction (Induced).
+//   - Support no-copy views (View) and copy-based submatrix extraction (Induced).
 //   - Enforce a numeric policy (optional rejection of NaN/Inf) from a single source of truth.
 //
 // AI-Hints:
@@ -18,7 +18,6 @@
 //
 // Complexity quicksheet:
 //   - NewDense: O(r*c) zero-init; At/Set: O(1); Clone: O(r*c); View: O(1); Induced: O(r'*c').
-
 package matrix
 
 import (
@@ -962,7 +961,7 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 //
 // Implementation:
 //   - Stage 1: validate window bounds; allow zero-area.
-//   - Stage 2: return MatrixView with offsets.
+//   - Stage 2: return View with offsets.
 //
 // Behavior highlights:
 //   - Writes via view reflect in base; policy is inherited.
@@ -971,7 +970,7 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 //   - r0,c0: top-left offsets; rows, cols: window size (≥0).
 //
 // Returns:
-//   - *MatrixView or error.
+//   - *View or error.
 //
 // Errors:
 //   - ErrBadShape when the window is invalid.
@@ -987,7 +986,7 @@ func (m *Dense) Apply(f func(i, j int, v float64) float64) error {
 //
 // AI-Hints:
 //   - Use for sliding-window ops; copy only when lifetime must be independent.
-func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
+func (m *Dense) View(r0, c0, rows, cols int) (*View, error) {
 	// Validate: nil receiver must not panic; View cannot exist without a base.
 	if m == nil {
 		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrNilMatrix)
@@ -1014,7 +1013,7 @@ func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
 	if rows > m.r-r0 || cols > m.c-c0 {
 		return nil, fmt.Errorf("Dense.%s(%d,%d,%d,%d): %w", ctxView, r0, c0, rows, cols, ErrOutOfRange)
 	}
-	return &MatrixView{
+	return &View{
 		base: m,    // share storage
 		r0:   r0,   // top row in base
 		c0:   c0,   // left col in base
@@ -1023,9 +1022,9 @@ func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error) {
 	}, nil
 }
 
-// MatrixView is a non-owning window into a Dense (shared storage).
+// View is a non-owning window into a Dense (shared storage).
 // Not implementing Matrix interface to avoid accidental copies in ops.
-type MatrixView struct {
+type View struct {
 	base *Dense // underlying storage owner
 	r0   int    // top-left row offset in base
 	c0   int    // top-left col offset in base
@@ -1035,7 +1034,7 @@ type MatrixView struct {
 
 // Rows return the number of rows in the view.
 // Complexity: O(1).
-func (v *MatrixView) Rows() int {
+func (v *View) Rows() int {
 	if v == nil {
 		return 0
 	}
@@ -1045,7 +1044,7 @@ func (v *MatrixView) Rows() int {
 
 // Cols return the number of columns in the view.
 // Complexity: O(1).
-func (v *MatrixView) Cols() int {
+func (v *View) Cols() int {
 	if v == nil {
 		return 0
 	}
@@ -1065,13 +1064,13 @@ func (v *MatrixView) Cols() int {
 //
 // Complexity:
 //   - Time O(1), Space O(1).
-func (v *MatrixView) At(i, j int) (float64, error) {
+func (v *View) At(i, j int) (float64, error) {
 	// Validate: nil view or nil base must not panic.
 	if v == nil || v.base == nil {
-		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrNilMatrix)
+		return 0, fmt.Errorf("View.At(%d,%d): %w", i, j, ErrNilMatrix)
 	}
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
-		return 0, fmt.Errorf("MatrixView.At(%d,%d): %w", i, j, ErrOutOfRange)
+		return 0, fmt.Errorf("View.At(%d,%d): %w", i, j, ErrOutOfRange)
 	}
 
 	// Translate to base coordinates and load directly from the flat buffer.
@@ -1112,20 +1111,20 @@ func (v *MatrixView) At(i, j int) (float64, error) {
 //
 // AI-Hints:
 //   - Allocate distance-policy bases when the view must allow +Inf.
-func (v *MatrixView) Set(i, j int, val float64) error {
+func (v *View) Set(i, j int, val float64) error {
 	// Validate: nil view or nil base must not panic.
 	if v == nil || v.base == nil {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrNilMatrix)
+		return fmt.Errorf("View.Set(%d,%d): %w", i, j, ErrNilMatrix)
 	}
 
 	// Validate: enforce view bounds first (more intuitive error for callers).
 	if i < 0 || i >= v.r || j < 0 || j >= v.c {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, ErrOutOfRange)
+		return fmt.Errorf("View.Set(%d,%d): %w", i, j, ErrOutOfRange)
 	}
 
 	// Validate: enforce base numeric policy exactly once.
 	if err := v.base.validateValue(val); err != nil {
-		return fmt.Errorf("MatrixView.Set(%d,%d): %w", i, j, err)
+		return fmt.Errorf("View.Set(%d,%d): %w", i, j, err)
 	}
 
 	// Execute: translate to base coordinates and write-through.

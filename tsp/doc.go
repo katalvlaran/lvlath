@@ -163,9 +163,9 @@
 // Invalid options are rejected. The package does not infer hidden policy changes
 // from matrix size, runtime pressure, or algorithm failure.
 //
-// # TSPResult Law
+// # Result Law
 //
-// TSPResult is the canonical public result. It owns detached slices and publishes
+// Result is the canonical public result. It owns detached slices and publishes
 // solver facts instead of requiring callers to infer behavior from Options alone.
 //
 // Result fields communicate:
@@ -268,5 +268,5 @@
 //   - Do not allow +Inf into final solver kernels.
 //   - Do not compare error strings; use errors.Is.
 //   - Do not describe ATSP 3-opt* as full ATSP 3-opt.
-//   - Do not infer optimality from a low cost; read TSPResult.Optimal.
+//   - Do not infer optimality from a low cost; read Result.Optimal.
 package tsp

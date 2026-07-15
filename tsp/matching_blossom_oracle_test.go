@@ -11,9 +11,6 @@ import (
 func TestBlossomMatchesOracleForSeededEvenK2To16(t *testing.T) {
 	for k := 2; k <= 16; k += 2 {
 		for seed := int64(1); seed <= 100; seed++ {
-			k := k
-			seed := seed
-
 			t.Run(fmt.Sprintf("k=%02d/seed=%03d", k, seed), func(t *testing.T) {
 				problem := internalSeededMatchingProblem(k, seed)
 
@@ -64,8 +61,6 @@ func TestBlossomRegressionSeeds(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			problem := internalSeededMatchingProblem(tc.k, tc.seed)
 
@@ -90,8 +85,6 @@ func TestBlossomRegressionSeeds(t *testing.T) {
 
 func TestBlossomWideRangeWeightsMatchesOracleSmall(t *testing.T) {
 	for _, seed := range []int64{7, 42, 1001, 9001, 17017, 424242} {
-		seed := seed
-
 		t.Run(fmt.Sprintf("seed=%d", seed), func(t *testing.T) {
 			problem := internalWideRangeMatchingProblem(12, seed)
 
@@ -116,8 +109,6 @@ func TestBlossomWideRangeWeightsMatchesOracleSmall(t *testing.T) {
 
 func TestBlossomEqualWeightsDeterministic(t *testing.T) {
 	for _, k := range []int{4, 8, 16, 32, 64} {
-		k := k
-
 		t.Run(fmt.Sprintf("k=%d", k), func(t *testing.T) {
 			problem := internalConstantMatchingProblem(k, 1)
 
@@ -191,8 +182,6 @@ func TestBlossomRejectsInvalidNumericProblems(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		tc := tc
-
 		t.Run(tc.name, func(t *testing.T) {
 			problem := internalSeededMatchingProblem(6, 1)
 			tc.edit(&problem)
@@ -208,7 +197,7 @@ func TestBlossomRejectsInvalidNumericProblems(t *testing.T) {
 func TestBlossomRejectsInvalidOptionsAndOddProblem(t *testing.T) {
 	problem := internalSeededMatchingProblem(4, 1)
 
-	if _, _, _, err := solveMinimumWeightPerfectMatching(problem, blossomOptions{Eps: 0}); err != ErrInvalidOptions {
+	if _, _, _, err := solveMinimumWeightPerfectMatching(problem, blossomOptions{Eps: 0}); !errors.Is(err, ErrInvalidOptions) {
 		t.Fatalf("invalid eps got %v", err)
 	}
 
@@ -218,7 +207,7 @@ func TestBlossomRejectsInvalidOptionsAndOddProblem(t *testing.T) {
 		w:   make([]float64, 9),
 	}
 
-	if _, _, _, err := solveMinimumWeightPerfectMatching(oddProblem, blossomOptions{Eps: DefaultEps}); err != ErrInvalidMatching {
+	if _, _, _, err := solveMinimumWeightPerfectMatching(oddProblem, blossomOptions{Eps: DefaultEps}); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("odd problem got %v", err)
 	}
 }
@@ -226,9 +215,6 @@ func TestBlossomRejectsInvalidOptionsAndOddProblem(t *testing.T) {
 func TestBlossomMatchesOracleForSeededEvenK2To14(t *testing.T) {
 	for k := 2; k <= 14; k += 2 {
 		for seed := int64(1); seed <= 25; seed++ {
-			k := k
-			seed := seed
-
 			t.Run(fmt.Sprintf("k=%02d/seed=%02d", k, seed), func(t *testing.T) {
 				problem := internalSeededMatchingProblem(k, seed)
 

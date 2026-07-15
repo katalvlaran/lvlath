@@ -65,21 +65,21 @@ For formal package contracts, read `{package}/doc.go`. For theory, diagrams, and
 
 Start with the question, not the algorithm name.
 
-| Question | Use | Reason |
-|:--|:--|:--|
-| “How many hops away is this vertex?” | `bfs` | BFS minimizes edge count. |
-| “Which vertices are in the same weak island?” | `bfs.Components` | Weak membership ignores direction for component grouping. |
-| “What is a deterministic deep traversal?” | `dfs` | DFS gives post-order and forest-style structure. |
-| “Does this graph contain a cycle?” | `dfs.DetectCycles` | Returns deterministic witness cycles. |
-| “What order can I execute a DAG?” | `dfs.TopologicalSort` | Topological order is a directed acyclic graph contract. |
-| “What is the cheapest route by weight?” | `dijkstra` | Dijkstra minimizes non-negative total cost. |
-| “What is the cheapest connected backbone?” | `mst` | MST solves minimum connected spanning structure. |
-| “What is the maximum throughput?” | `flow` | Flow solves capacity-constrained source-to-sink movement. |
-| “How do I turn graph topology into numeric features?” | `matrix` | Adjacency, incidence, degree vector, metric closure, algebra. |
-| “How do I model a grid map?” | `gridgraph` | Generates lattice topology instead of manual wiring. |
-| “How do I build repeatable fixtures?” | `builder` | Deterministic graph/data generation. |
-| “How do I align two time series?” | `dtw` | Dynamic Time Warping handles local timing drift. |
-| “How do I visit all cities in a route?” | `tsp` | Tour construction/improvement/exact-small-instance routing. |
+| Question                                              | Use                   | Reason                                                        |
+|:------------------------------------------------------|:----------------------|:--------------------------------------------------------------|
+| “How many hops away is this vertex?”                  | `bfs`                 | BFS minimizes edge count.                                     |
+| “Which vertices are in the same weak island?”         | `bfs.Components`      | Weak membership ignores direction for component grouping.     |
+| “What is a deterministic deep traversal?”             | `dfs`                 | DFS gives post-order and forest-style structure.              |
+| “Does this graph contain a cycle?”                    | `dfs.DetectCycles`    | Returns deterministic witness cycles.                         |
+| “What order can I execute a DAG?”                     | `dfs.TopologicalSort` | Topological order is a directed acyclic graph contract.       |
+| “What is the cheapest route by weight?”               | `dijkstra`            | Dijkstra minimizes non-negative total cost.                   |
+| “What is the cheapest connected backbone?”            | `mst`                 | MST solves minimum connected spanning structure.              |
+| “What is the maximum throughput?”                     | `flow`                | Flow solves capacity-constrained source-to-sink movement.     |
+| “How do I turn graph topology into numeric features?” | `matrix`              | Adjacency, incidence, degree vector, metric closure, algebra. |
+| “How do I model a grid map?”                          | `gridgraph`           | Generates lattice topology instead of manual wiring.          |
+| “How do I build repeatable fixtures?”                 | `builder`             | Deterministic graph/data generation.                          |
+| “How do I align two time series?”                     | `dtw`                 | Dynamic Time Warping handles local timing drift.              |
+| “How do I visit all cities in a route?”               | `tsp`                 | Tour construction/improvement/exact-small-instance routing.   |
 
 ### Q1.2. How do I avoid using the wrong algorithm?
 
@@ -196,7 +196,7 @@ This distinction is intentional and useful for diagnostics.
 
 BFS records one deterministic parent tree. `PathTo(dst)` reconstructs one shortest-hop witness from that tree. It does not enumerate all shortest paths.
 
-If your domain needs all shortest paths, that is a different algorithmic surface and should not be inferred from `BFSResult.Parent`.
+If your domain needs all shortest paths, that is a different algorithmic surface and should not be inferred from `bfs.Result.Parent`.
 
 ### Q3.4. Why did BFS skip some nodes?
 
@@ -242,7 +242,7 @@ Then assert partial-result fields exactly as the BFS contract defines.
 
 ## 4. DFS FAQ
 
-### Q4.1. Why is `DFSResult.Order` not the order I expected?
+### Q4.1. Why is `dfs.Result.Order` not the order I expected?
 
 Because returned DFS order is finish order, not discovery order.
 
@@ -300,70 +300,225 @@ If your graph contains undirected edges, decide whether they represent missing d
 
 ### Q5.1. When should I use Dijkstra?
 
-Use Dijkstra for single-source shortest paths when all edge weights are non-negative.
+Use `lvlath/dijkstra` when the mathematical objective is a minimum accumulated
+cost from one source and every graph-edge weight is finite and non-negative.
 
-Good domains:
+Good domains include:
 
-* route cost;
-* latency;
-* distance;
-* non-negative risk;
-* service radius.
+* physical route distance;
+* network latency;
+* monetary or energy cost;
+* non-negative risk scores;
+* service radius and budget limits;
+* deterministic route witnesses.
 
-Do not use Dijkstra for finite negative weights. That is mathematically invalid for the algorithm.
+Do not use Dijkstra when finite negative edge weights are part of the model.
+Negative weights violate the finalization argument on which the algorithm relies.
+
+Also do not store `NaN`, `+Inf`, or `-Inf` as `core.Graph` edge weights.
+Graph-edge weights belong to the finite storage domain.
+
+`+Inf` is used elsewhere:
+
+* in `Result.Distances`, as known-but-unreachable;
+* in `MaxDistance`, as “no cutoff”;
+* in `InfEdgeThreshold`, as “no finite edge is blocked”.
+
+Those meanings do not make `+Inf` a valid graph-edge weight.
 
 ### Q5.2. What is the difference between unknown and unreachable?
 
-They are different states.
+Target-domain state and path-tracking state are separate axes.
 
-| State | Meaning | Typical result |
-|:--|:--|:--|
-| Unknown target | Target is not in the result domain. | `ErrTargetNotFound`. |
-| Known unreachable | Target exists but no admissible path reaches it. | `+Inf`, nil error. |
-| Tracking disabled | Distance may exist, but path reconstruction was not recorded. | `ErrPathTrackingDisabled` from path query. |
-| No path | Known target but no path under policy. | `ErrNoPath` from path query when tracking is enabled. |
+| Target state      | Meaning                 | `DistanceTo`        | `HasPathTo`         |
+|:------------------|:------------------------|:--------------------|:--------------------|
+| Empty target ID   | Invalid query input     | `ErrEmptyTargetID`  | `ErrEmptyTargetID`  |
+| Unknown target    | Absent from `Distances` | `ErrTargetNotFound` | `ErrTargetNotFound` |
+| Known reachable   | Finite distance         | finite value, nil   | true, nil           |
+| Known unreachable | Present with `+Inf`     | `+Inf`, nil         | false, nil          |
 
-Do not collapse these into one “failed route” state.
+`PathTo` additionally depends on witness state:
+
+| Witness state                                      | `PathTo` result           |
+|:---------------------------------------------------|:--------------------------|
+| `Prev == nil`                                      | `ErrPathTrackingDisabled` |
+| Known target with `+Inf`, tracking enabled         | `ErrNoPath`               |
+| Valid source-anchored predecessor chain            | deterministic path        |
+| Broken, cyclic, or out-of-domain predecessor chain | `ErrNoPath`               |
+
+Do not collapse these cases into one generic “route failed” state.
 
 ### Q5.3. Why does Dijkstra publish `+Inf`?
 
-`+Inf` is the canonical distance for known but unreachable vertices. It is not a dirty numeric value in this context. It has a precise meaning.
+`+Inf` is the canonical **result-domain** value for a vertex that is known to the
+result but unreachable under the effective topology and traversal policy.
 
 Use:
 
 ```go
+cost, err := result.DistanceTo(targetID)
+if err != nil {
+	// Handle empty or unknown target.
+}
+
 if math.IsInf(cost, 1) {
-	// known target, unreachable under active policy
+	// The target is known but unreachable under the active policy.
 }
 ```
 
+This `+Inf` is created by the algorithm's result model. It is not copied from an
+infinite graph-edge weight.
+
 ### Q5.4. Why did `PathTo` fail even though `DistanceTo` worked?
 
-Path reconstruction requires path tracking. If the result was computed without path tracking, distance queries can still work while path queries fail with a tracking-disabled error.
+A distance and a path witness require different stored information.
 
-Use the package’s path-tracking option when you need witnesses.
+`DistanceTo` reads only `Distances`.
 
-### Q5.5. How do wall thresholds and max-distance cutoffs differ?
+`PathTo` additionally requires:
 
-They represent different runtime policies.
+1. a non-nil `Prev` map;
+2. a finite target distance;
+3. a predecessor chain that reaches `SourceID`;
+4. every predecessor to remain inside `Distances`;
+5. no repeated predecessor vertex.
+
+Typical outcomes:
+
+* `ErrPathTrackingDisabled`:
+  the run did not enable path tracking;
+* `ErrNoPath`:
+  the target is unreachable or the stored predecessor chain is invalid;
+* `ErrTargetNotFound`:
+  the target is not part of the result domain.
+
+Use `WithPathTracking()` when retaining a full `Result`, or use
+`ShortestPathTo(...)` when the consumer needs one path and its distance.
+
+### Q5.5. How do wall thresholds and maximum-distance cutoffs differ?
+
+They operate at different mathematical levels.
 
 ```text
 InfEdgeThreshold:
-  skip edges whose weight is too high.
-  Think: blocked/degraded links.
+  edge-local policy
+
+  skip one finite edge when:
+    edge.Weight >= threshold
+
+  Typical meaning:
+    degraded link, blocked road, prohibited transfer, excessive local risk
 
 MaxDistance:
-  do not publish/explore paths beyond a total distance.
-  Think: service radius or budget limit.
+  path-global policy
+
+  skip a candidate route when:
+    accumulatedDistance > max
+
+  Typical meaning:
+    service radius, total budget, SLA boundary, search horizon
 ```
 
-Neither should mutate the graph topology.
+Both policies are inclusive at their boundary:
+
+* `weight == InfEdgeThreshold` is blocked;
+* `distance == MaxDistance` is admissible.
+
+Neither policy mutates graph topology.
+
+Positive infinity disables the corresponding finite restriction:
+
+* `MaxDistance = +Inf` means no accumulated-distance cutoff;
+* `InfEdgeThreshold = +Inf` means no valid finite edge is blocked.
 
 ### Q5.6. Why is equal-cost path selection stable?
 
-Dijkstra should use deterministic frontier ordering and strict improvement. If a candidate distance equals the current best distance, predecessor state should not be overwritten.
+The package combines three deterministic laws:
 
-This keeps one witness stable instead of oscillating between equal-cost alternatives.
+1. relations are consumed in `core.Graph.Neighbors(u)` order;
+2. heap entries are ordered by `(candidateDistance, vertexID)`;
+3. predecessor state changes only on strict improvement.
+
+Therefore:
+
+```text
+candidate < current:
+  update distance and predecessor
+
+candidate == current:
+  preserve the existing predecessor
+```
+
+The package returns one deterministic witness, not all equal-cost shortest paths.
+
+Stability assumes the same graph state, source, package version, and options.
+Concurrent graph mutation is outside the reproducibility contract.
+
+### Q5.7. What does `ErrDistanceOverflow` mean?
+
+`ErrDistanceOverflow` means that:
+
+* the current finalized distance was finite;
+* the edge weight was finite;
+* but their sum exceeded the representable finite `float64` range.
+
+Example:
+
+```text
+currentDistance = math.MaxFloat64
+edgeWeight      = math.MaxFloat64
+candidate       = +Inf
+```
+
+This is arithmetic overflow, not ordinary unreachability.
+
+The package therefore returns:
+
+```text
+nil Result + ErrDistanceOverflow
+```
+
+It does not publish the overflowed route as a `+Inf` unreachable result.
+
+A finite `MaxDistance` may safely reject an already out-of-policy candidate before
+performing the overflowing addition.
+
+### Q5.8. Can I mutate `Result.Distances` or `Result.Prev`?
+
+Yes. Published result maps are caller-owned.
+
+However, mutation changes the meaning of that `Result`.
+
+Safe patterns:
+
+* read the result without mutation;
+* call `Clone()` before creating an independently mutable variant;
+* keep result mutation synchronized if shared across goroutines.
+
+`PathTo` defensively rejects:
+
+* broken chains;
+* predecessor cycles;
+* predecessors absent from `Distances`.
+
+It returns `ErrNoPath` rather than returning a partial witness or looping forever.
+
+### Q5.9. Does `DistanceTo(...)` stop Dijkstra when the target is reached?
+
+No.
+
+The convenience wrapper:
+
+```go
+dijkstra.DistanceTo(graph, sourceID, targetID, options...)
+```
+
+runs the same canonical single-source Dijkstra computation and then performs an
+O(1) target lookup on the completed `Result`.
+
+It is a point-query convenience API, not a target-directed early-exit kernel.
+
+Use it to reduce caller boilerplate, not as a different asymptotic algorithm.
 
 ---
 
@@ -454,7 +609,7 @@ Exporting that as an edge would invent topology. Refusal is correct.
 Use `View` when you intentionally want shared storage:
 
 ```text
-MatrixView.Set writes into the base Dense.
+View.Set writes into the base Dense.
 ```
 
 Use `Induced` when the submatrix needs independent lifetime or safe mutation.
@@ -471,11 +626,11 @@ For zero features (`cols == 0`), a valid `0×0` covariance is a structural resul
 
 ### Q7.1. Which max-flow algorithm should I choose?
 
-| Algorithm | Use when | Notes |
-|:--|:--|:--|
-| Ford-Fulkerson | Small or educational integral-capacity networks. | Simple but can be slow depending on augmenting paths. |
-| Edmonds-Karp | You want a simple polynomial guarantee. | Uses BFS shortest augmenting paths. |
-| Dinic | Larger or denser networks. | Builds level graphs and blocking flows; usually faster in practice. |
+| Algorithm      | Use when                                         | Notes                                                               |
+|:---------------|:-------------------------------------------------|:--------------------------------------------------------------------|
+| Ford-Fulkerson | Small or educational integral-capacity networks. | Simple but can be slow depending on augmenting paths.               |
+| Edmonds-Karp   | You want a simple polynomial guarantee.          | Uses BFS shortest augmenting paths.                                 |
+| Dinic          | Larger or denser networks.                       | Builds level graphs and blocking flows; usually faster in practice. |
 
 ### Q7.2. Why did repeated flow runs give different-looking residual states?
 
@@ -514,12 +669,12 @@ Residual state is part of the algorithm result, not just debug output.
 
 Use the facade that matches the shape of your domain data.
 
-| Input shape                   | Use                   | Why                                                                          |
-| :---------------------------- | :-------------------- | :--------------------------------------------------------------------------- |
-| `[]float64` vs `[]float64`    | `dtw.Align`           | Scalar signal alignment: price impulse, temperature, amplitude, trend score. |
-| precomputed local-cost matrix | `dtw.AlignCostMatrix` | Another model already computed frame-to-frame costs.                         |
-| time-step × feature matrices  | `dtw.AlignMatrix`     | Multivariate alignment: OHLC candles, sensor vectors, gesture features.      |
-| old tuple-style code          | `dtw.DTW`             | Compatibility wrapper. New code should prefer canonical `Result` facades.    |
+| Input shape                   | Use                   | Why                                                                           |
+|:------------------------------|:----------------------|:------------------------------------------------------------------------------|
+| `[]float64` vs `[]float64`    | `dtw.Align`           | Scalar signal alignment: price impulse, temperature, amplitude, trend score.  |
+| precomputed local-cost matrix | `dtw.AlignCostMatrix` | Another model already computed frame-to-frame costs.                          |
+| time-step × feature matrices  | `dtw.AlignMatrix`     | Multivariate alignment: OHLC candles, sensor vectors, gesture features.       |
+| old tuple-style code          | `dtw.DTW`             | Compatibility wrapper. New code should prefer canonical `Result` facades.     |
 
 `AlignMatrix` uses squared L2 row distance:
 
@@ -781,9 +936,9 @@ Prim:
 
 Do not document Prim as `O(E log V)` unless the implementation changes to a vertex-key decrease-key policy.
 
-### Q9.5. What does `MSTResult` actually guarantee?
+### Q9.5. What does `mst.Result` actually guarantee?
 
-`MSTResult` is the canonical result artifact.
+`mst.Result` is the canonical result artifact.
 
 It tells you:
 
@@ -884,7 +1039,7 @@ Do not send `core.Graph` into internal solver thinking. TSP kernels solve over m
 Choose by contract strength and runtime regime.
 
 | Algorithm        | Use when                                                                  | Result meaning                                                               |
-| :--------------- | :------------------------------------------------------------------------ | :--------------------------------------------------------------------------- |
+|:-----------------|:--------------------------------------------------------------------------|:-----------------------------------------------------------------------------|
 | `ExactHeldKarp`  | Small guarded instances where proof of optimality matters.                | Exact optimal result if accepted and completed.                              |
 | `BranchAndBound` | Exact search with pruning, good incumbents, and optional time budget.     | Exact only when completed; time limit may return incumbent + `ErrTimeLimit`. |
 | `Christofides`   | Symmetric complete metric TSP where an approximation certificate matters. | `1.5` ratio only with exact `BlossomMatch`.                                  |
@@ -960,9 +1115,9 @@ If this fails:
 
 The package should not publish an approximation ratio unless the selected algorithm and matching policy justify it.
 
-### Q10.7. What does `TSPResult` tell me beyond `Tour` and `Cost`?
+### Q10.7. What does `tsp.Result` tell me beyond `Tour` and `Cost`?
 
-`TSPResult` is the result contract. Use it instead of inferring behavior from the selected options.
+`tsp.Result` is the result contract. Use it instead of inferring behavior from the selected options.
 
 Important fields:
 
@@ -1281,16 +1436,16 @@ Only with fixed seed and documented shape. Randomness without reproducibility is
 
 ### Q16.1. Which file should explain what?
 
-| File | Responsibility |
-|:--|:--|
-| `README.md` | Public face, package map, strengths, key examples. |
-| `docs/TUTORIAL.md` | First learning path and fundamental concepts. |
-| `{package}/doc.go` | Package charter and implemented API contract. |
-| Exported GoDoc | Per-symbol behavior, errors, determinism, complexity. |
-| `docs/{PACKAGE}.md` | Theory, diagrams, pseudocode, pitfalls, examples. |
-| `examples/*.go` | Larger scenario programs. |
-| `example_test.go` | Executable package examples with deterministic output. |
-| `CONTRIBUTING.md` | Contribution workflow and quality gates. |
+| File                | Responsibility                                         |
+|:--------------------|:-------------------------------------------------------|
+| `README.md`         | Public face, package map, strengths, key examples.     |
+| `docs/TUTORIAL.md`  | First learning path and fundamental concepts.          |
+| `{package}/doc.go`  | Package charter and implemented API contract.          |
+| Exported GoDoc      | Per-symbol behavior, errors, determinism, complexity.  |
+| `docs/{PACKAGE}.md` | Theory, diagrams, pseudocode, pitfalls, examples.      |
+| `examples/*.go`     | Larger scenario programs.                              |
+| `example_test.go`   | Executable package examples with deterministic output. |
+| `CONTRIBUTING.md`   | Contribution workflow and quality gates.               |
 
 ### Q16.2. What is documentation drift?
 

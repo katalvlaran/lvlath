@@ -23,7 +23,7 @@
 //   - Memory: O(n·2ⁿ) for DP and parent tables.
 //
 // Returns:
-//   - A canonical TSPResult through public facades; the private kernel computes the same optimal tour.
+//   - A canonical Result through public facades; the private kernel computes the same optimal tour.
 package tsp
 
 import (
@@ -47,7 +47,7 @@ var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices
 //   - Stage 1: Validate standalone options and copy the complete distance matrix.
 //   - Stage 2: Enforce MaxExactN and StartVertex.
 //   - Stage 3: Run heldKarpDP over the immutable weight buffer.
-//   - Stage 4: Publish a detached exact optimal TSPResult.
+//   - Stage 4: Publish a detached exact optimal Result.
 //
 // Behavior highlights:
 //   - Supports asymmetric distances.
@@ -60,7 +60,7 @@ var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices
 //   - opts: ExactHeldKarp policy with StartVertex, MaxExactN, Eps, and TimeLimit.
 //
 // Returns:
-//   - *TSPResult: exact optimal result on completion.
+//   - *Result: exact optimal result on completion.
 //   - error: nil or sentinel-classified failure.
 //
 // Errors:
@@ -84,7 +84,7 @@ var ErrSizeTooLarge = errors.New("tsp: exact solver supports at most 16 vertices
 // AI-Hints:
 //   - Do not return heuristic fallback on ErrSizeTooLarge.
 //   - Do not mark timeout as partial unless an incumbent DP implementation exists.
-func heldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func heldKarp(dist matrix.Matrix, opts Options) (*Result, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
 	}
@@ -111,7 +111,7 @@ func heldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 		return nil, err
 	}
 
-	return &TSPResult{
+	return &Result{
 		Tour:               append([]int(nil), tour...),
 		Cost:               round1e9(cost),
 		Algorithm:          ExactHeldKarp,
@@ -165,6 +165,11 @@ func heldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 // AI-Hints:
 //   - Do not replace this with exhaustive permutation enumeration.
 //   - Do not mutate opts or caller-owned matrix data.
+//   - The Held-Karp recurrence relation requires tight synchronization between
+//     subset bitmasks and state transitions. Fragmenting this function would obscure
+//     the mathematical precision of the dynamic programming state updates.
+//
+// nolint:gocyclo
 func heldKarpDP(weights weightBuffer, opts Options) ([]int, float64, error) {
 
 	// Use the shared detached weight buffer so exact DP preserves the same

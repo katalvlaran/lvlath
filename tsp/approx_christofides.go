@@ -38,7 +38,7 @@
 //     Eulerian (O(E)), shortcut O(n)  ⇒ typically O(n^2) for metric instances.
 //
 // Returned value:
-//   - TSPResult with a detached closed tour and proof metadata.
+//   - Result with a detached closed tour and proof metadata.
 //   - Tour invariants: len==n+1, Tour[0]==Tour[n]==opts.StartVertex, each vertex appears once.
 //
 // Errors:
@@ -53,14 +53,14 @@ import (
 	"github.com/katalvlaran/lvlath/matrix"
 )
 
-// christofides runs the Christofides pipeline and publishes a canonical TSPResult.
+// christofides runs the Christofides pipeline and publishes a canonical Result.
 //
 // Implementation:
 //   - Stage 1: Validate options, symmetric complete matrix shape, and start vertex.
 //   - Stage 2: Build MST and collect odd-degree vertices.
 //   - Stage 3: Apply selected odd-vertex matching and record proof metadata.
 //   - Stage 4: Build an Eulerian circuit and shortcut it to a Hamiltonian cycle.
-//   - Stage 5: Canonicalize orientation, compute cost, validate the final tour, and publish TSPResult.
+//   - Stage 5: Canonicalize orientation, compute cost, validate the final tour, and publish Result.
 //
 // Behavior highlights:
 //   - Requires symmetric complete final matrix input.
@@ -73,7 +73,7 @@ import (
 //   - opts: Christofides policy.
 //
 // Returns:
-//   - *TSPResult: detached Christofides result.
+//   - *Result: detached Christofides result.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -98,7 +98,7 @@ import (
 // AI-Hints:
 //   - Do not apply 2-opt or 3-opt here; solver.go owns post-pass policy.
 //   - Do not publish a 1.5 ratio from GreedyMatch.
-func christofides(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func christofides(dist matrix.Matrix, opts Options) (*Result, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
 	}
@@ -151,7 +151,7 @@ func christofides(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 		return nil, err
 	}
 
-	return &TSPResult{
+	return &Result{
 		Tour:               append([]int(nil), tour...),
 		Cost:               cost,
 		Algorithm:          Christofides,

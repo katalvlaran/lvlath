@@ -108,8 +108,6 @@ func TestBlossomK4Seed02Trace(t *testing.T) {
 func TestBlossomK4AllSeededMatchesOracle(t *testing.T) {
 	k := 4
 	for seed := int64(1); seed <= 25; seed++ {
-		seed := seed
-
 		t.Run(fmt.Sprintf("k=%02d/seed=%02d", k, seed), func(t *testing.T) {
 			problem := internalSeededMatchingProblem(k, seed)
 

@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // letters_spec.go - canonical per-glyph vertex/edge specifications (data-only).

@@ -2,7 +2,7 @@
 // Copyright (C) 2025-2026 katalvlaran
 
 // Package tsp exposes canonical public facades for Traveling Salesman Problem solvers.
-// The public surface publishes TSPResult only, so exactness, optimality, timeout state,
+// The public surface publishes Result only, so exactness, optimality, timeout state,
 // approximation metadata, and ownership rules remain available to callers.
 package tsp
 
@@ -12,13 +12,13 @@ import (
 )
 
 // SolveMatrix solves a TSP/ATSP instance represented by a distance matrix.
-// It is the canonical matrix facade and publishes the full TSPResult contract.
+// It is the canonical matrix facade and publishes the full Result contract.
 //
 // Implementation:
 //   - Stage 1: Prepare direct matrix input, including optional metric closure.
 //   - Stage 2: Validate optional IDs against final matrix order.
 //   - Stage 3: Delegate to the result-native solver dispatcher without alternative mathematics.
-//   - Stage 4: Return the detached canonical TSPResult.
+//   - Stage 4: Return the detached canonical Result.
 //
 // Behavior highlights:
 //   - Does not mutate caller-owned direct matrices.
@@ -32,7 +32,7 @@ import (
 //   - opts: explicit solver policy; use DefaultOptions and override fields.
 //
 // Returns:
-//   - *TSPResult: detached canonical result on success.
+//   - *Result: detached canonical result on success.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -53,12 +53,12 @@ import (
 //   - Solver complexity depends on opts.Algo.
 //
 // Notes:
-//   - Branch-and-Bound timeout incumbents remain visible through TSPResult.
+//   - Branch-and-Bound timeout incumbents remain visible through Result.
 //
 // AI-Hints:
 //   - Do not bypass this facade in examples unless testing a specific kernel.
 //   - Do not publish a reduced result from this canonical facade.
-func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, error) {
+func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*Result, error) {
 	if err := validateOptionsStandalone(opts); err != nil {
 		return nil, err
 	}
@@ -95,7 +95,7 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 }
 
 // SolveGraph solves a TSP instance by adapting a core.Graph into a matrix distance model.
-// It is the canonical graph facade and publishes the full TSPResult contract.
+// It is the canonical graph facade and publishes the full Result contract.
 //
 // Implementation:
 //   - Stage 1: Reject nil and currently unsupported mixed-direction graphs.
@@ -114,7 +114,7 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 //   - opts: solver policy.
 //
 // Returns:
-//   - *TSPResult: detached canonical result.
+//   - *Result: detached canonical result.
 //   - error: sentinel-classified failure.
 //
 // Errors:
@@ -135,7 +135,7 @@ func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, er
 // AI-Hints:
 //   - Do not flatten mixed directed/undirected graphs into a global directed matrix.
 //   - Do not recover IDs by appending over map iteration.
-func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
+func SolveGraph(g *core.Graph, opts Options) (*Result, error) {
 	// Nil graph => invalid shape for building matrices.
 	if g == nil {
 		return nil, ErrNilGraph
@@ -227,7 +227,7 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 // Implementation:
 //   - Stage 1: Force the direct solver policy to ExactHeldKarp.
 //   - Stage 2: Run the private Held-Karp kernel over the validated final matrix.
-//   - Stage 3: Publish a detached TSPResult with exact optimal metadata.
+//   - Stage 3: Publish a detached Result with exact optimal metadata.
 //
 // Behavior highlights:
 //   - Supports asymmetric distances.
@@ -240,7 +240,7 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 //   - opts: solver policy; StartVertex, MaxExactN, Eps, and TimeLimit are honored.
 //
 // Returns:
-//   - *TSPResult: exact optimal tour on success.
+//   - *Result: exact optimal tour on success.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -265,7 +265,7 @@ func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error) {
 // AI-Hints:
 //   - Always force solverOptions.Algo=ExactHeldKarp before validation.
 //   - Do not reject ATSP because a caller accidentally passed opts.Algo=Christofides.
-func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func HeldKarp(dist matrix.Matrix, opts Options) (*Result, error) {
 	opts.Algo = ExactHeldKarp
 
 	return heldKarp(dist, opts)
@@ -279,7 +279,7 @@ func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - Stage 1: Force the direct solver policy to Christofides.
 //   - Stage 2: Validate symmetric complete metric input.
 //   - Stage 3: Run MST, odd-degree matching, Eulerian circuit, and shortcutting.
-//   - Stage 4: Publish a detached TSPResult with approximation proof metadata.
+//   - Stage 4: Publish a detached Result with approximation proof metadata.
 //
 // Behavior highlights:
 //   - Requires symmetric final matrix input.
@@ -292,7 +292,7 @@ func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - opts: solver policy; StartVertex and MatchingAlgo are honored.
 //
 // Returns:
-//   - *TSPResult: canonical heuristic/approximation result.
+//   - *Result: canonical heuristic/approximation result.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -316,7 +316,7 @@ func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 // AI-Hints:
 //   - Do not infer ApproximationRatio from Options.MatchingAlgo alone.
 //   - Do not convert exact matching failures into heuristic output.
-func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func ChristofidesSolve(dist matrix.Matrix, opts Options) (*Result, error) {
 	opts.Algo = Christofides
 
 	return christofides(dist, opts)
@@ -330,7 +330,7 @@ func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - Stage 1: Force the direct solver policy to BranchAndBound.
 //   - Stage 2: Copy the matrix into the solver weight buffer.
 //   - Stage 3: Seed an incumbent when possible and run deterministic DFS search.
-//   - Stage 4: Publish complete or partial TSPResult metadata.
+//   - Stage 4: Publish complete or partial Result metadata.
 //
 // Behavior highlights:
 //   - Supports symmetric and asymmetric final matrices.
@@ -343,7 +343,7 @@ func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - opts: solver policy; StartVertex, BoundAlgo, Eps, and TimeLimit are honored.
 //
 // Returns:
-//   - *TSPResult: optimal result, timeout incumbent, or nil if no incumbent exists.
+//   - *Result: optimal result, timeout incumbent, or nil if no incumbent exists.
 //   - error: nil on completion or ErrTimeLimit on timeout.
 //
 // Errors:
@@ -365,7 +365,7 @@ func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 // AI-Hints:
 //   - Always force solverOptions.Algo=BranchAndBound before validation.
 //   - Do not mark timeout incumbents as Optimal.
-func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
+func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*Result, error) {
 	opts.Algo = BranchAndBound
 
 	return branchAndBound(dist, opts)
@@ -378,7 +378,7 @@ func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - Stage 1: Force the direct solver policy to TwoOptOnly.
 //   - Stage 2: Validate the initial tour through the local-search kernel.
 //   - Stage 3: Run deterministic 2-opt improvement.
-//   - Stage 4: Publish a detached TSPResult.
+//   - Stage 4: Publish a detached Result.
 //
 // Behavior highlights:
 //   - Supports symmetric and asymmetric matrices according to the 2-opt kernel policy.
@@ -391,7 +391,7 @@ func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //   - opts: local-search policy.
 //
 // Returns:
-//   - *TSPResult: improved tour result.
+//   - *Result: improved tour result.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -411,7 +411,7 @@ func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error) {
 //
 // AI-Hints:
 //   - Do not publish exact or optimal metadata from local search.
-func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error) {
 	opts.Algo = TwoOptOnly
 
 	return twoOptSearch(dist, initTour, opts)
@@ -425,7 +425,7 @@ func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult,
 //   - Stage 1: Force the direct solver policy to ThreeOptOnly.
 //   - Stage 2: Validate the initial tour and matrix policy.
 //   - Stage 3: Run deterministic 3-opt improvement.
-//   - Stage 4: Publish a detached TSPResult.
+//   - Stage 4: Publish a detached Result.
 //
 // Behavior highlights:
 //   - Does not claim global optimality.
@@ -438,7 +438,7 @@ func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult,
 //   - opts: local-search policy.
 //
 // Returns:
-//   - *TSPResult: improved tour result.
+//   - *Result: improved tour result.
 //   - error: nil on success or sentinel-classified failure.
 //
 // Errors:
@@ -460,7 +460,7 @@ func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult,
 // AI-Hints:
 //   - Do not call the asymmetric path full ATSP 3-opt.
 //   - Do not publish exact or optimal metadata from local search.
-func ThreeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+func ThreeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error) {
 	opts.Algo = ThreeOptOnly
 
 	return threeOptSearch(dist, initTour, opts)

@@ -4,13 +4,13 @@
 // Package matrix - adjacency builders (dense) and metric-closure transform.
 //
 // Deliverables:
-//   1) Directed + AllowMulti=false → first-edge-wins (ordered key (u,v)).
-//   2) Undirected mirroring without loops (u==v is not mirrored).
-//   3) Weighted adjacency preserves zero-weight edges by switching to +Inf no-edge
-//      encoding when mixed zero/non-zero weights make 0-as-no-edge ambiguous.
-//      Effectively-unweighted all-zero input may still degrade to binary in auto mode.
-//   4) MetricClosure (Floyd–Warshall): diag=0, unreachable=+Inf (off-diagonal).
-//   5) Deterministic iteration & stable vertex/edge order (no map order reliance).
+//  1. Directed + AllowMulti=false → first-edge-wins (ordered key (u,v)).
+//  2. Undirected mirroring without loops (u==v is not mirrored).
+//  3. Weighted adjacency preserves zero-weight edges by switching to +Inf no-edge
+//     encoding when mixed zero/non-zero weights make 0-as-no-edge ambiguous.
+//     Effectively-unweighted all-zero input may still degrade to binary in auto mode.
+//  4. MetricClosure (Floyd–Warshall): diag=0, unreachable=+Inf (off-diagonal).
+//  5. Deterministic iteration & stable vertex/edge order (no map order reliance).
 //
 // AI-Hints:
 //   - For directed graphs, duplicate (u,v) edges are ignored when AllowMulti=false;
@@ -33,13 +33,11 @@
 //     All-zero input remains treated as effectively unweighted in auto mode to
 //     preserve existing graph-adapter behavior; use explicit weighted-preservation
 //     options in a follow-up if your domain needs all-zero weighted graphs.
-
 package matrix
 
 import (
 	"fmt"
 	"math"
-	"sort"
 
 	"github.com/katalvlaran/lvlath/core"
 )
@@ -150,26 +148,6 @@ func NewAdjacencyMatrix(g *core.Graph, opts Options) (*AdjacencyMatrix, error) {
 		vertexByIndex: rev,
 		opts:          opts,
 	}, nil
-}
-
-// buildGraphOptions prepares core.GraphOption slice from stored opts.
-// Complexity O(1).
-func (am *AdjacencyMatrix) buildGraphOptions() []core.GraphOption {
-	var goOpts []core.GraphOption
-	if am.opts.directed {
-		goOpts = append(goOpts, core.WithDirected(true))
-	}
-	if am.opts.weighted {
-		goOpts = append(goOpts, core.WithWeighted())
-	}
-	if am.opts.allowMulti {
-		goOpts = append(goOpts, core.WithMultiEdges())
-	}
-	if am.opts.allowLoops {
-		goOpts = append(goOpts, core.WithLoops())
-	}
-
-	return goOpts
 }
 
 // VertexIDs RETURNS an ordered list of vertex identifiers with initial validation.
@@ -354,16 +332,6 @@ func (am *AdjacencyMatrix) Neighbors(u string) ([]string, error) {
 	return neighbors, nil
 }
 
-// indexToVertex returns the VertexID for a given matrix column index.
-// Returns an error if index is out of range.
-func (am *AdjacencyMatrix) indexToVertex(idx int) (string, error) {
-	if idx < 0 || idx >= len(am.vertexByIndex) {
-		return "", fmt.Errorf("indexToVertex: index %d out of range: %w", idx, ErrDimensionMismatch)
-	}
-
-	return am.vertexByIndex[idx], nil
-}
-
 // adjacencyUsesInfNoEdge reports whether this adjacency interprets +Inf as absence.
 //
 // What:
@@ -423,54 +391,6 @@ func adjacencyEntryAbsent(v float64, infNoEdge bool) bool {
 	}
 
 	return v == unreachableWeight || isNonFinite(v)
-}
-
-// buildDenseAdjacencyFromGraph is a convenience wrapper used by tests
-//
-//	and potential internal callers that have only *core.Graph*.
-//
-// Implementation:
-//   - Stage 1: validate graph presence.
-//   - Stage 2: obtain vertex IDs (defensively ensure lexicographic order).
-//   - Stage 3: obtain edges in core-defined deterministic order.
-//   - Stage 4: call BuildDenseAdjacency.
-//
-// Behavior highlights:
-//   - Guarantees canonical vertex order for callers that rely on wrapper determinism.
-//
-// Errors:
-//   - ErrGraphNil and any BuildDenseAdjacency error bubbled.
-//
-// Determinism:
-//   - Stable order by design.
-//
-// Complexity:
-//   - Time O(V log V + E) worst-case (only if defensive sort triggers).
-//
-// NOTE: we sort vertex IDs lexicographically here to be absolutely explicit,
-// even if core.Vertices() is already sorted. This guarantees that callers that
-// rely on this wrapper receive the canonical order.
-func buildDenseAdjacencyFromGraph(g *core.Graph, opts Options) (map[string]int, *Dense, error) {
-	// Validate graph (public contract sentinel).
-	if g == nil {
-		return nil, nil, fmt.Errorf("buildDenseAdjacencyFromGraph: %w", ErrGraphNil)
-	}
-
-	// Pull vertex IDs from core; ensure deterministic lex order.
-	ids := g.Vertices() // expected stable & sorted by core contract
-	if !isLexSorted(ids) {
-		// If not lex-sorted, sort defensively to meet our matrix determinism.
-		cp := make([]string, len(ids))
-		copy(cp, ids)
-		sort.Strings(cp)
-		ids = cp
-	}
-
-	// Pull edges in the order defined by core (Edge.ID asc).
-	edges := g.Edges()
-
-	// Delegate to main builder.
-	return BuildDenseAdjacency(ids, edges, opts)
 }
 
 // ToGraph CONVERT the stored adjacency to core.Graph with threshold/weight policy.
@@ -612,6 +532,7 @@ func (am *AdjacencyMatrix) ToGraph(optFns ...Option) (*core.Graph, error) {
 					return nil, fmt.Errorf("ToGraph: At(%d,%d): %w", i, j, err)
 				}
 				if err = returnEdge(g, fromID, toID, val, exportPolicy); err != nil {
+					return nil, fmt.Errorf("ToGraph: entry[%d,%d] %q->%q: %w", i, j, fromID, toID, err)
 				}
 			}
 		}

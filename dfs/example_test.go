@@ -31,7 +31,7 @@ import (
 // Behavior highlights:
 //   - Uses WithFilterNeighbor to simulate a quarantine boundary without mutating topology.
 //   - Uses WithOnVisit and WithOnExit as deterministic audit hooks.
-//   - Prints DFSResult.Order, which is finish order (post-order), not discovery order.
+//   - Prints Result.Order, which is finish order (post-order), not discovery order.
 //
 // Inputs:
 //   - None (the topology is deterministic and hard-coded).
@@ -50,7 +50,7 @@ import (
 //
 // Notes:
 //   - The quarantine branch remains present in the graph but is blocked by policy at traversal time.
-//   - The printed post-order is identical to DFSResult.Order and to the exit hook sequence.
+//   - The printed post-order is identical to Result.Order and to the exit hook sequence.
 //
 // AI-Hints:
 //   - Hooks are observers here; keep them deterministic and side-effect aware.

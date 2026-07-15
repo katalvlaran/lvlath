@@ -20,8 +20,7 @@ import (
 // Time: O(n + E), where E is the number of undirected edges.
 // Memory: O(n).
 func degFromAdj(adj [][]int) []int {
-	var n int
-	n = len(adj)             // number of vertices
+	n := len(adj)            // number of vertices
 	var deg = make([]int, n) // degree accumulator
 	var u int                // row index
 	for u = 0; u < n; u++ {  // iterate all rows

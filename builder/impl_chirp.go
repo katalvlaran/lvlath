@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // impl_chirp.go - deterministic linear audio chirp generator.
@@ -68,7 +70,7 @@ func extractChirpParams(_ builderConfig) seqChirpParams {
 //   - fi  = f0 + (f1 − f0) * i/(n−1)  (cycles/sample)
 //   - θᵢ₊₁ = θᵢ + τ * fi               (phase accumulator, τ=2π)
 //   - yᵢ  = A * sin(θᵢ) + trend*i + noise
-func BuildAudioChirp(n int, seed int64, opts ...BuilderOption) []float64 {
+func BuildAudioChirp(n int, seed int64, opts ...Option) []float64 {
 	// Validate size early.
 	if n < 1 {
 		return nil

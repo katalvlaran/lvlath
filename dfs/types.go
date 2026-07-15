@@ -55,7 +55,7 @@ const (
 	Black
 )
 
-// DFSResult captures the observable outcome of DFS traversal.
+// Result captures the observable outcome of DFS traversal.
 //
 // Implementation:
 //   - Stage 1: Visited is recorded at vertex entry.
@@ -88,7 +88,7 @@ const (
 //   - Order is finish order.
 //   - Depth is DFS-tree depth, not general shortest-path distance.
 //   - Parent is assigned only when a vertex is actually entered.
-type DFSResult struct {
+type Result struct {
 	// Order records vertices in DFS finish order (post-order).
 	Order []string
 
@@ -179,7 +179,7 @@ type CycleDetectionResult struct {
 //
 // AI-Hints:
 //   - Use Nilable-aware test helpers to detect typed nil correctly behind interfaces.
-func (r *DFSResult) IsNil() bool {
+func (r *Result) IsNil() bool {
 	return r == nil
 }
 

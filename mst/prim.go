@@ -138,7 +138,7 @@ func (pf *primFrontier) Pop() any {
 //   - cfg: finalized option policy.
 //
 // Returns:
-//   - *MSTResult: canonical detached result.
+//   - *Result: canonical detached result.
 //   - error: ErrDisconnected in strict tree mode when not all vertices connect.
 //
 // Errors:
@@ -155,10 +155,10 @@ func (pf *primFrontier) Pop() any {
 //
 // AI-Hints:
 //   - Do not derive target from edge.to alone; the same undirected edge is stored in both adjacency lists.
-func primKernel(snapshot *mstSnapshot, cfg Options) (*MSTResult, error) {
+func primKernel(snapshot *mstSnapshot, cfg Options) (*Result, error) {
 	vertexCount := len(snapshot.vertices)
 
-	result := &MSTResult{
+	result := &Result{
 		Algorithm:      AlgorithmPrim,
 		Mode:           cfg.Mode,
 		Root:           cfg.Root,
@@ -264,7 +264,7 @@ func primKernel(snapshot *mstSnapshot, cfg Options) (*MSTResult, error) {
 //
 // AI-Hints:
 //   - Do not append result edges before checking visited[target]; stale heap candidates must not form cycles.
-func growPrimComponent(snapshot *mstSnapshot, root string, visited map[string]bool, result *MSTResult) {
+func growPrimComponent(snapshot *mstSnapshot, root string, visited map[string]bool, result *Result) {
 	result.ComponentRoots = append(result.ComponentRoots, root)
 
 	frontier := &primFrontier{}

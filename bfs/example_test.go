@@ -340,7 +340,7 @@ func ExampleBFS_CancellationPartial() {
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	onVisit := func(id string, depth int) error {
+	onVisit := func(id string) error {
 		if id == "tripwire" {
 			cancel()
 		}

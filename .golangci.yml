@@ -1,0 +1,62 @@
+# Configuration for golangci-lint
+# This file defines strict code quality standards for a mathematical/algorithmic library.
+
+run:
+  # The maximum time allowed for the linter to run before it stops automatically.
+  # Algorithmic code with heavy analysis can take more time.
+  timeout: 5m
+
+  # Exit code when issues are found. 1 means the build will fail if there are lint errors.
+  modules-download-mode: readonly
+
+linters:
+  # Disable all default linters first to gain total control over the enabled list.
+  disable-all: true
+
+  # Enable specific linters to ensure maximum performance, safety, and correctness.
+  enable:
+    # --- YOUR ORIGINAL LINTERS ---
+    - unused       # Finds unused constants, variables, functions, and types.
+    - gosimple     # Suggests code simplifications (makes your Go code more idiomatic).
+    - govet        # Official Go tool. Reports suspicious constructs (printf errors, shadowing).
+    - ineffassign  # Detects when a variable is assigned a value but never used after.
+    - staticcheck  # Advanced static analysis for bugs, performance, and correctness.
+
+    # --- PERFORMANCE & MATH OPTIMIZATIONS ---
+    - prealloc     # Finds slice declarations that could be pre-allocated to save memory.
+    - goconst      # Finds repeated values that should be moved to a constant (good for math constants).
+    - copyloopvar  # Detects unsafe copying of loop variables (critical for concurrent algorithms).
+    - bodyclose    # Checks whether HTTP/file response bodies are closed to prevent memory leaks.
+
+    # --- CODE COMPLEXITY & ACCURACY ---
+#    - gocognit     # Checks cognitive complexity. Ensures algorithms are easy to read and understand.
+    - gocyclo      # Computes cyclomatic complexity. Prevents functions from being too complex.
+    - misspell     # Checks for misspelled English words in comments and documentation.
+    - errorlint    # Finds code that incorrectly compares wrapped errors.
+
+    # --- SECURITY & CODE SMELLS ---
+    - gosec        # Inspects source code for security problems (integer overflows, unsafe blocks).
+    - revive       # Fast and highly configurable linter for style rules and best practices.
+
+issues:
+  # Maximum count of issues with the same text. 0 means unlimited.
+  max-same-issues: 0
+
+  # Global rules to ignore specific linter checks in certain files.
+  exclude-rules:
+    # Rule: Skip specific linters inside unit|bench|fuzz|regression tests (_test.go files).
+    # Why:
+    # - unused, govet: Test suites often isolate specific functions, leading to intentionally unused variables or mock structures.
+    # - gocyclo, gocognit: Algorithmic tests require extensive table-driven setups and deeply nested mock data.
+    # - goconst: Math tests frequently repeat hardcoded matrix dimensions, expected weights, or static delta values.
+    # - gosec: Security linters trigger false positives on non-secure math/rand or heavy byte-shifting used strictly for benchmarking.
+    # - staticcheck: Tests intentionally trigger panic states, edge-case assertions, or deprecated functions to verify backward compatibility.
+    - path: _test\.go
+      linters:
+        - unused
+        - govet
+        - gocyclo
+        - gocognit
+        - goconst
+        - gosec
+        - staticcheck

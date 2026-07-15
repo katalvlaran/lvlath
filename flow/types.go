@@ -206,10 +206,10 @@ func newPartialResult(
 	}
 }
 
-// FlowOptions configures legacy maximum-flow wrappers.
+// Options configures legacy maximum-flow wrappers.
 //
 // Implementation:
-//   - Stage 1: Legacy wrappers convert FlowOptions into canonical Option values.
+//   - Stage 1: Legacy wrappers convert Options into canonical Option values.
 //   - Stage 2: Canonical option assembly validates numeric and domain policy.
 //
 // Behavior highlights:
@@ -236,7 +236,7 @@ func newPartialResult(
 //
 // AI-Hints:
 //   - Do not add new contract-changing fields here; add canonical WithXxx options.
-type FlowOptions struct {
+type Options struct {
 	// Ctx is the context used to cancel or timeout long-running computations.
 	// It is normalized to context.Background() if left nil.
 	Ctx context.Context
@@ -269,7 +269,7 @@ type FlowOptions struct {
 //   - New code should prefer MaxFlow with no options or explicit WithXxx options.
 //
 // Returns:
-//   - FlowOptions: compatibility configuration.
+//   - Options: compatibility configuration.
 //
 // Errors:
 //   - None.
@@ -282,8 +282,8 @@ type FlowOptions struct {
 //
 // AI-Hints:
 //   - Keep this as a legacy bridge; canonical defaults live in options.go.
-func DefaultOptions() FlowOptions {
-	return FlowOptions{
+func DefaultOptions() Options {
+	return Options{
 		Ctx:                  context.Background(),
 		Epsilon:              defaultEpsilon,
 		Verbose:              false,

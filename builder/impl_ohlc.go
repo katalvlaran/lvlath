@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // impl_ohlc.go - deterministic OHLC series via discrete-time GBM with intraday steps.
@@ -74,7 +76,7 @@ func extractOHLCParams(_ builderConfig) seqOHLCParams {
 // Model (discrete GBM per intraday step with Δt = 1/steps):
 //
 //	S_{t+1} = S_t * exp((μ - 0.5σ²)Δt + σ√Δt * Z),  Z ~ N(0,1).
-func BuildOHLCSeries(days int, seed int64, opts ...BuilderOption) (open, high, low, close []float64) {
+func BuildOHLCSeries(days int, seed int64, opts ...Option) (open, high, low, closes []float64) {
 	// Validate the requested number of days; if invalid, return nil slices.
 	if days < 1 {
 		return nil, nil, nil, nil
@@ -95,10 +97,10 @@ func BuildOHLCSeries(days int, seed int64, opts ...BuilderOption) (open, high, l
 	rng := rngFrom(cfg, seed)
 
 	// Pre-allocate outputs exactly once: O(days) memory.
-	open = make([]float64, days)  // open[d] at day start
-	high = make([]float64, days)  // high[d] max on intraday path
-	low = make([]float64, days)   // low[d]  min on intraday path
-	close = make([]float64, days) // close[d] after last intraday step
+	open = make([]float64, days)   // open[d] at day start
+	high = make([]float64, days)   // high[d] max on intraday path
+	low = make([]float64, days)    // low[d]  min on intraday path
+	closes = make([]float64, days) // close[d] after last intraday step
 
 	// Initialize the starting price (strictly positive).
 	S := p.S0
@@ -151,7 +153,7 @@ func BuildOHLCSeries(days int, seed int64, opts ...BuilderOption) (open, high, l
 
 		// The close is the last price after the final intraday step.
 		closeD = S
-		close[d] = closeD
+		closes[d] = closeD
 
 		// Finalize high/low to include endpoints explicitly (open & close).
 		// (Defensive, although open was used to init and close already visited.)
@@ -174,5 +176,5 @@ func BuildOHLCSeries(days int, seed int64, opts ...BuilderOption) (open, high, l
 	}
 
 	// Return the four deterministic series.
-	return open, high, low, close
+	return open, high, low, closes
 }

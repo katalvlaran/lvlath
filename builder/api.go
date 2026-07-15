@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // api.go - thin public entry-points for the builder package.
@@ -6,7 +8,7 @@
 // Design contract (strict):
 //   - One orchestrator: BuildGraph(gopts, bopts, cons...). Creates g, resolves cfg, runs cons in order.
 //   - All public factories are declared here, implemented in impl_*.go (single place to read docs).
-//   - Functional options (BuilderOption) resolve into an immutable builderConfig (no global state).
+//   - Functional options (Option) resolve into an immutable builderConfig (no global state).
 //   - Determinism: same inputs/options/seed and constructor order ⇒ identical graphs/series.
 //   - Safety: never panic; return sentinel errors from constructors; data helpers return nil on invalid input.
 //
@@ -55,7 +57,7 @@ type Constructor func(g *core.Graph, cfg builderConfig) error
 // Errors:
 //   - Wraps constructor errors via %w; callers should branch with errors.Is
 //     against builder sentinels (ErrTooFewVertices, ErrInvalidProbability, ...).
-func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constructor) (*core.Graph, error) {
+func BuildGraph(gopts []core.GraphOption, bopts []Option, cons ...Constructor) (*core.Graph, error) {
 	// Create a new graph using the provided core graph options (O(1) here).
 	g, err := core.NewGraph(gopts...)
 	if err != nil {
@@ -156,7 +158,7 @@ func BuildGraph(gopts []core.GraphOption, bopts []BuilderOption, cons ...Constru
 // BuildLetters is a thin helper: resolve cfg and run Letters(...) against an existing g.
 // It returns sentinel errors; it never panics.
 // Complexity: O(len(opts)) + cost of Letters constructor.
-func BuildLetters(g *core.Graph, text, scope string, opts ...BuilderOption) error {
+func BuildLetters(g *core.Graph, text, scope string, opts ...Option) error {
 	// Resolve configuration once for this call.
 	cfg := newBuilderConfig(opts...)
 
@@ -172,7 +174,7 @@ func BuildLetters(g *core.Graph, text, scope string, opts ...BuilderOption) erro
 // BuildWord is a thin helper: resolve cfg and run Word(...) against an existing g.
 // It returns sentinel errors; it never panics.
 // Complexity: O(len(opts)) + cost of Word constructor.
-func BuildWord(g *core.Graph, word, scope string, opts ...BuilderOption) error {
+func BuildWord(g *core.Graph, word, scope string, opts ...Option) error {
 	// Resolve configuration for deterministic behavior.
 	cfg := newBuilderConfig(opts...)
 
@@ -185,7 +187,7 @@ func BuildWord(g *core.Graph, word, scope string, opts ...BuilderOption) error {
 	return Word(word, scope)(g, cfg)
 }
 
-func BuildDigit(g *core.Graph, digit int, scope string, opts ...BuilderOption) error {
+func BuildDigit(g *core.Graph, digit int, scope string, opts ...Option) error {
 	cfg := newBuilderConfig(opts...)
 	if g == nil {
 		return fmt.Errorf("BuildDigit: nil graph: %w", ErrConstructFailed)
@@ -193,7 +195,7 @@ func BuildDigit(g *core.Graph, digit int, scope string, opts ...BuilderOption) e
 	return Digit(digit, scope)(g, cfg)
 }
 
-func BuildNumber(g *core.Graph, number float64, decimal bool, scope string, opts ...BuilderOption) error {
+func BuildNumber(g *core.Graph, number float64, decimal bool, scope string, opts ...Option) error {
 	cfg := newBuilderConfig(opts...)
 	if g == nil {
 		return fmt.Errorf("BuildNumber: nil graph: %w", ErrConstructFailed)
@@ -213,14 +215,14 @@ func BuildNumber(g *core.Graph, number float64, decimal bool, scope string, opts
 // BuildPulse returns a deterministic pulse series of length n.
 // Validation: n ≥ 1 (else returns nil). Determinism per (n, seed, opts...).
 // Complexity: O(n).
-//func BuildPulse(n int, seed int64, opts ...BuilderOption) []float64
+//func BuildPulse(n int, seed int64, opts ...Option) []float64
 //
 // BuildAudioChirp returns a deterministic linear chirp series of length n.
 // Validation: n ≥ 1 (else returns nil). Determinism per (n, seed, opts...).
 // Complexity: O(n).
-//func BuildAudioChirp(n int, seed int64, opts ...BuilderOption) []float64
+//func BuildAudioChirp(n int, seed int64, opts ...Option) []float64
 //
 // BuildOHLCSeries returns deterministic OHLC arrays for the given number of days.
 // Validation: days ≥ 1 (else returns nils). Invariants: low≤min(open,close), high≥max(...).
 // Complexity: O(days * steps) where steps is a small constant.
-//func BuildOHLCSeries(days int, seed int64, opts ...BuilderOption) (open, high, low, close []float64)
+//func BuildOHLCSeries(days int, seed int64, opts ...Option) (open, high, low, close []float64)

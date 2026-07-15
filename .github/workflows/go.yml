@@ -1,34 +1,43 @@
 name: CI
 
 on:
+  # Run the workflow on push to main or any version tags (like v1.0.0)
   push:
     branches: [ main, 'v*' ]
+  # Run the workflow on any pull request targeting the main branch
   pull_request:
     branches: [ main ]
 
 jobs:
   test:
+    # Use the latest Ubuntu environment provided by GitHub
     runs-on: ubuntu-latest
     steps:
+      # Step 1: Clone the repository code into the runner
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
+      # Step 2: Install and configure the Go environment
       - name: Set up Go
-        uses: actions/setup-go@v3
+        uses: actions/setup-go@v5
         with:
           go-version: 1.21
 
+      # Step 3: Install the linter with a locked version to prevent breaking changes
       - name: Install linters
         run: |
-          go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+          go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.60.3
 
+      # Step 4: Run the linter. It will automatically detect and use '.golangci.yml'
       - name: Run linters
         run: golangci-lint run
 
+      # Step 5: Run all unit tests with code coverage enabled
       - name: Run tests
         run: go test ./... -v -coverprofile=coverage.out
 
+      # Step 6: Upload coverage reports to Codecov for visual analysis
       - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@v3
+        uses: codecov/codecov-action@v4
         with:
           file: coverage.out

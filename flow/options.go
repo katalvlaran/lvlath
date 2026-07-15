@@ -131,7 +131,7 @@ type AugmentationObserver func(context.Context, AugmentationEvent) error
 // Behavior highlights:
 //   - Defaults are conservative and deterministic.
 //   - No allocation-heavy work is performed.
-//   - Legacy DefaultOptions mirrors these values through FlowOptions.
+//   - Legacy DefaultOptions mirrors these values through Options.
 //
 // Inputs:
 //   - None.
@@ -495,7 +495,7 @@ func checkAugmentationLimit(count int, limit int) error {
 	return nil
 }
 
-// optionsFromLegacy converts FlowOptions into canonical Option values.
+// optionsFromLegacy converts Options into canonical Option values.
 // It lets legacy wrappers reuse MaxFlow without duplicating policy logic.
 //
 // Implementation:
@@ -509,7 +509,7 @@ func checkAugmentationLimit(count int, limit int) error {
 //   - New option fields should be bridged here only when they preserve legacy semantics.
 //
 // Inputs:
-//   - legacy: historical FlowOptions value.
+//   - legacy: historical Options value.
 //   - algorithm: Algorithm forced by Dinic/EdmondsKarp/FordFulkerson wrapper.
 //
 // Returns:
@@ -529,7 +529,7 @@ func checkAugmentationLimit(count int, limit int) error {
 //
 // AI-Hints:
 //   - Do not copy algorithm code into wrappers; bridge through this helper.
-func optionsFromLegacy(legacy FlowOptions, algorithm Algorithm) []Option {
+func optionsFromLegacy(legacy Options, algorithm Algorithm) []Option {
 	opts := []Option{
 		WithAlgorithm(algorithm),
 		WithContext(legacy.Ctx),

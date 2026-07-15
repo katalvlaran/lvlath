@@ -12,7 +12,7 @@
     - Public behaviors described here are part of the lvlath/tsp contract.
     - Determinism rules described here are part of the lvlath/tsp contract.
     - Numeric and sentinel-error rules described here are part of the lvlath/tsp contract.
-    - TSPResult ownership, Clone, and VertexTour semantics are part of the public contract.
+    - Result ownership, Clone, and VertexTour semantics are part of the public contract.
     - Approximation-ratio publication rules are part of the public contract.
     - Any incompatible change must be explicit, documented, and versioned.
 
@@ -71,7 +71,7 @@ TSP models a closed route that visits every required vertex exactly once and ret
 
 6. **Result Ownership Law**
 
-   `TSPResult` owns detached `Tour` and `IDs` slices. `Clone()` deep-copies mutable result surfaces. `VertexTour()` projects indices through the detached ID mapping without recomputing a route.
+   `Result` owns detached `Tour` and `IDs` slices. `Clone()` deep-copies mutable result surfaces. `VertexTour()` projects indices through the detached ID mapping without recomputing a route.
 
 7. **Partial-Result Safety Law**
 
@@ -229,17 +229,17 @@ For directed 2-opt*, the move is orientation-preserving: it rewires tails rather
 ### Canonical facades and direct wrappers
 
 ```go
-func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*TSPResult, error)
-func SolveGraph(g *core.Graph, opts Options) (*TSPResult, error)
+func SolveMatrix(dist matrix.Matrix, ids []string, opts Options) (*Result, error)
+func SolveGraph(g *core.Graph, opts Options) (*Result, error)
 
-func HeldKarp(dist matrix.Matrix, opts Options) (*TSPResult, error)
-func ChristofidesSolve(dist matrix.Matrix, opts Options) (*TSPResult, error)
-func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*TSPResult, error)
-func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error)
-func ThreeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error)
+func HeldKarp(dist matrix.Matrix, opts Options) (*Result, error)
+func ChristofidesSolve(dist matrix.Matrix, opts Options) (*Result, error)
+func BranchAndBoundSolve(dist matrix.Matrix, opts Options) (*Result, error)
+func TwoOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error)
+func ThreeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error)
 ```
 
-Direct wrappers force their own algorithm policy and publish `TSPResult`. They are public convenience wrappers, not duplicate implementations.
+Direct wrappers force their own algorithm policy and publish `Result`. They are public convenience wrappers, not duplicate implementations.
 
 ### Utility APIs
 
@@ -269,7 +269,7 @@ type Algorithm int
 type MatchingAlgo int
 type BoundAlgo int
 
-type TSPResult struct {
+type Result struct {
     Tour []int
     Cost float64
     IDs  []string
@@ -288,9 +288,9 @@ type TSPResult struct {
     NodesExpanded int
 }
 
-func (r *TSPResult) IsNil() bool
-func (r *TSPResult) Clone() *TSPResult
-func (r *TSPResult) VertexTour() ([]string, error)
+func (r *Result) IsNil() bool
+func (r *Result) Clone() *Result
+func (r *Result) VertexTour() ([]string, error)
 ```
 
 ### Result states
@@ -412,7 +412,7 @@ FUNCTION SolveMatrix(dist, ids, opts):
   attach detached IDs
   attach MetricClosureApplied and Symmetric metadata
   validate closed tour
-  publish detached TSPResult
+  publish detached Result
 ```
 
 ### Held-Karp
@@ -512,7 +512,7 @@ FUNCTION Christofides(dist, opts):
   CanonicalizeOrientationInPlace(tour)
   cost = tourCost(dist, tour)
 
-  publish detached TSPResult
+  publish detached Result
 ```
 
 ### Blossom MWPM
@@ -1213,7 +1213,7 @@ func main() {
 
 ### Ownership
 
-`TSPResult` is detached. `Clone()` deep-copies `Tour` and `IDs`, preserves scalar metadata, and returns nil for a nil receiver. `VertexTour()` allocates a detached `[]string` and maps indices through `IDs` left-to-right.
+`Result` is detached. `Clone()` deep-copies `Tour` and `IDs`, preserves scalar metadata, and returns nil for a nil receiver. `VertexTour()` allocates a detached `[]string` and maps indices through `IDs` left-to-right.
 
 Caller mutation of the returned `Tour`, `IDs`, clone, or vertex tour must not mutate solver state or the source result.
 
@@ -1305,7 +1305,7 @@ errors.Is(err, tsp.ErrTimeLimit)
 
 > **Do not reintroduce metadata-dropping result projections.**
 >
->    `TSPResult` is the canonical result artifact.
+>    `Result` is the canonical result artifact.
 
 > **Do not hide selected-algorithm failures with weaker fallback.**
 >

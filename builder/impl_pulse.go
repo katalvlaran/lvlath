@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // impl_pulse.go - deterministic rectangular/triangular pulse generator.
@@ -92,7 +94,7 @@ func extractPulseParams(_ builderConfig) seqPulseParams {
 //
 // Complexity:
 //   - O(n) time, O(n) memory, constant-small overhead.
-func BuildPulse(n int, seed int64, opts ...BuilderOption) []float64 {
+func BuildPulse(n int, seed int64, opts ...Option) []float64 {
 	// Early size check avoids any allocations or RNG setup on invalid input.
 	if n < 1 {
 		return nil // Contract: invalid input → no data, never panic.

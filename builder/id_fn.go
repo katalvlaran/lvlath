@@ -90,36 +90,36 @@ func SymbolNumberIDFn(prefix string) IDFn {
 // WithSymbNumb sets the ID scheme to SymbolNumberIDFn(prefix).
 // Example: WithSymbNumb("v") → "v0","v1",...
 // Complexity: O(1).
-func WithSymbNumb(prefix string) BuilderOption {
+func WithSymbNumb(prefix string) Option {
 	return WithIDScheme(SymbolNumberIDFn(prefix))
 }
 
 // WithDefaultIDs resets the ID scheme to DefaultIDFn.
 // Complexity: O(1).
-func WithDefaultIDs() BuilderOption {
+func WithDefaultIDs() Option {
 	return WithIDScheme(DefaultIDFn)
 }
 
 // WithSymbolIDs sets the ID scheme to SymbolIDFn.
 // Complexity: O(1).
-func WithSymbolIDs() BuilderOption {
+func WithSymbolIDs() Option {
 	return WithIDScheme(SymbolIDFn)
 }
 
 // WithExcelColumnIDs sets the ID scheme to ExcelColumnIDFn.
 // Complexity: O(1).
-func WithExcelColumnIDs() BuilderOption {
+func WithExcelColumnIDs() Option {
 	return WithIDScheme(ExcelColumnIDFn)
 }
 
 // WithHexIDs sets the ID scheme to HexIDFn.
 // Complexity: O(1).
-func WithHexIDs() BuilderOption {
+func WithHexIDs() Option {
 	return WithIDScheme(HexIDFn)
 }
 
 // WithAlphanumericIDs sets the ID scheme to AlphanumericIDFn.
 // Complexity: O(1).
-func WithAlphanumericIDs() BuilderOption {
+func WithAlphanumericIDs() Option {
 	return WithIDScheme(AlphanumericIDFn)
 }

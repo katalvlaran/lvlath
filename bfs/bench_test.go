@@ -294,7 +294,7 @@ func BenchmarkBFS_HookOverhead(b *testing.B) {
 	//
 	// AI-HINT:
 	//   - Keep the hook itself deterministic and allocation-free to measure pure CPU overhead.
-	heavy := func(_ string, _ int) error {
+	heavy := func(_ string) error {
 		sum := 0
 		for i := 0; i < 100; i++ {
 			sum += i

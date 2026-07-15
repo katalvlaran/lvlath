@@ -129,15 +129,15 @@ go mod tidy
 
 The repository uses a lightweight GitFlow-style process.
 
-| Branch | Role |
-|:--|:--|
-| `main` | Stable branch representing released or release-ready state. |
-| `v0.1.0-alpha` | Active development branch for the current alpha line. |
-| `feature/<name>` | Focused feature branch. |
-| `fix/<name>` | Focused bug-fix branch. |
-| `docs/<name>` | Documentation-only branch. |
-| `test/<name>` | Test-only or regression branch. |
-| `hotfix/<name>` | Urgent fix branch based on `main` when needed. |
+| Branch           | Role                                                        |
+|:-----------------|:------------------------------------------------------------|
+| `main`           | Stable branch representing released or release-ready state. |
+| `v0.1.0-alpha`   | Active development branch for the current alpha line.       |
+| `feature/<name>` | Focused feature branch.                                     |
+| `fix/<name>`     | Focused bug-fix branch.                                     |
+| `docs/<name>`    | Documentation-only branch.                                  |
+| `test/<name>`    | Test-only or regression branch.                             |
+| `hotfix/<name>`  | Urgent fix branch based on `main` when needed.              |
 
 Create focused branches:
 
@@ -209,7 +209,7 @@ For non-trivial algorithm packages, the main public function should return a nam
 Preferred shape:
 
 ```go
-func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, error)
+func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*Result, error)
 ```
 
 Avoid canonical APIs like:
@@ -340,13 +340,13 @@ Tests must protect contracts, not merely execute lines.
 
 Every non-trivial package should cover:
 
-| Group | Purpose | Examples |
-|:--|:--|:--|
-| Validation | Fail-fast input and policy errors. | nil graph, bad option, invalid weight, missing start. |
-| Medium | Real algorithm behavior on non-trivial structures. | weighted routing, cycle witness, dense algebra, max-flow network. |
-| Special | Edge cases and regression traps. | zero-shape matrix, zero-weight edge, cancellation, mixed edges, partial result. |
-| Determinism | Stable order/tie behavior. | equal-cost Dijkstra witnesses, DFS cycle canonicalization, sorted components. |
-| Error protocol | Sentinel classification. | `errors.Is`, wrapped errors, joined/double-wrapped causes. |
+| Group          | Purpose                                            | Examples                                                                        |
+|:---------------|:---------------------------------------------------|:--------------------------------------------------------------------------------|
+| Validation     | Fail-fast input and policy errors.                 | nil graph, bad option, invalid weight, missing start.                           |
+| Medium         | Real algorithm behavior on non-trivial structures. | weighted routing, cycle witness, dense algebra, max-flow network.               |
+| Special        | Edge cases and regression traps.                   | zero-shape matrix, zero-weight edge, cancellation, mixed edges, partial result. |
+| Determinism    | Stable order/tie behavior.                         | equal-cost Dijkstra witnesses, DFS cycle canonicalization, sorted components.   |
+| Error protocol | Sentinel classification.                           | `errors.Is`, wrapped errors, joined/double-wrapped causes.                      |
 
 ### 9.2. Test helper policy
 
@@ -503,14 +503,14 @@ Only when a nearby comment explains that the shortcut is safe for static tutoria
 
 ### 12.2. Public names
 
-| Concept | Naming |
-|:--|:--|
-| Constructor | `NewXxx` |
-| Option | `WithXxx`, `WithAllowXxx`, `WithNoXxx` |
-| Error | `ErrXxx` |
-| Result | `XxxResult` |
-| Canonical algorithm facade | package-specific clear name, e.g. `Dijkstra` |
-| Wrappers | explicit projection names, e.g. `DistanceTo`, `ShortestPathTo` |
+| Concept                    | Naming                                                         |
+|:---------------------------|:---------------------------------------------------------------|
+| Constructor                | `NewXxx`                                                       |
+| Option                     | `WithXxx`, `WithAllowXxx`, `WithNoXxx`                         |
+| Error                      | `ErrXxx`                                                       |
+| Result                     | `XxxResult`                                                    |
+| Canonical algorithm facade | package-specific clear name, e.g. `Dijkstra`                   |
+| Wrappers                   | explicit projection names, e.g. `DistanceTo`, `ShortestPathTo` |
 
 ### 12.3. No magic values
 

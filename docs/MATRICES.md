@@ -146,44 +146,44 @@ func NewPreparedDense(rows, cols int, opts ...Option) (*Dense, error)
 func (m *Dense) Fill(data []float64) error
 func (m *Dense) Clone() Matrix
 func (m *Dense) Induced(rowsIdx, colsIdx []int) (*Dense, error)
-func (m *Dense) View(r0, c0, rows, cols int) (*MatrixView, error)
+func (m *Dense) View(r0, c0, rows, cols int) (*View, error)
 func (m *Dense) Apply(f func(i, j int, v float64) float64) error
 func (m *Dense) Do(f func(i, j int, v float64) bool)
 ```
 
-`Clone` and `Induced` own new buffers. `View` and `MatrixView` share base storage. `Apply` mutates in-place and is intentionally not all-or-nothing: earlier accepted writes remain if a later value violates policy.
+`Clone` and `Induced` own new buffers. `View` and `View` share base storage. `Apply` mutates in-place and is intentionally not all-or-nothing: earlier accepted writes remain if a later value violates policy.
 
 ### 10.3.3. Public Facades
 
-| Group | Facades |
-|:--|:--|
-| Construction | `NewZeros`, `NewIdentity`, `ZerosLike`, `IdentityLike`, `CloneMatrix` |
-| Algebra | `Sum`, `Diff`, `Product`, `HadamardProd`, `T`, `ScaleBy`, `MatVecMul` |
-| Factorization | `LUDecompose`, `QRDecompose`, `InverseOf`, `EigenSym` |
-| Graph adapters | `BuildAdjacency`, `GraphFromAdjacency`, `AdjacencyToGraph`, `BuildMetricClosure`, `DegreeVector` |
-| APSP | `APSPInPlace`, `MetricClosure` |
-| Sanitization / compare | `Clip`, `ReplaceInfNaN`, `AllClose` |
-| Statistics | `CenterColumns`, `CenterRows`, `NormalizeRowsL1`, `NormalizeRowsL2`, `Covariance`, `Correlation` |
+| Group                  | Facades                                                                                          |
+|:-----------------------|:-------------------------------------------------------------------------------------------------|
+| Construction           | `NewZeros`, `NewIdentity`, `ZerosLike`, `IdentityLike`, `CloneMatrix`                            |
+| Algebra                | `Sum`, `Diff`, `Product`, `HadamardProd`, `T`, `ScaleBy`, `MatVecMul`                            |
+| Factorization          | `LUDecompose`, `QRDecompose`, `InverseOf`, `EigenSym`                                            |
+| Graph adapters         | `BuildAdjacency`, `GraphFromAdjacency`, `AdjacencyToGraph`, `BuildMetricClosure`, `DegreeVector` |
+| APSP                   | `APSPInPlace`, `MetricClosure`                                                                   |
+| Sanitization / compare | `Clip`, `ReplaceInfNaN`, `AllClose`                                                              |
+| Statistics             | `CenterColumns`, `CenterRows`, `NormalizeRowsL1`, `NormalizeRowsL2`, `Covariance`, `Correlation` |
 
 ### 10.3.4. Math Formulation Summary
 
 The public API is intentionally thin: facades delegate to canonical kernels and preserve their validation, loop order, and allocation model.
 
-| Facade API | Operation | Complexity | Formulation & Notes |
-|:--|:--|:--|:--|
-| `Sum(A, B)` | Matrix sum | $O(R \cdot C)$ | $$ C_{ij} = A_{ij} + B_{ij} $$ |
-| `Diff(A, B)` | Matrix difference | $O(R \cdot C)$ | $$ C_{ij} = A_{ij} - B_{ij} $$ |
-| `HadamardProd(A, B)` | Element-wise product | $O(R \cdot C)$ | $$ C_{ij} = A_{ij}B_{ij} $$ |
-| `T(A)` | Transposition | $O(R \cdot C)$ | $$ C_{ij} = A_{ji} $$ |
-| `Product(A, B)` | Matrix multiplication | $O(R \cdot N \cdot C)$ | $$ C_{ij} = \sum_k A_{ik}B_{kj} $$ |
-| `ScaleBy(A, α)` | Scalar scale | $O(R \cdot C)$ | $$ C_{ij} = \alpha A_{ij} $$ |
-| `MatVecMul(A, x)` | Matrix-vector product | $O(R \cdot C)$ | $$ y_i = \sum_j A_{ij}x_j $$ |
-| `LUDecompose(A)` | LU factorization | $O(N^3)$ | Deterministic LU facade; callers must handle singularity errors. |
-| `InverseOf(A)` | Matrix inverse | $O(N^3)$ | Delegates to the inverse kernel; singular matrices return sentinel errors. |
-| `EigenSym(A,tol,k)` | Symmetric eigensolver | $O(k \cdot N^3)$ | Delegates to deterministic Jacobi-style symmetric eigen decomposition. |
-| `APSPInPlace(D)` | Floyd-Warshall | $O(N^3)$ | $$ D_{ij} \leftarrow \min(D_{ij}, D_{ik}+D_{kj}) $$ |
-| `Covariance(X)` | Sample covariance | $O(R \cdot C^2)$ | $$ Cov = \frac{(X^c)^T X^c}{R-1} $$ |
-| `Correlation(X)` | Pearson correlation | $O(R \cdot C^2)$ | $$ Corr = \frac{Z^T Z}{R-1} $$ |
+| Facade API           | Operation             | Complexity             | Formulation & Notes                                                        |
+|:---------------------|:----------------------|:-----------------------|:---------------------------------------------------------------------------|
+| `Sum(A, B)`          | Matrix sum            | $O(R \cdot C)$         | $$ C_{ij} = A_{ij} + B_{ij} $$                                             |
+| `Diff(A, B)`         | Matrix difference     | $O(R \cdot C)$         | $$ C_{ij} = A_{ij} - B_{ij} $$                                             |
+| `HadamardProd(A, B)` | Element-wise product  | $O(R \cdot C)$         | $$ C_{ij} = A_{ij}B_{ij} $$                                                |
+| `T(A)`               | Transposition         | $O(R \cdot C)$         | $$ C_{ij} = A_{ji} $$                                                      |
+| `Product(A, B)`      | Matrix multiplication | $O(R \cdot N \cdot C)$ | $$ C_{ij} = \sum_k A_{ik}B_{kj} $$                                         |
+| `ScaleBy(A, α)`      | Scalar scale          | $O(R \cdot C)$         | $$ C_{ij} = \alpha A_{ij} $$                                               |
+| `MatVecMul(A, x)`    | Matrix-vector product | $O(R \cdot C)$         | $$ y_i = \sum_j A_{ij}x_j $$                                               |
+| `LUDecompose(A)`     | LU factorization      | $O(N^3)$               | Deterministic LU facade; callers must handle singularity errors.           |
+| `InverseOf(A)`       | Matrix inverse        | $O(N^3)$               | Delegates to the inverse kernel; singular matrices return sentinel errors. |
+| `EigenSym(A,tol,k)`  | Symmetric eigensolver | $O(k \cdot N^3)$       | Delegates to deterministic Jacobi-style symmetric eigen decomposition.     |
+| `APSPInPlace(D)`     | Floyd-Warshall        | $O(N^3)$               | $$ D_{ij} \leftarrow \min(D_{ij}, D_{ik}+D_{kj}) $$                        |
+| `Covariance(X)`      | Sample covariance     | $O(R \cdot C^2)$       | $$ Cov = \frac{(X^c)^T X^c}{R-1} $$                                        |
+| `Correlation(X)`     | Pearson correlation   | $O(R \cdot C^2)$       | $$ Corr = \frac{Z^T Z}{R-1} $$                                             |
 
 > [!NOTE]
 > **On determinants:** `lvlath/matrix` does not expose a determinant facade in the provided API. Use factorization-level workflows when you need structural information about singularity or invertibility.
@@ -220,12 +220,12 @@ func WithBinaryWeights() Option
 
 ### 10.4.1. Numeric Admissibility
 
-| Value | Default Dense | `+Inf`-policy Dense |
-|:--|:--:|:--:|
-| finite value | accepted | accepted |
-| `NaN` | rejected | rejected |
-| `-Inf` | rejected | rejected |
-| `+Inf` | rejected | accepted |
+| Value        | Default Dense | `+Inf`-policy Dense |
+|:-------------|:-------------:|:-------------------:|
+| finite value |   accepted    |      accepted       |
+| `NaN`        |   rejected    |      rejected       |
+| `-Inf`       |   rejected    |      rejected       |
+| `+Inf`       |   rejected    |      accepted       |
 
 Finalization rules:
 
@@ -842,7 +842,7 @@ func main() {
 
 `Dense` does not contain locks. Concurrent read-only access is safe when no goroutine mutates the matrix. Concurrent writes or read/write races require external synchronization.
 
-Safe read-style operations include shape reads and `At` when the matrix is not being mutated. Unsafe concurrent operations include `Set`, `Fill`, `Apply`, and writes through `MatrixView`.
+Safe read-style operations include shape reads and `At` when the matrix is not being mutated. Unsafe concurrent operations include `Set`, `Fill`, `Apply`, and writes through `View`.
 
 ### Publication on Failure
 
@@ -874,7 +874,7 @@ Construction and transform functions return `nil` result artifacts with an error
 
 > [!NOTE]
 > **6. Choose copy vs view deliberately.**
-> Use `Induced` or `Clone` when downstream code needs independent lifetime. Use `View` only for intentional shared windows. Treat `MatrixView.Set` as a write into the base matrix.
+> Use `Induced` or `Clone` when downstream code needs independent lifetime. Use `View` only for intentional shared windows. Treat `View.Set` as a write into the base matrix.
 
 > [!IMPORTANT]
 > **7. Respect zero-shape matrices.**

@@ -180,7 +180,7 @@ func TestBFS_Special_PartialResult_OnVisitError(t *testing.T) {
 	stopErr := errors.New("test: stop")
 
 	res, err := bfs.BFS(g, "A",
-		bfs.WithOnVisit(func(id string, depth int) error {
+		bfs.WithOnVisit(func(id string) error {
 			if id == "B" {
 				return stopErr
 			}

@@ -34,7 +34,7 @@ func run3opt(
 	seed int64,
 	start int,
 	timeLimit time.Duration,
-) (*tsp.TSPResult, error) {
+) (*tsp.Result, error) {
 	opts := tsp.DefaultOptions()
 	opts.Algo = tsp.ThreeOptOnly
 	opts.BestImprovement = bestImprovement
@@ -150,10 +150,10 @@ func TestThreeOpt_ATSP_Basic(t *testing.T) {
 
 	thr, err := run3opt(m, true, false, false, epsTiny, seedDet, startV, 0)
 	mustNoError(t, err)
-	mustValidTSPResult(t, thr, 4, startV, tsp.ThreeOptOnly)
+	mustValidResult(t, thr, 4, startV, tsp.ThreeOptOnly)
 
 	if twoErr == nil {
-		mustValidTSPResult(t, two, 4, startV, tsp.TwoOptOnly)
+		mustValidResult(t, two, 4, startV, tsp.TwoOptOnly)
 		if thr.Cost > two.Cost+epsTiny {
 			t.Fatalf("ATSP: 3-opt worse than 2-opt: three=%.12f two=%.12f", thr.Cost, two.Cost)
 		}

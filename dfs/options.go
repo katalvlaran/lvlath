@@ -5,7 +5,6 @@
 // for depth-first search workflows over core.Graph.
 //
 // The file contains configuration and result contracts only.
-
 package dfs
 
 import (
@@ -20,7 +19,7 @@ const NoDepthLimit = -1
 // Option configures DFS traversal behavior before execution starts.
 //
 // Implementation:
-//   - Stage 1: Each option mutates DFSOptions during configuration.
+//   - Stage 1: Each option mutates Option during configuration.
 //   - Stage 2: Each option validates its own input and may reject invalid values.
 //   - Stage 3: DFS applies all options before traversal begins.
 //
@@ -29,7 +28,7 @@ const NoDepthLimit = -1
 //   - Invalid option input returns ErrOptionViolation.
 //
 // Inputs:
-//   - *DFSOptions: the mutable DFS configuration being assembled.
+//   - *Option: the mutable DFS configuration being assembled.
 //
 // Returns:
 //   - error: nil on success, or ErrOptionViolation-wrapped failure on invalid input.
@@ -50,9 +49,9 @@ const NoDepthLimit = -1
 //   - Keep option validation local to the option and finalize cross-field invariants centrally.
 //   - Do not let options silently alter core traversal semantics unless documented.
 //   - Treat explicitly provided nil callbacks and nil context as invalid input.
-type Option func(*DFSOptions) error
+type Option func(*Options) error
 
-// DFSOptions holds configurable DFS traversal parameters.
+// Options holds configurable DFS traversal parameters.
 //
 // Implementation:
 //   - Stage 1: DefaultOptions provides the baseline configuration.
@@ -82,10 +81,10 @@ type Option func(*DFSOptions) error
 //   - Hooks and filters are user-provided behavior and may dominate runtime if they are expensive.
 //
 // AI-Hints:
-//   - Keep DFSOptions as pure configuration.
+//   - Keep Option as pure configuration.
 //   - Do not store runtime counters or mutable traversal state in this struct.
 //   - Callback cost is part of the traversal cost model.
-type DFSOptions struct {
+type Options struct {
 	// Ctx controls cancellation and timeout behavior for DFS.
 	// A non-nil context is required once explicitly provided through WithContext.
 	Ctx context.Context
@@ -128,7 +127,7 @@ type DFSOptions struct {
 //   - N/A.
 //
 // Returns:
-//   - DFSOptions: the baseline DFS configuration.
+//   - Option: the baseline DFS configuration.
 //
 // Errors:
 //   - N/A.
@@ -145,8 +144,8 @@ type DFSOptions struct {
 // AI-Hints:
 //   - Use DefaultOptions as the single baseline before applying options.
 //   - Keep NoDepthLimit as the only supported sentinel for unrestricted depth.
-func DefaultOptions() DFSOptions {
-	return DFSOptions{
+func DefaultOptions() Options {
+	return Options{
 		Ctx:            context.Background(),
 		OnVisit:        nil,
 		OnExit:         nil,
@@ -160,7 +159,7 @@ func DefaultOptions() DFSOptions {
 //
 // Implementation:
 //   - Stage 1: Validate the provided context.
-//   - Stage 2: Store it in DFSOptions for later traversal checks.
+//   - Stage 2: Store it in Option for later traversal checks.
 //
 // Behavior highlights:
 //   - A nil context is invalid explicit input.
@@ -187,7 +186,7 @@ func DefaultOptions() DFSOptions {
 //   - Do not silently accept nil context when it was explicitly provided.
 //   - Preserve context.Canceled and context.DeadlineExceeded as underlying causes.
 func WithContext(ctx context.Context) Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		if ctx == nil {
 			return ErrOptionViolation
 		}
@@ -228,7 +227,7 @@ func WithContext(ctx context.Context) Option {
 //   - Treat an explicit nil callback as invalid input, not as a silent no-op.
 //   - Keep hook behavior side-effect aware and deterministic when order matters.
 func WithOnVisit(fn func(id string) error) Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return ErrOptionViolation
 		}
@@ -270,7 +269,7 @@ func WithOnVisit(fn func(id string) error) Option {
 //   - Treat an explicit nil callback as invalid input, not as a silent no-op.
 //   - Keep hook behavior side-effect aware and deterministic when order matters.
 func WithOnExit(fn func(id string) error) Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return ErrOptionViolation
 		}
@@ -284,7 +283,7 @@ func WithOnExit(fn func(id string) error) Option {
 //
 // Implementation:
 //   - Stage 1: Validate the requested limit.
-//   - Stage 2: Store it in DFSOptions.
+//   - Stage 2: Store it in Option.
 //
 // Behavior highlights:
 //   - NoDepthLimit disables depth limiting.
@@ -312,7 +311,7 @@ func WithOnExit(fn func(id string) error) Option {
 //   - Do not invent additional negative sentinels.
 //   - Keep NoDepthLimit as the only supported unrestricted-depth value.
 func WithMaxDepth(limit int) Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		if limit < NoDepthLimit {
 			return ErrOptionViolation
 		}
@@ -353,7 +352,7 @@ func WithMaxDepth(limit int) Option {
 //   - Filtering affects traversal reachability and diagnostics, not graph topology.
 //   - Avoid expensive filter logic when O(V+E) behavior matters.
 func WithFilterNeighbor(fn func(id string) bool) Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return ErrOptionViolation
 		}
@@ -393,13 +392,13 @@ func WithFilterNeighbor(fn func(id string) bool) Option {
 // AI-Hints:
 //   - In full traversal mode, Depth is measured from each tree root, not from a single global origin.
 func WithFullTraversal() Option {
-	return func(o *DFSOptions) error {
+	return func(o *Options) error {
 		o.FullTraversal = true
 		return nil
 	}
 }
 
-// buildDFSOptions assembles the canonical DFS configuration before traversal starts.
+// buildOption assembles the canonical DFS configuration before traversal starts.
 //
 // Implementation:
 //   - Stage 1: Start from DefaultOptions as the single baseline configuration.
@@ -409,13 +408,13 @@ func WithFullTraversal() Option {
 // Behavior highlights:
 //   - Configuration is fail-fast.
 //   - A nil Option value is invalid explicit input.
-//   - The returned DFSOptions value contains traversal policy only.
+//   - The returned Option value contains traversal policy only.
 //
 // Inputs:
 //   - opts: ordered DFS option builders.
 //
 // Returns:
-//   - DFSOptions: the assembled DFS configuration.
+//   - Option: the assembled DFS configuration.
 //   - error: nil on success, or an option-construction failure.
 //
 // Errors:
@@ -436,7 +435,7 @@ func WithFullTraversal() Option {
 //   - Use this helper as the single entry point for DFS option assembly.
 //   - Do not duplicate option application logic across algorithms.
 //   - Treat invalid explicit option input as configuration failure, not runtime traversal failure.
-func buildDFSOptions(opts ...Option) (DFSOptions, error) {
+func buildOption(opts ...Option) (Options, error) {
 	// Start from the canonical baseline configuration.
 	options := DefaultOptions()
 
@@ -444,12 +443,12 @@ func buildDFSOptions(opts ...Option) (DFSOptions, error) {
 	for index, opt := range opts {
 		// Reject a nil Option value explicitly to avoid a panic on call.
 		if opt == nil {
-			return DFSOptions{}, fmt.Errorf("%w: option at index %d is nil", ErrOptionViolation, index)
+			return Options{}, fmt.Errorf("%w: option at index %d is nil", ErrOptionViolation, index)
 		}
 
 		// Apply the option and stop immediately if it rejects the input.
 		if err := opt(&options); err != nil {
-			return DFSOptions{}, err
+			return Options{}, err
 		}
 	}
 

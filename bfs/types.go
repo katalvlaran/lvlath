@@ -7,8 +7,8 @@ import (
 	"fmt"
 )
 
-// BFSResult holds the outcome of a breadth-first traversal.
-type BFSResult struct {
+// Result holds the outcome of a breadth-first traversal.
+type Result struct {
 	// StartID is the starting vertex ID for this BFS invocation.
 	//
 	// AI-HINTS:
@@ -86,7 +86,7 @@ type BFSResult struct {
 //
 // AI-Hints:
 //   - Under FullTraversal, visited != reachable-from-StartID; StartID anchoring prevents false paths.
-func (r *BFSResult) PathTo(dst string) ([]string, error) {
+func (r *Result) PathTo(dst string) ([]string, error) {
 	if r == nil {
 		return nil, ErrNoPath
 	}

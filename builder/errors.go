@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // errors.go - sentinel errors for the builder package.
@@ -21,7 +23,6 @@ package builder
 
 import (
 	"errors"
-	"fmt"
 )
 
 // ErrTooFewVertices indicates that a numeric parameter (e.g., n, rows, cols, degree)
@@ -73,22 +74,6 @@ var ErrBadSize = errors.New("builder: invalid size/length")
 // must surface as errors rather than panics (e.g., runtime option resolution).
 // Usage: if errors.Is(err, ErrOptionViolation) { /* correct option values */ }.
 var ErrOptionViolation = errors.New("builder: invalid option value")
-
-// builderErrorf wraps an inner error message with the given method context.
-// It returns an error of the form "<Method>: <formatted message>".
-//
-// Parameters:
-//   - method: canonical constructor name, e.g. MethodCycle.
-//   - format: format string for the inner message.
-//   - args:   values for the format placeholders.
-//
-// Complexity: O(len(format) + Σlen(args)), negligible for our use.
-func builderErrorf(method, format string, args ...interface{}) error {
-	// Build the inner message using fmt.Sprintf
-	inner := fmt.Sprintf(format, args...)
-	// Prefix with the method name and return a new error
-	return fmt.Errorf("%s: %s", method, inner)
-}
 
 // --- Implementation Notes ----------------------------------------------------
 //

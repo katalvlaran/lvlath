@@ -55,6 +55,6 @@ var ErrNilOption = errors.New("mst: nil option")
 // MST ordering requires finite weights; negative finite weights remain valid.
 var ErrNaNInfWeight = errors.New("mst: edge weight is NaN or Inf")
 
-// ErrNilResult indicates that a method requiring a non-nil MSTResult receiver was called on nil.
+// ErrNilResult indicates that a method requiring a non-nil Result receiver was called on nil.
 // Result helpers use this sentinel instead of panicking on nil receivers.
 var ErrNilResult = errors.New("mst: nil result")

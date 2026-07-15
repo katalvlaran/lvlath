@@ -87,7 +87,7 @@
 // dfs
 //
 //	Provides deterministic depth-first traversal, finish-order output, cycle
-//	witnesses, and topological sorting. DFSResult.Order is finish order, not
+//	witnesses, and topological sorting. dfs.Result.Order is finish order, not
 //	discovery order. Cycle detection publishes deterministic witnesses rather
 //	than pretending to enumerate every simple cycle.
 //
@@ -102,7 +102,7 @@
 //
 //	Computes minimum spanning trees and explicit minimum spanning forests over
 //	weighted, undirected graphs. MinimumSpanningTree is the canonical facade;
-//	Kruskal and Prim are focused wrappers. MSTResult reports algorithm, mode,
+//	Kruskal and Prim are focused wrappers. mst.Result reports algorithm, mode,
 //	root, detached selected edges, total weight, vertex count, component count,
 //	and deterministic component roots.
 //
@@ -136,7 +136,7 @@
 //	the boundary. ExactHeldKarp and completed BranchAndBound are exact regimes;
 //	Christofides is a symmetric metric approximation pipeline; BlossomMatch is
 //	the exact matching mode required for the 1.5 ratio; GreedyMatch is explicit
-//	and weaker; TwoOptOnly and ThreeOptOnly are local-search regimes. TSPResult
+//	and weaker; TwoOptOnly and ThreeOptOnly are local-search regimes. Result
 //	publishes tour, cost, algorithm, exactness, optimality, timeout state,
 //	approximation ratio, metric-closure flag, and detached IDs.
 //

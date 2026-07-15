@@ -105,7 +105,10 @@ Must explicitly list:
 1.3 Contract Laws
 The charter must explicitly declare:
 - Shape / Dimensions: valid sizes, behavior on zero-values and degenerate cases.
-- Numeric / Domain policy: NaN/Inf, +Inf, 0, no edge, no path, loops, multi-edges.
+- Numeric / Domain policy: NaN/Inf, +Inf, 0, no edge, no path, loops,
+  multi-edges, arithmetic overflow, and explicit separation of storage,
+  algorithm-input, policy, result, and dense-representation domains
+  according to Section 2.8.
 - Determinism law: traversal order, tie-break rules, sorting semantics.
 - Error law: which sentinel-errors are returned at which stages.
 - Ownership / Aliasing law: who owns memory, where shallow/deep copy occurs.
@@ -133,10 +136,10 @@ an explicit named `XxxResult` structure.
   its nil-state behavior explicitly and safely.
 
 1.5.2 Examples of acceptable shape:
-- `BFSResult`
-- `DFSResult`
+- BFS `Result`
+- DFS `Result`
 - `CycleDetectionResult`
-- `DijkstraResult`
+- Dijkstra `Result`
 
 1.5.3 Examples of forbidden canonical shape:
 - `(map[string]float64, map[string]string, error)`
@@ -230,6 +233,107 @@ error protocol, and document the determinism source.
 2.7 Executable Documentation Layer
 - `example_test.go`, `docs/*.md`, and focused helpers.
 - Explains and demonstrates the real surface only. Must never outrun the source.
+
+2.8 Numeric Domain Separation Law
+
+The same float64 value may have different validity and meaning in different
+library domains. Numeric semantics must never be transferred implicitly from
+one domain into another.
+
+2.8.1 Storage-Domain Values
+
+Storage types must define the exact numeric set they can persist.
+
+Current lvlath/core law:
+- core.Graph edge weights must be finite.
+- NaN, +Inf, and -Inf are rejected before topology publication.
+- Absence of an edge is represented by absence of topology, not by an infinite
+  stored edge weight.
+
+2.8.2 Algorithm-Input Values
+
+Every algorithm must define its accepted subset of the storage domain.
+
+Examples:
+- Dijkstra accepts finite non-negative costs.
+- Flow accepts finite non-negative capacities under its tolerance policy.
+- MST accepts finite weights according to its ordering contract.
+- Algorithms that support negative weights must declare that support explicitly.
+
+An algorithm may impose a stricter numeric domain than its storage layer.
+It must not silently widen the storage domain.
+
+2.8.3 Arithmetic-Domain Values
+
+Individually valid finite operands may produce an unrepresentable intermediate
+or final value.
+
+Mandatory rules:
+- arithmetic overflow must be detected when it can affect the public result,
+- overflow must receive a distinct sentinel when callers need to branch on it,
+- an overflowed value must not be silently converted into an unrelated domain
+  state such as “unreachable”,
+- partial-result publication must follow the package's declared failure law.
+
+Example:
+- finite current distance + finite edge weight producing +Inf is arithmetic
+  overflow, not an unreachable shortest-path result.
+
+2.8.4 Result-Domain Sentinels
+
+Algorithm results may use numeric sentinels when their meaning is explicit,
+documented, and test-governed.
+
+Examples:
+- +Inf may represent a known but unreachable shortest-path destination.
+- A missing or unknown entity must remain a separate protocol state and must not
+  be collapsed into the same numeric sentinel without an explicit contract.
+
+2.8.5 Policy-Domain Sentinels
+
+Options may use numeric sentinels to express unbounded policy.
+
+Examples:
+- MaxDistance=+Inf may mean “no distance cutoff”.
+- InfEdgeThreshold=+Inf may mean “no finite edge is blocked”.
+
+A policy-domain +Inf value must not authorize +Inf in storage-domain input.
+
+2.8.6 Dense-Representation Sentinels
+
+Dense structures may require a stored value for every index pair.
+
+In such representations:
+- +Inf may represent no direct edge,
+- +Inf may represent an unreachable pair,
+- the exact interpretation must be declared by the matrix or adapter contract.
+
+When converting between dense and graph storage:
+- +Inf absence cells must become absent edges,
+- they must not become core.Graph edges with +Inf weight.
+
+2.8.7 Hard Prohibitions
+
+The following are forbidden:
+- silently reinterpreting result-domain +Inf as an edge weight,
+- silently reinterpreting policy-domain +Inf as storage permission,
+- translating arithmetic overflow into ordinary unreachable state,
+- losing numeric-domain meaning during graph/matrix/adapter conversion,
+- documenting one numeric domain while implementing another.
+
+2.8.8 Verification Law
+
+Every package using numeric sentinels must test:
+- valid boundary values,
+- NaN,
+- +Inf,
+- -Inf,
+- finite negative values where relevant,
+- arithmetic overflow where relevant,
+- domain conversion and sentinel preservation where adapters exist.
+
+Documentation, tests, examples, and implementation must describe the same
+numeric-domain boundaries.
 
 Hard Prohibitions:
 - Algorithm kernels depending on external domains without an explicit adapter layer.
@@ -368,6 +472,12 @@ This helper must:
 - compute derived invariants centrally,
 - validate all options *before* any heavy allocations occur.
 - enforce "last-writer-wins" unless explicitly documented otherwise.
+- If Option is publicly constructible, or if the options fields are publicly
+  mutable, built-in option constructors are not a sufficient validation barrier.
+  Canonical assembly must revalidate the resulting complete configuration after
+  every option before the state reaches a kernel.
+- Test-only production exports that expose private option assembly are forbidden.
+  External tests must use the public facade or directly test public option values.
 
 6.2.1 No-Panic Options Law
 Public option setters and public option assembly must never use panic for
@@ -919,6 +1029,12 @@ For `PathTo` or predecessor maps, explicitly define:
 - whether it reconstructs one path or all,
 - what counts as reachable,
 - semantics under forest/multi-root modes.
+- Path reconstruction over caller-owned predecessor state must always terminate.
+- Broken, cyclic, repeated, empty-before-root, and out-of-domain predecessor
+  relations must produce a documented deterministic error.
+- No partial witness may be published when predecessor validation fails.
+- A path method must not assume that an exported predecessor map remains
+  kernel-valid after publication.
 
 22.5.1 Public Path Query Law
 If a package supports path reconstruction, public path interaction must be exposed

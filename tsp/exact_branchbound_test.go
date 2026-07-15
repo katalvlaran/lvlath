@@ -299,7 +299,7 @@ func TestBB_TimeLimit_TinyBudget_NoBound(t *testing.T) {
 
 	result, err := tsp.BranchAndBoundSolve(dist, opts)
 	if err == nil {
-		mustValidTSPResult(t, result, n, startV, tsp.BranchAndBound)
+		mustValidResult(t, result, n, startV, tsp.BranchAndBound)
 		return
 	}
 	if !errors.Is(err, tsp.ErrTimeLimit) {

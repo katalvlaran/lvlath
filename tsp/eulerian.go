@@ -256,6 +256,7 @@ func EulerianCircuit(adj [][]int, start int) ([]int, error) {
 //   - Do not replace this with packUndirectedKey in Eulerian half-edge pairing.
 //   - Twin pairing requires opposite directed keys.
 func packDirectedHalfEdgeKey(u int, v int) uint64 {
+	//nolint:gosec // G115: vertex IDs are guaranteed to fit in uint32 by graph bounds
 	return uint64(uint32(u))<<32 | uint64(uint32(v))
 }
 
@@ -473,7 +474,7 @@ func canonicalUndirectedKey(u int, v int) uint64 {
 	if u > v {
 		u, v = v, u
 	}
-
+	//nolint:gosec // G115: vertex IDs are guaranteed to fit in uint32 by graph bounds
 	return uint64(uint32(u))<<32 | uint64(uint32(v))
 }
 
@@ -512,5 +513,6 @@ func canonicalUndirectedKey(u int, v int) uint64 {
 // AI-Hints:
 //   - Do not use this for directed edge IDs.
 func unpackCanonicalUndirectedKey(key uint64) (int, int) {
+	//nolint:gosec // G115: vertex IDs are guaranteed to fit in uint32 by graph bounds
 	return int(uint32(key >> 32)), int(uint32(key))
 }

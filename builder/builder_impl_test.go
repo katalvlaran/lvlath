@@ -45,7 +45,7 @@ func TestBuilders_Functional(t *testing.T) {
 		wantV       int                               // expected number of vertices
 		wantE       int                               // expected number of edges
 		sampleCheck func(t *testing.T, g *core.Graph) // additional topology-specific checks
-		bopts       []builder.BuilderOption
+		bopts       []builder.Option
 	}{
 		{
 			name:  "Cycle(5)",
@@ -142,7 +142,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomSparse_p0(5)",
 			ctor:  builder.RandomSparse(5, 0.0),
 			wantV: 5, wantE: 0, // p=0 yields no edges
-			bopts: []builder.BuilderOption{builder.WithSeed(1)}, // satisfy rng-required contract
+			bopts: []builder.Option{builder.WithSeed(1)}, // satisfy rng-required contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 0 {
 					t.Errorf("RandomSparse(p=0): expected 0 edges, got %d", len(g.Edges()))
@@ -153,7 +153,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomSparse_p1(5)",
 			ctor:  builder.RandomSparse(5, 1.0),
 			wantV: 5, wantE: 10, // 5*4/2 = 10
-			bopts: []builder.BuilderOption{builder.WithSeed(1)}, // satisfy rng-required contract
+			bopts: []builder.Option{builder.WithSeed(1)}, // satisfy rng-required contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 10 {
 					t.Errorf("RandomSparse(p=1): expected 10 edges, got %d", len(g.Edges()))
@@ -164,7 +164,7 @@ func TestBuilders_Functional(t *testing.T) {
 			name:  "RandomRegular(6,2)",
 			ctor:  builder.RandomRegular(6, 2),
 			wantV: 6, wantE: 6, // n*d/2 = 6*2/2 = 6 edges
-			bopts: []builder.BuilderOption{builder.WithSeed(42)}, // rng required by contract
+			bopts: []builder.Option{builder.WithSeed(42)}, // rng required by contract
 			sampleCheck: func(t *testing.T, g *core.Graph) {
 				if len(g.Edges()) != 6 {
 					t.Errorf("RandomRegular: expected 6 edges, got %d", len(g.Edges()))
@@ -223,7 +223,6 @@ func TestBuilders_Functional(t *testing.T) {
 
 	// Execute each subtest in parallel
 	for _, tc := range tests {
-		tc := tc // capture loop variable
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			// build into a weighted graph so AddEdge never returns ErrBadWeight

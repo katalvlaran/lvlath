@@ -3,7 +3,10 @@
 
 package tsp
 
-import "testing"
+import (
+	"errors"
+	"testing"
+)
 
 func TestBlossomShrinkStoresCycleAsSingleSourceOfTruth(t *testing.T) {
 	problem := internalSeededMatchingProblem(4, 10)
@@ -82,7 +85,7 @@ func TestBlossomCycleStepsRejectSingletonAndMalformedCycle(t *testing.T) {
 		t.Fatalf("newBlossomEngine: %v", err)
 	}
 
-	if _, err := engine.cycleSteps(0); err != ErrInvalidMatching {
+	if _, err = engine.cycleSteps(0); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("singleton cycleSteps got %v", err)
 	}
 
@@ -93,7 +96,7 @@ func TestBlossomCycleStepsRejectSingletonAndMalformedCycle(t *testing.T) {
 		{node: 1, edgeToNext: internalEdgeID(t, engine, 1, 0), vertexToNext: 1, nextVertex: 0},
 	}
 
-	if _, err := engine.cycleSteps(node); err != ErrInvalidMatching {
+	if _, err = engine.cycleSteps(node); !errors.Is(err, ErrInvalidMatching) {
 		t.Fatalf("even malformed cycle got %v", err)
 	}
 }

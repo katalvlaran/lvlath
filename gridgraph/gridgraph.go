@@ -37,7 +37,8 @@ func NewGridGraph(values [][]int, opts GridOptions) (*GridGraph, error) {
 		copy(cells[y], values[y])
 	}
 	// Precompute neighbor offsets based on connectivity
-	offsets := make([][2]int, 0, 8)
+	var offsets [][2]int
+	//offsets := make([][2]int, 0, 8)
 	if opts.Conn == Conn8 {
 		offsets = [][2]int{{0, -1}, {1, -1}, {1, 0}, {1, 1}, {0, 1}, {-1, 1}, {-1, 0}, {-1, -1}}
 	} else {

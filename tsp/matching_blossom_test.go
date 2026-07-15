@@ -26,12 +26,12 @@ func TestBlossomMatch_PublicChristofides_LargeDeterministicK64(t *testing.T) {
 
 	first, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, first, 64, startV, tsp.Christofides)
+	mustValidResult(t, first, 64, startV, tsp.Christofides)
 
 	for run := 0; run < 5; run++ {
 		got, runErr := tsp.ChristofidesSolve(dist, opts)
 		mustNoError(t, runErr)
-		mustValidTSPResult(t, got, 64, startV, tsp.Christofides)
+		mustValidResult(t, got, 64, startV, tsp.Christofides)
 
 		mustEqualInts(t, got.Tour, first.Tour)
 		mustEqualFloat(t, got.Cost, first.Cost, epsTiny, "large Blossom deterministic cost")
@@ -52,7 +52,7 @@ func TestBlossomMatch_PublicChristofides_NoSizeBasedRefusalK128(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 128, startV, tsp.Christofides)
+	mustValidResult(t, result, 128, startV, tsp.Christofides)
 }
 
 func TestBlossomMatch_PublicChristofides_PublishesFormalRatio(t *testing.T) {
@@ -69,7 +69,7 @@ func TestBlossomMatch_PublicChristofides_PublishesFormalRatio(t *testing.T) {
 
 	result, err := tsp.ChristofidesSolve(dist, opts)
 	mustNoError(t, err)
-	mustValidTSPResult(t, result, 20, startV, tsp.Christofides)
+	mustValidResult(t, result, 20, startV, tsp.Christofides)
 
 	mustEqualFloat(t, result.ApproximationRatio, tsp.ChristofidesApproximationRatio, epsTiny, "Blossom ratio")
 }

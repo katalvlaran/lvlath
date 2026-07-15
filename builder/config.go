@@ -1,4 +1,6 @@
-// SPDX-License-Identifier: MIT
+// SPDX-License-Identifier: AGPL-3.0-only
+// Copyright (C) 2025-2026 katalvlaran
+//
 // Package: lvlath/builder
 //
 // impl_config.go - internal configuration and deterministic defaults.
@@ -66,7 +68,7 @@ const (
 // all options in order. Options may leave some string fields empty; we resolve
 // those to defaults here to keep downstream code branch-free.
 // Complexity: O(len(opts)) time, O(1) space.
-func newBuilderConfig(opts ...BuilderOption) builderConfig {
+func newBuilderConfig(opts ...Option) builderConfig {
 	// Start with strict, deterministic defaults.
 	cfg := builderConfig{
 		idFn:        decimalID,                                             // "0","1","2",...

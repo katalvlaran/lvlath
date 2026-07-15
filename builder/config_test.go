@@ -1,5 +1,5 @@
 // Package builder contains unit tests for the configuration primitives
-// (builderConfig and BuilderOption) to ensure correct application and override behavior.
+// (builderConfig and Option) to ensure correct application and override behavior.
 package builder
 
 import (

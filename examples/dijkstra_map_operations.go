@@ -19,9 +19,9 @@
 //   - WithPathTracking()
 //   - WithMaxDistance(max)
 //   - WithInfEdgeThreshold(threshold)
-//   - DijkstraResult.DistanceTo(targetID)
-//   - DijkstraResult.HasPathTo(targetID)
-//   - DijkstraResult.PathTo(targetID)
+//   - Result.DistanceTo(targetID)
+//   - Result.HasPathTo(targetID)
+//   - Result.PathTo(targetID)
 //
 // Notes:
 //   - Distances in the dataset are kilometers.

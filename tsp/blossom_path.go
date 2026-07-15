@@ -357,58 +357,6 @@ func (e *blossomEngine) verifyPathStepContinuity(steps []blossomPathStep) error 
 	return nil
 }
 
-// liftAugmentingPath expands an endpoint-aware top-level path into the first deterministic
-// original dense edge candidate accepted by verifyAugmentingEdgeSequence.
-//
-// This wrapper exists for compatibility and focused tests. Production augmentation should use
-// liftAugmentingPathChoices and then transactionally try candidates, because nested contracted
-// blossoms may have multiple locally alternating lifts and only later candidates may preserve
-// persistent blossom-base invariants after flip.
-//
-// Implementation:
-//   - Stage 1: Delegate candidate construction to liftAugmentingPathChoices.
-//   - Stage 2: Reject when no candidate exists.
-//   - Stage 3: Return the first deterministic fully alternating candidate.
-//
-// Behavior highlights:
-//   - Does not mutate mate[], base[], labels, duals, cycles, or members.
-//   - Preserves deterministic candidate order.
-//   - Does not prove post-flip persistent blossom validity.
-//
-// Inputs:
-//   - steps: root-to-root oriented top-level path.
-//
-// Returns:
-//   - []int: first lifted original dense edge sequence accepted by augmenting-path validation.
-//   - error: nil when at least one candidate exists.
-//
-// Errors:
-//   - ErrInvalidMatching from malformed steps, broken ownership, failed lifting,
-//     or absence of a valid augmenting edge sequence.
-//
-// Determinism:
-//   - Returns candidate zero from deterministic liftAugmentingPathChoices output.
-//
-// Complexity:
-//   - Time O(2^b * L), Space O(2^b * L), where b is crossed/nested blossoms
-//     and L is lifted candidate length.
-//
-// Notes:
-//   - Use this only when one candidate is sufficient for the caller.
-//   - augment must prefer liftAugmentingPathChoices.
-//
-// AI-Hints:
-//   - Do not use this wrapper inside augment if transactional candidate retry is required.
-//   - Do not mutate matching state here.
-func (e *blossomEngine) liftAugmentingPath(steps []blossomPathStep) ([]int, error) {
-	choices, err := e.liftAugmentingPathChoices(steps)
-	if err != nil {
-		return nil, err
-	}
-
-	return choices[0], nil
-}
-
 // liftAugmentingPathChoices expands an endpoint-aware top-level augmenting path into
 // every deterministic original-edge candidate that satisfies strict augmenting-path
 // alternation under the current committed matching.
@@ -530,55 +478,6 @@ func (e *blossomEngine) liftAugmentingPathChoices(steps []blossomPathStep) ([][]
 	}
 
 	return valid, nil
-}
-
-// liftThroughBlossom returns the first deterministic edge-only internal route between two
-// original vertices represented by a contracted blossom. It is a compatibility wrapper
-// around liftThroughBlossomChoices for callers that do not need multiple parity candidates.
-//
-// Implementation:
-//   - Stage 1: Build all deterministic internal route choices.
-//   - Stage 2: Reject empty choice sets.
-//   - Stage 3: Return the first candidate.
-//
-// Behavior highlights:
-//   - Does not mutate engine state.
-//   - Preserves deterministic forward-before-backward ordering.
-//   - Does not prove full augmenting-path validity by itself.
-//
-// Inputs:
-//   - node: contracted blossom node.
-//   - entryVertex: original local vertex where the route enters node.
-//   - exitVertex: original local vertex where the route leaves node.
-//
-// Returns:
-//   - []int: first deterministic internal dense edge sequence.
-//   - error: nil when at least one route exists.
-//
-// Errors:
-//   - ErrInvalidMatching from liftThroughBlossomChoices or empty candidates.
-//
-// Determinism:
-//   - Returns first choice in deterministic candidate order.
-//
-// Complexity:
-//   - Time O(2^b * L), Space O(2^b * L).
-//
-// Notes:
-//   - Full path lifting should keep all choices until global validation.
-//
-// AI-Hints:
-//   - Do not use this wrapper when nested choices must be preserved.
-func (e *blossomEngine) liftThroughBlossom(node int, entryVertex int, exitVertex int) ([]int, error) {
-	choices, err := e.liftThroughBlossomChoices(node, entryVertex, exitVertex)
-	if err != nil {
-		return nil, err
-	}
-	if len(choices) == 0 {
-		return nil, ErrInvalidMatching
-	}
-
-	return choices[0], nil
 }
 
 // liftThroughBlossomChoices returns all deterministic internal edge sequences between two
@@ -728,85 +627,6 @@ func (e *blossomEngine) cycleChildIndexContainingVertex(node int, vertex int) (i
 	return -1, ErrInvalidMatching
 }
 
-// cyclePathBetween returns the first deterministic internally alternating edge path between
-// two child indices of a contracted blossom. It is a compatibility wrapper around
-// cyclePathBetweenDirection and should not be used when all nested alternatives must be preserved.
-//
-// Implementation:
-//   - Stage 1: Try the forward directed cycle walk.
-//   - Stage 2: Return the first locally alternating forward candidate.
-//   - Stage 3: Try the backward directed cycle walk.
-//   - Stage 4: Return the first locally alternating backward candidate.
-//   - Stage 5: Reject when neither direction yields a candidate.
-//
-// Behavior highlights:
-//   - Does not mutate engine state.
-//   - Uses base vertices of the child nodes as entry/exit compatibility endpoints.
-//   - Preserves deterministic forward-before-backward order.
-//
-// Inputs:
-//   - node: contracted blossom node.
-//   - fromChild: source child index.
-//   - toChild: target child index.
-//
-// Returns:
-//   - []int: first deterministic internal edge path.
-//   - error: nil when a locally alternating path exists.
-//
-// Errors:
-//   - ErrInvalidMatching for invalid cycle metadata, invalid child indices,
-//     invalid child bases, or absence of an alternating route.
-//
-// Determinism:
-//   - Forward candidates are considered before backward candidates.
-//
-// Complexity:
-//   - Time O(2^b * L), Space O(2^b * L) in nested cases.
-//
-// Notes:
-//   - This is a wrapper; full augmentation should use all choices.
-//
-// AI-Hints:
-//   - Do not choose by shortest path.
-//   - Do not use this to discard alternatives inside liftAugmentingPathChoices.
-func (e *blossomEngine) cyclePathBetween(node int, fromChild int, toChild int) ([]int, error) {
-	forward, err := e.cyclePathBetweenDirection(
-		node,
-		fromChild,
-		toChild,
-		true,
-		e.base[e.cycles[node][fromChild].node],
-		e.base[e.cycles[node][toChild].node],
-	)
-	if err == nil {
-		for _, candidate := range forward {
-			if e.edgeSequenceAlternates(candidate) {
-				return candidate, nil
-			}
-		}
-	}
-
-	backward, err := e.cyclePathBetweenDirection(
-		node,
-		fromChild,
-		toChild,
-		false,
-		e.base[e.cycles[node][fromChild].node],
-		e.base[e.cycles[node][toChild].node],
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	for _, candidate := range backward {
-		if e.edgeSequenceAlternates(candidate) {
-			return candidate, nil
-		}
-	}
-
-	return nil, ErrInvalidMatching
-}
-
 // cyclePathBetweenDirection builds every candidate lift sequence along one directed walk
 // of a contracted blossom cycle. It preserves recursive alternatives from nested child
 // blossoms instead of collapsing them to the first local route.
@@ -942,55 +762,6 @@ func (e *blossomEngine) cyclePathBetweenDirection(
 	}
 
 	return candidates, nil
-}
-
-// liftInsideChild returns the first deterministic internal route inside one cycle child.
-// It is a compatibility wrapper around liftInsideChildChoices for callers that need only
-// one edge-only path.
-//
-// Implementation:
-//   - Stage 1: Build all child internal route choices.
-//   - Stage 2: Reject empty choice sets.
-//   - Stage 3: Return the first deterministic candidate.
-//
-// Behavior highlights:
-//   - Does not mutate engine state.
-//   - Accepts singleton same-vertex neutral routes through liftInsideChildChoices.
-//   - Does not preserve alternatives.
-//
-// Inputs:
-//   - child: singleton or contracted blossom child node.
-//   - entryVertex: original vertex where traversal enters child.
-//   - exitVertex: original vertex where traversal leaves child.
-//
-// Returns:
-//   - []int: first deterministic internal dense edge sequence.
-//   - error: nil when at least one route exists.
-//
-// Errors:
-//   - ErrInvalidMatching for invalid child, invalid ownership, or no valid route.
-//
-// Determinism:
-//   - Returns first candidate from deterministic choice order.
-//
-// Complexity:
-//   - Time O(1) for singleton children; recursive O(2^b * L) for contracted children.
-//
-// Notes:
-//   - Full lifting should prefer liftInsideChildChoices.
-//
-// AI-Hints:
-//   - Do not use this when all nested alternatives must be retained.
-func (e *blossomEngine) liftInsideChild(child int, entryVertex int, exitVertex int) ([]int, error) {
-	choices, err := e.liftInsideChildChoices(child, entryVertex, exitVertex)
-	if err != nil {
-		return nil, err
-	}
-	if len(choices) == 0 {
-		return nil, ErrInvalidMatching
-	}
-
-	return choices[0], nil
 }
 
 // liftInsideChildChoices returns every candidate internal route inside one cycle child.

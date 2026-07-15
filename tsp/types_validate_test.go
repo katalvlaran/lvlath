@@ -391,7 +391,6 @@ func TestValidate_TimeZero_And_StartBounds(t *testing.T) {
 
 	t.Run("StartVertex in [0, n-1] is accepted", func(t *testing.T) {
 		for _, sv := range []int{0, 2} {
-			sv := sv
 			t.Run((func() string {
 				if sv == 0 {
 					return "start=0 ok"

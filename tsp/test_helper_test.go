@@ -291,7 +291,7 @@ func mustAdjEqual(t *testing.T, got [][]int, want [][]int) {
 	}
 }
 
-// mustValidTSPResult verifies the public TSPResult contract shared by solver tests.
+// mustValidResult verifies the public Result contract shared by solver tests.
 // It checks shape, metadata, finite cost, algorithm identity, and Hamiltonian tour validity.
 //
 // Implementation:
@@ -330,11 +330,11 @@ func mustAdjEqual(t *testing.T, got [][]int, want [][]int) {
 // AI-Hints:
 //   - Do not check ApproximationRatio here; GreedyMatch and exact algorithms intentionally differ.
 //   - Do not require IDs unless the test explicitly passed IDs into SolveMatrix/SolveGraph.
-func mustValidTSPResult(t *testing.T, result *tsp.TSPResult, n int, start int, algorithm tsp.Algorithm) {
+func mustValidResult(t *testing.T, result *tsp.Result, n int, start int, algorithm tsp.Algorithm) {
 	t.Helper()
 
 	if result == nil {
-		t.Fatalf("nil TSPResult")
+		t.Fatalf("nil Result")
 	}
 	if result.Algorithm != algorithm {
 		t.Fatalf("algorithm mismatch: got %v, want %v", result.Algorithm, algorithm)
@@ -471,8 +471,7 @@ func edgesCount(adj [][]int) int {
 // Complexity: O(E) memory/time where E is the number of undirected edges.
 func doubleAdj(adj [][]int) [][]int {
 	// Allocate result with the same number of rows as input.
-	var n int
-	n = len(adj)              // number of vertices
+	n := len(adj)             // number of vertices
 	var cp = make([][]int, n) // output adjacency (multigraph)
 	var u int                 // row index
 	for u = 0; u < n; u++ {   // iterate rows

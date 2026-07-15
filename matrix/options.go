@@ -874,53 +874,6 @@ func NewMatrixOptions(opts ...Option) (Options, error) {
 	return gatherOptions(opts...)
 }
 
-// defaultOptions returns the documented defaults (single source of truth).
-// Implementation:
-//   - Stage 1: fill fields from Default* constants.
-//   - Stage 2: leave derived 'undirected' to be finalized by gatherOptions.
-//
-// Behavior highlights:
-//   - Ensures defaults and comments never diverge.
-//
-// Returns:
-//   - Options: defaults snapshot.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - Keep this in sync with constants above.
-//
-// AI-Hints:
-//   - Use NewMatrixOptions() to override selectively.
-func defaultOptions() Options {
-	o := Options{
-		// numeric policy
-		eps:               DefaultEpsilon,
-		validateNaNInf:    DefaultValidateNaNInf,
-		allowInfDistances: DefaultAllowInfDistances,
-
-		// build policy
-		directed:    DefaultDirected,
-		allowMulti:  DefaultAllowMulti,
-		allowLoops:  DefaultAllowLoops,
-		weighted:    DefaultWeighted,
-		metricClose: DefaultMetricClosure,
-
-		preserveZeroWeights: DefaultPreserveZeroWeights,
-
-		// export policy
-		edgeThreshold: DefaultEdgeThreshold,
-		keepWeights:   DefaultKeepWeights,
-		binaryWeights: DefaultBinaryWeights,
-		// undirected inferred in gatherOptions
-	}
-
-	finalizeOptions(&o)
-
-	return o
-}
-
 // gatherOptions applies user-provided Option setters on top of defaults and
 // finalizes derived invariants (e.g., export 'undirected' = !build.directed).
 // This is the canonical internal entry in api/impl layers.

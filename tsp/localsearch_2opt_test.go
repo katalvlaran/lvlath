@@ -30,7 +30,7 @@ func run2opt(
 	seed int64,
 	start int,
 	timeLimit time.Duration,
-) (*tsp.TSPResult, error) {
+) (*tsp.Result, error) {
 	opts := tsp.DefaultOptions()
 	opts.Algo = tsp.TwoOptOnly
 	opts.Symmetric = symmetric
@@ -90,7 +90,7 @@ func TestTwoOpt_TSP_ImprovesConvexHexagon(t *testing.T) {
 		if !sameCycleEitherDir(rot, want) {
 			t.Fatalf("unexpected tour:\n got:  %v\n want: %v (either direction, start=0)", rot, want)
 		}
-		mustValidTSPResult(t, res, n, startV, tsp.TwoOptOnly)
+		mustValidResult(t, res, n, startV, tsp.TwoOptOnly)
 	})
 }
 

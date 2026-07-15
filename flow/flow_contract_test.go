@@ -56,8 +56,6 @@ func buildEnterpriseBackboneProofNetwork(t *testing.T) *core.Graph {
 
 func TestMaxFlow_AllAlgorithms_EnterpriseBackboneProofCertificate(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := buildEnterpriseBackboneProofNetwork(t)
 
@@ -78,8 +76,6 @@ func TestMaxFlow_AllAlgorithms_EnterpriseBackboneProofCertificate(t *testing.T) 
 
 func TestMaxFlow_AllAlgorithms_SingleEdgeSaturatesForwardAndPublishesReverse(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(true), core.WithWeighted())
 			mustAddEdge(t, g, "S", "T", 7)
@@ -101,8 +97,6 @@ func TestMaxFlow_AllAlgorithms_SingleEdgeSaturatesForwardAndPublishesReverse(t *
 
 func TestMaxFlow_AllAlgorithms_ParallelEdgesAggregateAcrossLayeredNetwork(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(true), core.WithWeighted(), core.WithMultiEdges())
 
@@ -139,8 +133,6 @@ func TestMaxFlow_AllAlgorithms_EpsilonFiltersOnlyEffectiveCapacityNetwork(t *tes
 	const epsilon = 2.0
 
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(true), core.WithWeighted())
 
@@ -173,8 +165,6 @@ func TestMaxFlow_AllAlgorithms_EpsilonFiltersOnlyEffectiveCapacityNetwork(t *tes
 
 func TestMaxFlow_AllAlgorithms_LoopsIgnoredInMultiLayerNetwork(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(true), core.WithWeighted(), core.WithLoops())
 
@@ -207,8 +197,6 @@ func TestMaxFlow_AllAlgorithms_LoopsIgnoredInMultiLayerNetwork(t *testing.T) {
 
 func TestMaxFlow_AllAlgorithms_UndirectedEdgeIsTwoDirectedCapacityArcs(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := mustGraph(t, core.WithDirected(false), core.WithWeighted())
 			mustAddEdge(t, g, "A", "B", 4)

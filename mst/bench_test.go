@@ -26,7 +26,7 @@ const (
 	benchmarkRandomWeightLimit = 100
 )
 
-var benchmarkMSTResult *mst.MSTResult
+var benchmarkResult *mst.Result
 
 // BenchmarkMST_Kruskal_SparseConnected_500v_2000e measures global edge-sort cost
 // on a connected sparse-ish graph where E is much smaller than V².
@@ -43,7 +43,7 @@ func BenchmarkMST_Kruskal_SparseConnected_500v_2000e(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		benchmarkMSTResult = result
+		benchmarkResult = result
 	}
 }
 
@@ -58,7 +58,7 @@ func BenchmarkMST_Prim_SparseConnected_500v_2000e(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		benchmarkMSTResult = result
+		benchmarkResult = result
 	}
 }
 
@@ -73,7 +73,7 @@ func BenchmarkMST_Kruskal_DenseConnected_200v_12000e(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		benchmarkMSTResult = result
+		benchmarkResult = result
 	}
 }
 
@@ -93,7 +93,7 @@ func BenchmarkMST_Prim_DenseConnected_200v_12000e(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		benchmarkMSTResult = result
+		benchmarkResult = result
 	}
 }
 

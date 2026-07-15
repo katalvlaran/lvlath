@@ -117,37 +117,26 @@ func ExponentialWeightFn(rate float64) WeightFn {
 	}
 }
 
-// resolveWeightFn returns the first non-nil WeightFn in wfn,
-// or DefaultWeightFn if none provided.
-// Complexity: O(1) time, O(1) space.
-func resolveWeightFn(wfn ...WeightFn) WeightFn {
-	if len(wfn) > 0 && wfn[0] != nil {
-		return wfn[0]
-	}
-
-	return DefaultWeightFn
-}
-
 // WithConstantWeight sets a fixed edge weight via ConstantWeightFn.
 // Complexity: O(1).
-func WithConstantWeight(w float64) BuilderOption {
+func WithConstantWeight(w float64) Option {
 	return WithWeightFn(ConstantWeightFn(w))
 }
 
 // WithUniformWeight sets weights ∼ U[min,max] via UniformWeightFn.
 // Complexity: O(1).
-func WithUniformWeight(min, max float64) BuilderOption {
+func WithUniformWeight(min, max float64) Option {
 	return WithWeightFn(UniformWeightFn(min, max))
 }
 
 // WithNormalWeight sets weights ∼ N(mean,stddev) via NormalWeightFn.
 // Complexity: O(1).
-func WithNormalWeight(mean, stddev float64) BuilderOption {
+func WithNormalWeight(mean, stddev float64) Option {
 	return WithWeightFn(NormalWeightFn(mean, stddev))
 }
 
 // WithExponentialWeight sets weights ∼ Exp(rate) via ExponentialWeightFn.
 // Complexity: O(1).
-func WithExponentialWeight(rate float64) BuilderOption {
+func WithExponentialWeight(rate float64) Option {
 	return WithWeightFn(ExponentialWeightFn(rate))
 }

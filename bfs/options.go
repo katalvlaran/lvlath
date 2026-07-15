@@ -51,14 +51,14 @@ const (
 //
 // AI-Hints:
 //   - Keep hooks allocation-free; avoid capturing large objects in closures.
-type Option func(*BFSOptions) error
+type Option func(*Options) error
 
-// BFSOptions holds effective parameters and callbacks for BFS execution.
+// Options holds effective parameters and callbacks for BFS execution.
 //
 // AI-HINTS:
-//   - Configure BFS via WithXxx options; do not construct BFSOptions directly.
+//   - Configure BFS via WithXxx options; do not construct Options directly.
 //   - Callbacks must be safe, deterministic, and free of graph mutations.
-type BFSOptions struct {
+type Options struct {
 	// ctx allows cancellation and deadlines.
 	ctx context.Context
 
@@ -78,7 +78,7 @@ type BFSOptions struct {
 
 	// onVisit is called when visiting a vertex.
 	// If it returns an error, BFS aborts and returns a partial result with that error.
-	onVisit func(id string, depth int) error
+	onVisit func(id string) error
 
 	// filterNeighbor can skip neighbor relations by returning false.
 	// Called for each relation currID → nbrID surfaced by NeighborIDs.
@@ -89,11 +89,11 @@ type BFSOptions struct {
 var (
 	noOpEnqueue = func(string, int) {}
 	noOpDequeue = func(string, int) {}
-	noOpVisit   = func(string, int) error { return nil }
+	noOpVisit   = func(string) error { return nil }
 	allowAllNbr = func(string, string) bool { return true }
 )
 
-// DefaultOptions returns a fully-initialized BFSOptions value.
+// DefaultOptions returns a fully-initialized Options value.
 //
 // Behavior highlights:
 //   - ctx is context.Background().
@@ -105,7 +105,7 @@ var (
 //   - none.
 //
 // Returns:
-//   - BFSOptions: a valid options carrier for the BFS kernel.
+//   - Options: a valid options carrier for the BFS kernel.
 //
 // Errors:
 //   - none.
@@ -121,8 +121,8 @@ var (
 //
 // AI-Hints:
 //   - Defaults are allocation-free and safe; customize only what you need.
-func DefaultOptions() BFSOptions {
-	return BFSOptions{
+func DefaultOptions() Options {
+	return Options{
 		ctx:            context.Background(),
 		maxDepth:       MaxDepthUnlimited,
 		fullTraversal:  false,
@@ -133,7 +133,7 @@ func DefaultOptions() BFSOptions {
 	}
 }
 
-// applyOptions applies opts sequentially and returns the effective BFSOptions.
+// applyOptions applies opts sequentially and returns the effective Options.
 //
 // Implementation:
 //   - Stage 1: Initialize defaults.
@@ -147,7 +147,7 @@ func DefaultOptions() BFSOptions {
 //   - opts: functional options; last-writer-wins for each field.
 //
 // Returns:
-//   - BFSOptions: fully-initialized options value.
+//   - Options: fully-initialized options value.
 //   - error: a descriptive error (to be wrapped as ErrOptionViolation by the public API).
 //
 // Errors:
@@ -164,32 +164,32 @@ func DefaultOptions() BFSOptions {
 //
 // AI-Hints:
 //   - Passing nil as an Option is rejected to prevent silent misconfiguration.
-func applyOptions(opts ...Option) (BFSOptions, error) {
+func applyOptions(opts ...Option) (Options, error) {
 	o := DefaultOptions()
 
 	for i, opt := range opts {
 		if opt == nil {
-			return BFSOptions{}, fmt.Errorf("nil option at index %d", i)
+			return Options{}, fmt.Errorf("nil option at index %d", i)
 		}
 		if err := opt(&o); err != nil {
-			return BFSOptions{}, err
+			return Options{}, err
 		}
 	}
 
 	if o.ctx == nil {
-		return BFSOptions{}, fmt.Errorf("context is nil")
+		return Options{}, fmt.Errorf("context is nil")
 	}
 	if o.onEnqueue == nil {
-		return BFSOptions{}, fmt.Errorf("onEnqueue is nil")
+		return Options{}, fmt.Errorf("onEnqueue is nil")
 	}
 	if o.onDequeue == nil {
-		return BFSOptions{}, fmt.Errorf("onDequeue is nil")
+		return Options{}, fmt.Errorf("onDequeue is nil")
 	}
 	if o.onVisit == nil {
-		return BFSOptions{}, fmt.Errorf("onVisit is nil")
+		return Options{}, fmt.Errorf("onVisit is nil")
 	}
 	if o.filterNeighbor == nil {
-		return BFSOptions{}, fmt.Errorf("filterNeighbor is nil")
+		return Options{}, fmt.Errorf("filterNeighbor is nil")
 	}
 
 	return o, nil
@@ -201,7 +201,7 @@ func applyOptions(opts ...Option) (BFSOptions, error) {
 //   - Passing nil is invalid; use context.Background() instead.
 //   - Avoid time-based cancellation in Examples; use WithCancel + deterministic triggers.
 func WithContext(ctx context.Context) Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		if ctx == nil {
 			return fmt.Errorf("context is nil")
 		}
@@ -222,7 +222,7 @@ func WithContext(ctx context.Context) Option {
 //   - Depth is measured in edge count (unweighted).
 //   - Inclusive means vertices at depth d are visited, but their neighbors are not enqueued.
 func WithMaxDepth(d int) Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		if d < MaxDepthUnlimited {
 			return fmt.Errorf("maxDepth is invalid (%d)", d)
 		}
@@ -237,7 +237,7 @@ func WithMaxDepth(d int) Option {
 //   - This mode is useful for building a forest.
 //   - PathTo must still anchor to StartID; do not interpret forest paths as start-reachable paths.
 func WithFullTraversal() Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		o.fullTraversal = true
 		return nil
 	}
@@ -249,7 +249,7 @@ func WithFullTraversal() Option {
 //   - This filter operates on (currID, nbrID) pairs returned by NeighborIDs.
 //   - Do not assume edge-level visibility (Edge.ID is not available here).
 func WithFilterNeighbor(fn func(currID, nbrID string) bool) Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return fmt.Errorf("filterNeighbor is nil")
 		}
@@ -264,7 +264,7 @@ func WithFilterNeighbor(fn func(currID, nbrID string) bool) Option {
 //   - Hooks must be observers; do not mutate the graph.
 //   - Keep hooks allocation-free for minimal overhead.
 func WithOnEnqueue(fn func(id string, depth int)) Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return fmt.Errorf("onEnqueue is nil")
 		}
@@ -278,7 +278,7 @@ func WithOnEnqueue(fn func(id string, depth int)) Option {
 // AI-HINTS:
 //   - This hook is a good place for deterministic cancellation triggers.
 func WithOnDequeue(fn func(id string, depth int)) Option {
-	return func(o *BFSOptions) error {
+	return func(o *Options) error {
 		if fn == nil {
 			return fmt.Errorf("onDequeue is nil")
 		}
@@ -292,8 +292,8 @@ func WithOnDequeue(fn func(id string, depth int)) Option {
 // AI-HINTS:
 //   - Returning an error stops BFS and returns a partial result.
 //   - Use sentinel errors in your own code and wrap them for classification.
-func WithOnVisit(fn func(id string, depth int) error) Option {
-	return func(o *BFSOptions) error {
+func WithOnVisit(fn func(id string) error) Option {
+	return func(o *Options) error {
 		if fn == nil {
 			return fmt.Errorf("onVisit is nil")
 		}

@@ -59,7 +59,7 @@ The library covers:
 * `core` graph modeling with deterministic topology and explicit capabilities;
 * `bfs` hop-distance traversal and weak components;
 * `dfs` finish-order traversal, cycle witnesses, and topological sorting;
-* `dijkstra` non-negative weighted shortest paths with explicit `+Inf` state semantics;
+* `dijkstra` finite non-negative single-source shortest paths, deterministic witnesses, `+Inf` unreachable results, and explicit cutoff/wall policies;
 * `mst` strict minimum spanning trees and explicit minimum spanning forests;
 * `flow` max-flow / residual-network analysis;
 * `matrix` dense graph algebra: adjacency, incidence, metric closure, statistics, factorization, sanitation;
@@ -72,14 +72,14 @@ The library covers:
 Mathematical object        Package surface             Contract idea
 ────────────────────────────────────────────────────────────────────────────
 G = (V,E)                  *core.Graph                 deterministic topology
-hop layers                 *bfs.BFSResult              depth / parent / visited
-DFS forest                 *dfs.DFSResult              finish order, not discovery
-weighted route             *dijkstra.Result            distance + witness + +Inf
-spanning backbone          *mst.MSTResult              strict tree or explicit forest
+hop layers                 *bfs.Result                 depth / parent / visited
+DFS forest                 *dfs.Result                 finish order, not discovery
+weighted route             *dijkstra.Result            finite cost / +Inf unreachable / witness
+spanning backbone          *mst.Result                 strict tree or explicit forest
 flow network               residual *core.Graph        capacity state after flow
 dense operator             *matrix.Dense               row-major numeric artifact
 warping alignment          *dtw.Result                 distance, reachability, path
-closed tour                *tsp.TSPResult              cost, exactness, timeout, ratio
+closed tour                *tsp.Result                 cost, exactness, timeout, ratio
 ```
 
 ### Why lvlath?
@@ -92,7 +92,7 @@ A shortest-path formula is easy. A reliable Go package must also answer:
 * Is this graph really directed, weighted, loop-enabled, or multi-edge capable?
 * Is a missing target different from a known but unreachable target?
 * Is a zero edge a real zero-cost edge or an absent edge?
-* Is `+Inf` a valid unreachable state or invalid numeric input?
+* In which numeric domain is `+Inf` being used: graph storage, runtime policy, dense representation, or algorithm result?
 * Is a disconnected MST request an error or an explicit forest request?
 * Is a DTW path recoverable under the selected memory mode?
 * Is a TSP result exact, approximate, locally improved, or merely a timed-out incumbent?
@@ -114,9 +114,12 @@ A shortest-path formula is easy. A reliable Go package must also answer:
 
    `mst` does not silently turn strict MST into a forest. `tsp` does not silently replace Blossom matching with Greedy matching. `dtw` does not pretend rolling-row memory can reconstruct a path.
 
-4. **Numeric semantics are package-specific and documented**
+4. **Numeric domains are explicit**
 
-   `+Inf` is valid as Dijkstra unreachable distance, matrix absence under explicit policy, DTW no-path accumulated state, or TSP pre-closure missing edge sentinel. It is invalid as an MST weight and invalid as a DTW local cost.
+   `core.Graph` edge weights are finite. Individual algorithms may impose stricter
+   input subsets. `+Inf` may still be valid as an unbounded option, an unreachable
+   result, or a dense absence sentinel. Arithmetic overflow is a separate error and
+   must not be silently converted into another domain state.
 
 5. **Graph and matrix workflows compose**
 
@@ -128,21 +131,21 @@ A shortest-path formula is easy. A reliable Go package must also answer:
 
 Read these files as a learning path. `doc.go` files define implemented package contracts; `docs/*.md` files teach the theory, diagrams, pitfalls, and recipes.
 
-| Step | Document                                   | What you learn                                                                                     |
-|:-----|:-------------------------------------------|:---------------------------------------------------------------------------------------------------|
-| 1    | [`CORE.md`](CORE.md)                       | Graph capabilities, deterministic topology, ownership, locks, graph invariants.                    |
-| 2    | [`BFS.md`](BFS.md)                         | Hop-distance traversal, `BFSResult`, components, filters, partial-result behavior.                 |
-| 3    | [`DFS.md`](DFS.md)                         | Finish order, DFS forest, deterministic cycle witnesses, topological sort.                         |
-| 4    | [`DIJKSTRA.md`](DIJKSTRA.md)               | Non-negative weighted routing, strict improvement, `+Inf`, path tracking, walls/cutoffs.           |
-| 5    | [`MST.md`](MST.md)                         | Strict MST vs explicit MSF, Kruskal, Prim, finite-weight law, `MSTResult`.                         |
-| 6    | [`FLOW.md`](FLOW.md)                       | Capacity networks, residual graph state, Ford-Fulkerson, Edmonds-Karp, Dinic.                      |
-| 7    | [`MATRICES.md`](MATRICES.md)               | Dense storage, graph adapters, zero-weight policy, metric closure, statistics, numeric sanitation. |
-| 8    | [`DTW.md`](DTW.md)                         | `Align`, `AlignCostMatrix`, `AlignMatrix`, windows, slope penalty, memory/path artifacts.          |
-| 9    | [`TSP.md`](TSP.md)                         | Matrix-backed tours, exact regimes, Christofides, Blossom matching, local search, timeouts.        |
-| 10   | [`GRID_GRAPH.md`](GRID_GRAPH.md)           | Lattice topology for traversal/routing demos and pathfinding fixtures.                             |
-| 11   | [`FAQ_&_TIPS.md`](FAQ_%26_TIPS.md)         | Troubleshooting, package selection, testing/benchmark/documentation pitfalls.                      |
-| 12   | [`lvlath_UES.md`](lvlath_UES.md)           | Universal engineering standard for package quality and contribution discipline.                    |
-| 13   | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Branching, tests, linting, examples, docs, benchmark, and PR workflow.                             |
+| Step | Document                                   | What you learn                                                                                                             |
+|:-----|:-------------------------------------------|:---------------------------------------------------------------------------------------------------------------------------|
+| 1    | [`CORE.md`](CORE.md)                       | Graph capabilities, deterministic topology, ownership, locks, graph invariants.                                            |
+| 2    | [`BFS.md`](BFS.md)                         | Hop-distance traversal, `Result`, components, filters, partial-result behavior.                                            |
+| 3    | [`DFS.md`](DFS.md)                         | Finish order, DFS forest, deterministic cycle witnesses, topological sort.                                                 |
+| 4    | [`DIJKSTRA.md`](DIJKSTRA.md)               | Finite non-negative weighted routing, strict improvement, `+Inf` result semantics, overflow, path tracking, walls/cutoffs. |
+| 5    | [`MST.md`](MST.md)                         | Strict MST vs explicit MSF, Kruskal, Prim, finite-weight law, MST `Result`.                                                |
+| 6    | [`FLOW.md`](FLOW.md)                       | Capacity networks, residual graph state, Ford-Fulkerson, Edmonds-Karp, Dinic.                                              |
+| 7    | [`MATRICES.md`](MATRICES.md)               | Dense storage, graph adapters, zero-weight policy, metric closure, statistics, numeric sanitation.                         |
+| 8    | [`DTW.md`](DTW.md)                         | `Align`, `AlignCostMatrix`, `AlignMatrix`, windows, slope penalty, memory/path artifacts.                                  |
+| 9    | [`TSP.md`](TSP.md)                         | Matrix-backed tours, exact regimes, Christofides, Blossom matching, local search, timeouts.                                |
+| 10   | [`GRID_GRAPH.md`](GRID_GRAPH.md)           | Lattice topology for traversal/routing demos and pathfinding fixtures.                                                     |
+| 11   | [`FAQ_&_TIPS.md`](FAQ_%26_TIPS.md)         | Troubleshooting, package selection, testing/benchmark/documentation pitfalls.                                              |
+| 12   | [`lvlath_UES.md`](lvlath_UES.md)           | Universal engineering standard for package quality and contribution discipline.                                            |
+| 13   | [`../CONTRIBUTING.md`](../CONTRIBUTING.md) | Branching, tests, linting, examples, docs, benchmark, and PR workflow.                                                     |
 
 Suggested route:
 
@@ -186,11 +189,11 @@ Think of `lvlath` as a contract stack.
        │                      │                      │                      │                      │
  traversal structure     weighted routing      connectivity design      capacity network       dense artifacts
        │                      │                      │                      │                      │
-  ┌────▼────┐            ┌────▼──────┐          ┌────▼────┐            ┌────▼────┐            ┌────▼──────┐
-  │ bfs     │            │ dijkstra  │          │ mst     │            │ flow    │            │ matrix    │
-  │ dfs     │            │ +Inf law  │          │ MST/MSF │            │ residual│            │ graph     │
-  └────┬────┘            └────┬──────┘          └────┬────┘            └────┬────┘            │ algebra   │
-       │                      │                      │                      │                 └────┬──────┘
+  ┌────▼────┐       ┌─────────▼──────────┐      ┌────▼────┐            ┌────▼────┐            ┌────▼──────┐
+  │ bfs     │       │ dijkstra           │      │ mst     │            │ flow    │            │ matrix    │
+  │ dfs     │       │ finite weights     │      │ MST/MSF │            │ residual│            │ graph     │
+  └────┬────┘       │ +Inf result/policy │      └────┬────┘            └────┬────┘            │ algebra   │
+       │            └─────────┬──────────┘           │                      │                 └────┬──────┘
        │                      │                      │                      │                      │
        └──────────────────────┴──────────────────────┴──────────────────────┴────────────┬─────────┘
                                                                                          │
@@ -477,7 +480,7 @@ Objective:
   inspect depth-first structure
 
 Important law:
-  DFSResult.Order = finish order, not discovery order
+  dfs.Result.Order = finish order, not discovery order
 ```
 
 Good questions:
@@ -597,7 +600,7 @@ Graphs describe relationships. Matrices make those relationships computable.
 ### Matrix core capabilities
 
 | Capability                 | What it controls                        | Why it matters                                                    |
-| :------------------------- | :-------------------------------------- | :---------------------------------------------------------------- |
+|:---------------------------|:----------------------------------------|:------------------------------------------------------------------|
 | `Dense` row-major storage  | One flat `[]float64` buffer.            | Predictable memory layout and fast loops.                         |
 | `Matrix` interface         | `Rows`, `Cols`, `At`, `Set`, `Clone`.   | Kernels can accept dense and wrapped/fallback inputs.             |
 | `NewPreparedDense` options | Finite/`+Inf` admissibility.            | Numeric policy is explicit.                                       |
@@ -695,9 +698,9 @@ weights = latency / operational cost
         │                               │                               │0
         │                               ▼                               ▼
       edge ────3────▶ api ─────4────▶ search ─────3────▶ logs ───2──▶ backup
-        │              │                │
-        │              │2               │1
-        │              ▼                ▼
+        │              │                 │
+        │              │2                │1
+        │              ▼                 ▼
         └─────6────▶ cache             index ─────5────▶ archive
 
 Important semantics:
@@ -869,27 +872,27 @@ Do not use it as:
 
 ### If the input is a graph
 
-| Problem                                | Package                  | Main output                                          |
-| :------------------------------------- | :----------------------- | :--------------------------------------------------- |
-| Reachability by hop count              | `bfs`                    | `BFSResult` with depth, parent, visited/order state. |
-| Weak components                        | `bfs`                    | component artifact and deterministic membership.     |
-| DFS forest / finish order              | `dfs`                    | `DFSResult` with finish-order semantics.             |
-| Cycle witness                          | `dfs`                    | deterministic witness, not exhaustive enumeration.   |
-| Topological execution order            | `dfs`                    | DAG order or cycle error.                            |
-| Weighted route from one source         | `dijkstra`               | distances plus optional path witnesses.              |
-| Runtime weighted walls/cutoffs         | `dijkstra`               | `+Inf` publication without mutating topology.        |
-| Strict connected backbone              | `mst`                    | `MSTResult` in strict tree mode.                     |
-| Component-wise backbones               | `mst` with forest policy | explicit minimum spanning forest.                    |
-| Max throughput                         | `flow`                   | max-flow value and residual graph.                   |
-| Grid/lattice topology                  | `gridgraph`              | generated graph world.                               |
-| Dense topology artifacts               | `matrix`                 | adjacency, incidence, degree vector, metric closure. |
-| Complete tour over graph-derived costs | `tsp.SolveGraph`         | `TSPResult` after graph-to-matrix adaptation.        |
-| Reproducible fixture graph             | `builder`                | deterministic generated graph.                       |
+| Problem                                | Package                  | Main output                                                                             |
+|:---------------------------------------|:-------------------------|:----------------------------------------------------------------------------------------|
+| Reachability by hop count              | `bfs`                    | BFS `Result` with depth, parent, visited/order state.                                   |
+| Weak components                        | `bfs`                    | component artifact and deterministic membership.                                        |
+| DFS forest / finish order              | `dfs`                    | DFS `Result` with finish-order semantics.                                               |
+| Cycle witness                          | `dfs`                    | deterministic witness, not exhaustive enumeration.                                      |
+| Topological execution order            | `dfs`                    | DAG order or cycle error.                                                               |
+| Weighted route from one source         | `dijkstra`               | finite distances, `+Inf` for known unreachable vertices, optional deterministic witness |
+| Runtime weighted walls/cutoffs         | `dijkstra`               | `+Inf` publication without mutating topology.                                           |
+| Strict connected backbone              | `mst`                    | MST `Result` in strict tree mode.                                                       |
+| Component-wise backbones               | `mst` with forest policy | explicit minimum spanning forest.                                                       |
+| Max throughput                         | `flow`                   | max-flow value and residual graph.                                                      |
+| Grid/lattice topology                  | `gridgraph`              | generated graph world.                                                                  |
+| Dense topology artifacts               | `matrix`                 | adjacency, incidence, degree vector, metric closure.                                    |
+| Complete tour over graph-derived costs | `tsp.SolveGraph`         | TSP `Result` after graph-to-matrix adaptation.                                          |
+| Reproducible fixture graph             | `builder`                | deterministic generated graph.                                                          |
 
 ### If the input is numeric data
 
 | Problem                            | Package               | Main output                                   |
-| :--------------------------------- | :-------------------- | :-------------------------------------------- |
+|:-----------------------------------|:----------------------|:----------------------------------------------|
 | Dense algebra                      | `matrix`              | matrix result with shape/error policy.        |
 | Numeric cleaning                   | `matrix`              | sanitized matrix.                             |
 | Feature centering/normalization    | `matrix`              | transformed matrix plus metadata.             |
@@ -903,7 +906,7 @@ Do not use it as:
 ### If the goal is documentation or testing
 
 | Goal                          | Package/file         |
-| :---------------------------- | :------------------- |
+|:------------------------------|:---------------------|
 | Reproducible generated graphs | `builder`            |
 | Grid pathfinding fixtures     | `gridgraph`          |
 | Package API contract          | `{package}/doc.go`   |
@@ -918,7 +921,7 @@ Do not use it as:
 ### 11.1. Start from the objective, not the function name
 
 ```text
-min hops                         -> bfs
+min hops                          -> bfs
 post-order / cycle / DAG order    -> dfs
 min non-negative route cost       -> dijkstra
 min acyclic backbone cost         -> mst
@@ -939,7 +942,8 @@ Do not enable options “just in case.” A directed weighted multi-edge graph i
 
 ### 11.4. Prefer policy over destructive graph edits
 
-Use filters, wall thresholds, max-distance cutoffs, forest mode, metric closure, matrix options, DTW windows, and TSP time limits instead of rewriting input data to simulate one run.
+* Use filters, wall thresholds, max-distance cutoffs, forest mode, metric closure, matrix options, DTW windows, and TSP time limits instead of rewriting input data to simulate one run.
+* Use Dijkstra finite wall thresholds for degraded links; do not encode a failed link as a `+Inf` graph-edge weight.
 
 ### 11.5. Preserve result meaning
 
@@ -953,9 +957,18 @@ Do not collapse rich result artifacts into anonymous tuples. Inspect the fields 
 * DTW: `Reachable`, `PathTracked`, `MemoryMode`;
 * TSP: `Exact`, `Optimal`, `TimedOut`, `ApproximationRatio`.
 
-### 11.6. Treat numeric sentinels by package contract
+### 11.6. Separate numeric domains explicitly
 
-`+Inf` can be correct in Dijkstra, matrix metric closure, and DTW no-path states. It is not a valid MST weight or DTW local cost. Do not invent one universal numeric policy.
+The same `float64` value can have different meanings in different package domains.
+
+* `core.Graph` edge weights must be finite.
+* Dijkstra accepts finite non-negative edge weights.
+* Dijkstra may publish `+Inf` for a known unreachable vertex.
+* Dijkstra options may use `+Inf` to mean “unlimited”.
+* Matrix policies may use `+Inf` for absence or unreachable pairs.
+* Arithmetic overflow must remain an error, not an unreachable sentinel.
+
+Never transfer a sentinel from one domain into another implicitly.
 
 ### 11.7. Sanitize before statistics and spectral workflows
 

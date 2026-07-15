@@ -2,7 +2,7 @@
 // Copyright (C) 2025-2026 katalvlaran
 
 // Package tsp defines public types for Traveling Salesman Problem solvers.
-// The package exposes one canonical result artifact, TSPResult, so callers can
+// The package exposes one canonical result artifact, Result, so callers can
 // interpret exactness, optimality, timeout state, approximation metadata, and
 // route ownership without relying on reduced compatibility projections.
 package tsp
@@ -65,7 +65,7 @@ const (
 	BranchAndBound
 )
 
-// TSPResult is the only public result artifact published by package tsp.
+// Result is the only public result artifact published by package tsp.
 //
 // Implementation:
 //   - Stage 1: Solver facades validate matrix/graph input and finalize explicit options.
@@ -82,7 +82,7 @@ const (
 //   - Produced by SolveMatrix, SolveGraph, or direct result-native solver wrappers.
 //
 // Returns:
-//   - TSPResult values are immutable-by-convention snapshots.
+//   - Result values are immutable-by-convention snapshots.
 //   - Clone returns detached slices owned by the caller.
 //   - VertexTour maps Tour indices through IDs without sorting or route recomputation.
 //
@@ -109,7 +109,7 @@ const (
 //   - Do not reintroduce a reduced public result projection.
 //   - Do not add live matrix, graph, or mutable solver-engine references to this result.
 //   - Do not classify timed-out Branch-and-Bound incumbents as Optimal.
-type TSPResult struct {
+type Result struct {
 	// Tour is the closed Hamiltonian cycle in matrix row/column indices.
 	Tour []int
 
@@ -157,7 +157,7 @@ type TSPResult struct {
 //   - Does not inspect result fields.
 //
 // Inputs:
-//   - r: optional *TSPResult receiver.
+//   - r: optional *Result receiver.
 //
 // Returns:
 //   - bool: true when r==nil.
@@ -176,7 +176,7 @@ type TSPResult struct {
 //
 // AI-Hints:
 //   - Prefer this over reflection-based nil checks in package tests.
-func (r *TSPResult) IsNil() bool {
+func (r *Result) IsNil() bool {
 	return r == nil
 }
 
@@ -195,7 +195,7 @@ func (r *TSPResult) IsNil() bool {
 //   - r: source result snapshot.
 //
 // Returns:
-//   - *TSPResult: detached result copy, or nil when r is nil.
+//   - *Result: detached result copy, or nil when r is nil.
 //
 // Errors:
 //   - None.
@@ -211,7 +211,7 @@ func (r *TSPResult) IsNil() bool {
 //
 // AI-Hints:
 //   - Do not return aliases for Tour or IDs; caller mutation must not corrupt the source.
-func (r *TSPResult) Clone() *TSPResult {
+func (r *Result) Clone() *Result {
 	if r == nil {
 		return nil
 	}
@@ -261,7 +261,7 @@ func (r *TSPResult) Clone() *TSPResult {
 // AI-Hints:
 //   - Do not recover IDs by map iteration inside this method.
 //   - Do not recompute costs or route orientation here.
-func (r *TSPResult) VertexTour() ([]string, error) {
+func (r *Result) VertexTour() ([]string, error) {
 	if r == nil {
 		return nil, ErrNilResult
 	}

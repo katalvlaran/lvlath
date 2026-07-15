@@ -10,8 +10,9 @@
   Contract status:
     - Determinism rules (graph-surface order, heap tie-break, strict improvement)
       are part of the public contract.
-    - Numeric policy (float64, +Inf unreachable publication, NaN/-Inf rejection,
-      +Inf wall semantics) is part of the public contract.
+    - Numeric policy (finite non-negative graph-edge weights, `+Inf` result and
+      option semantics, non-finite input rejection, and explicit arithmetic-overflow
+      classification) is part of the public contract.
     - Sentinel-error governance and errors.Is-first matching are part of the
       public contract.
     - Result-surface semantics (detached ownership, tracking-enabled path witness,
@@ -47,15 +48,15 @@ Why use `lvlath/dijkstra` instead of a custom heap loop?
 1. **Deterministic Weighted Routing**
     *   *Others:* Return one of several equal-cost paths depending on incidental adjacency map order or unstable heap behavior.
     *   *Lvlath:* Preserves the deterministic graph-surface order from `core`, adds an explicit heap tie-break on vertex ID, and applies strict-improvement-only predecessor updates. The chosen witness is binary-stable for the same graph state and runtime policy.
-2. **Explicit Numeric Discipline**
-    *   *Others:* Hide unreachable state behind integer sentinels (`MaxInt64`), conflate invalid numeric input with large values, or silently accept negative costs.
-    *   *Lvlath:* Uses `float64` strictly. `NaN` and `-Inf` are invalid. Finite negative weights are rejected. `+Inf` is dual-purpose: it is valid input data for wall semantics, and it is the canonical published distance for known-but-unreachable vertices.
+2. **Explicit Numeric-Domain Separation**
+    *   *Others:* Reuse one numeric sentinel across storage, options, arithmetic, and results, making it impossible to distinguish corrupted input from valid unreachability.
+    *   *Lvlath:* Requires finite non-negative graph-edge weights. `+Inf` is valid only as an unbounded option value or a known-unreachable result value. If finite distance arithmetic overflows to `+Inf`, the package returns `ErrDistanceOverflow` and publishes no partial result.
 3. **Traversal Policy Without Topology Mutation**
     *   *Others:* Force callers to physically delete edges or clone the graph to model "blocked" roads or "out-of-radius" conditions.
     *   *Lvlath:* Applies `WithInfEdgeThreshold` and `WithMaxDistance` as runtime policy gates. The topology remains unchanged by the call.
 4. **Detached Result Surface**
     *   *Others:* Return ad-hoc internal maps or couple result semantics to implementation detail.
-    *   *Lvlath:* Publishes a detached `*DijkstraResult` that exposes explicit distance, reachability, and path-witness queries.
+    *   *Lvlath:* Publishes a detached `*Result` that exposes explicit distance, reachability, and path-witness queries.
 5. **Graph-Semantics Fidelity**
     *   *Others:* Assume the traversable destination is always `edge.To`, which silently breaks on undirected or mixed-edge relations.
     *   *Lvlath:* Resolves the effective opposite endpoint relative to the current vertex. Mixed and undirected traversal therefore remains mathematically correct even when internal edge storage orientation differs from the traversal direction.
@@ -82,7 +83,26 @@ The package answers weighted shortest-path questions such as:
 
 ## 5.3. Mathematical Formulation
 
-The package differentiates between classic theoretical definitions and our strict runtime application. Let $G = (V, E)$ be a graph with weight function $w: E \to [0, +\infty]$.
+The package differentiates between classic theoretical definitions and our strict runtime application. Let $G = (V, E)$ be a graph whose edge-weight function is:
+
+$$
+w: E \rightarrow \mathbb{R}_{\ge 0}
+$$
+
+with the additional storage law:
+
+$$
+\forall e \in E,\quad w(e)\ \text{is finite}
+$$
+
+The extended result distance belongs to:
+
+$$
+dist(s,v) \in \mathbb{R}_{\ge 0} \cup \{+\infty\}
+$$
+
+Here `+Inf` belongs to the result domain and means that `v` is known but no
+admissible representable path was published.
 
 ### 5.3.1. Classical Shortest-Path Objective
 For a source $s$ and target $v$, the weighted shortest-path objective is the infimum of the sum of edge weights over all possible paths $\mathcal{P}(s,v)$:
@@ -111,7 +131,18 @@ Options geometrically restrict the admissible graph and the publication domain a
 Frontier priority is resolved using a secondary lexicographical key:
 $$ Priority(v) = \langle candidateDistance(v), \text{VertexID}(v) \rangle $$
 
-### 5.3.5. Effective Complexity
+### 5.3.5. Representability Law
+Two valid finite operands can still exceed the representable `float64` range:
+$$ finite(a) \land finite(b) \not\Rightarrow finite(a+b) $$
+
+When:
+$$ dist(s,u) + w(u,v) = +\infty $$
+
+for an otherwise admissible candidate, the run fails with `ErrDistanceOverflow`.
+
+Overflow is not converted into ordinary unreachable state.
+
+### 5.3.6. Effective Complexity
 *   **Validation Phase:** Depends on option validation and $O(E \log E)$ graph-surface numeric pre-scans.
 *   **Kernel Phase:** Effective time $\mathcal{O}(V \log V + E \log V + E_{\text{surface}})$. Space $\mathcal{O}(V + E_{\text{heap}})$.
 *   **Result Surface:** `DistanceTo` is $\mathcal{O}(1)$. `PathTo` is $\mathcal{O}(k)$ where $k$ is path length.
@@ -123,7 +154,7 @@ $$ Priority(v) = \langle candidateDistance(v), \text{VertexID}(v) \rangle $$
 ### 5.4.1. Public Entry Points & Wrapper Semantics
 ```go
 // 1. Canonical Execution
-func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, error)
+func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*Result, error)
 
 // 2. Convenience Wrappers (Facades over the canonical result model)
 func Distances(g *core.Graph, sourceID string, opts ...Option) (map[string]float64, error)
@@ -136,7 +167,7 @@ func ShortestPathTo(g *core.Graph, sourceID, targetID string, opts ...Option) ([
 
 ### 5.4.2. Canonical Result Artifact
 ```go
-type DijkstraResult struct {
+type Result struct {
 	SourceID  string
 	Distances map[string]float64
 	Prev      map[string]string
@@ -172,20 +203,40 @@ Path reconstruction depends on a separate, independent axis:
 
 ## 5.5. Options, Numeric & Error Policies
 
-### 5.5.1. Numeric Policy
-Numeric semantics are part of the public package contract.
+### 5.5.1. Numeric Domain Policy
 
-- All distances and weights are `float64`.
-- The canonical unreachable value is `math.Inf(1)`.
-- `NaN` is forbidden.
-- `-Inf` is forbidden.
-- `+Inf` is valid input data and participates in wall semantics.
+Numeric values have different meanings in different package domains.
 
-Weight classification law:
-- `math.IsNaN(w)` -> `ErrInvalidWeight`
-- `math.IsInf(w, -1)` -> `ErrInvalidWeight`
-- `w < 0` -> `ErrNegativeWeight`
-- `math.IsInf(w, +1)` -> valid input, handled by traversal policy
+| Domain              | Valid values            | Meaning of `+Inf`         |
+|:--------------------|:------------------------|:--------------------------|
+| `core.Edge.Weight`  | finite values           | invalid                   |
+| Dijkstra edge input | finite `w >= 0`         | invalid                   |
+| `MaxDistance`       | finite `>= 0` or `+Inf` | no distance cutoff        |
+| `InfEdgeThreshold`  | finite `> 0` or `+Inf`  | no finite edge is blocked |
+| `Result.Distances`  | finite `>= 0` or `+Inf` | known but unreachable     |
+
+Edge classification:
+
+```text
+NaN             -> ErrInvalidWeight
++Inf edge       -> ErrInvalidWeight
+-Inf edge       -> ErrInvalidWeight
+finite w < 0    -> ErrNegativeWeight
+finite w >= 0   -> accepted
+```
+
+Arithmetic classification:
+
+```text
+finite current distance
++ finite edge weight
+= +Inf
+    -> ErrDistanceOverflow
+    -> nil Result
+```
+
+`InfEdgeThreshold` is not permission to store infinite edges. It filters valid
+finite edges by policy.
 
 ### 5.5.2. Option Governance
 Options are explicit runtime policy inputs, not hidden mutable state.
@@ -213,6 +264,10 @@ Important separation:
 * `sourceID` is **not** an option,
 * `sourceID` is an explicit required public API argument.
 
+Because `Option` is publicly constructible, canonical assembly revalidates the
+entire `Options` state after every option. A custom option cannot bypass
+`MaxDistance` or `InfEdgeThreshold` numeric invariants merely by returning `nil`.
+
 ### 5.5.3. Error Law
 
 Exported sentinels are the single source of truth for protocol matching.
@@ -237,6 +292,7 @@ Primary sentinels include:
 * `ErrBadInfEdgeThreshold`
 * `ErrNegativeWeight`
 * `ErrInvalidWeight`
+* `ErrDistanceOverflow`
 * `ErrPathTrackingDisabled`
 * `ErrNoPath`
 * `ErrEmptyTargetID`
@@ -250,6 +306,13 @@ Error-class separation is intentional:
 * unknown target != known unreachable target.
 
 When additional context is attached, the sentinel must be preserved with `%w`.
+
+`ErrDistanceOverflow` is intentionally distinct from both `ErrInvalidWeight`
+and a published `+Inf` distance:
+
+* `ErrInvalidWeight` means the edge input itself is non-finite;
+* `ErrDistanceOverflow` means valid finite operands produced an unrepresentable sum;
+* published `+Inf` means no admissible representable route was found.
 
 Panic-based option validation is forbidden.
 
@@ -323,54 +386,84 @@ The implementation utilizes a **Lazy Decrease-Key Min-Heap** bounded by a strict
 ```text
 FUNCTION Dijkstra(g, sourceID, opts...):
 
-  Stage 1: Validate Admission
-    - Ensure g != nil, sourceID != "", options are valid.
-    - Pre-scan edge weights: mathematically reject NaN, -Inf, and w < 0.
-    - Fail immediately and publish NOTHING on validation error.
+  Stage 1: Validate admission
+    - reject nil graph
+    - reject empty or missing source
+    - require weighted graph
+    - apply options in call order
+    - revalidate finalized state after every option
+    - pre-scan all edges in deterministic Edge.ID order:
+        reject NaN
+        reject +Inf and -Inf
+        reject finite negative weights
 
-  Stage 2: Initialize Working State
-    - For v in g.Vertices(): distances[v] = +Inf, visited[v] = false
-    - distances[sourceID] = 0
+  Stage 2: Initialize result domain
+    for each vertex v in g.Vertices():
+      distances[v] = +Inf
+      visited[v] = false
 
-  Stage 3: Seed Frontier
-    - Push (sourceID, distance: 0) into min-heap.
-    - Heap is ordered by (candidateDistance, vertexID).
+    distances[sourceID] = 0
 
-  Stage 4: Main Visited-Finalization Loop
+    if TrackPaths:
+      allocate Prev
+    else:
+      Prev = nil
+
+  Stage 3: Seed frontier
+    push (sourceID, 0)
+
+    heap order:
+      (candidateDistance, vertexID)
+
+  Stage 4: Visited-finalization loop
     while frontier is not empty:
-      item = frontier.PopMin()
+      item = pop minimum
 
       if visited[item.id]:
-        continue // Discard stale/duplicate entry
+        continue
 
       if item.dist > MaxDistance:
-        break // Cutoff applied to the popped minimum terminates exploration!
+        break
 
       visited[item.id] = true
 
       for each edge in g.Neighbors(item.id):
-        // Endpoint Law: Resolve relative to current vertex
-        nbrID, ok = otherEndpoint(edge, item.id)
-        if not ok or visited[nbrID]:
+        neighborID, ok = otherEndpoint(edge, item.id)
+
+        if not ok or visited[neighborID]:
           continue
 
-        if edge.Weight >= InfEdgeThreshold:
-          continue // Wall threshold check
+        weight = edge.Weight
 
-        candidate = distances[item.id] + edge.Weight
+        reclassify weight defensively:
+          reject NaN
+          reject +/-Inf
+          reject finite negative value
 
-        if candidate > MaxDistance:
-          continue // Edge cutoff
+        if weight >= InfEdgeThreshold:
+          continue
 
-        // Strict-Improvement Law
-        if candidate < distances[nbrID]:
-          distances[nbrID] = candidate
-          if opts.TrackPaths:
-            Prev[nbrID] = item.id
-          frontier.Push(nbrID, candidate)
+        currentDistance = distances[item.id]
 
-  Stage 5: Publish Result
-    - Return detached DijkstraResult ONLY after successful completion.
+        if MaxDistance is finite and
+           weight > MaxDistance - currentDistance:
+          continue
+
+        candidate = currentDistance + weight
+
+        if candidate == +Inf:
+          return nil Result + ErrDistanceOverflow
+
+        if candidate < distances[neighborID]:
+          distances[neighborID] = candidate
+
+          if TrackPaths:
+            Prev[neighborID] = item.id
+
+          push (neighborID, candidate)
+
+  Stage 5: Publish
+    return detached Result only after complete success
 ```
 
 ---
@@ -431,29 +524,41 @@ Correct interpretation (lvlath endpoint law):
 
 ### 5.8.4. Result-State Distinctions
 ```text
-Target query state machine:
+Result query priority:
 
-  [targetID is empty]
-        -> ErrEmptyTargetID
-
-  [result is nil]
+  [receiver == nil]
         -> ErrNilResult
 
-  [target absent from result domain]
+  [targetID == ""]
+        -> ErrEmptyTargetID
+
+  [target absent from Distances]
         -> ErrTargetNotFound
 
-  [target known in result domain]
+  [DistanceTo / HasPathTo]
         |
-        +-- distance is finite
-        |      -> DistanceTo = finite value
+        +-- finite distance
+        |      -> DistanceTo = finite
         |      -> HasPathTo  = true
-        |      -> PathTo     = path OR ErrPathTrackingDisabled
         |
         +-- distance is +Inf
                -> DistanceTo = +Inf
                -> HasPathTo  = false
-               -> PathTo     = ErrNoPath OR ErrPathTrackingDisabled
 
+  [PathTo]
+        |
+        +-- Prev == nil
+        |      -> ErrPathTrackingDisabled
+        |
+        +-- target distance is +Inf
+        |      -> ErrNoPath
+        |
+        +-- valid source-anchored predecessor chain
+        |      -> deterministic path
+        |
+        +-- missing, cyclic, or out-of-domain predecessor
+               -> ErrNoPath
+               -> nil path
 ```
 
 ---
@@ -605,7 +710,7 @@ This is the canonical “cost + one deterministic route” workflow.
 Published results are detached and caller-owned.
 
 This means:
-- the package does not retain a live mutable link from `DijkstraResult` back to the graph,
+- the package does not retain a live mutable link from `Result` back to the graph,
 - the package does not mutate published result maps after return,
 - callers may read, clone, cache, or transform the result after return.
 
@@ -619,58 +724,89 @@ The graph itself remains externally owned by the caller.
 If correctness and reproducibility matter, graph topology must remain stable for the duration of the call.
 
 ### 5.10.3. Partial-Result Suppression Law
-On failure, the package does **not** publish a partial `DijkstraResult`.
+On failure, the package does **not** publish a partial `Result`.
 
 Publication rule:
 - validation failure $\implies$ `nil` result + error
 - runtime kernel failure $\implies$ `nil` result + error
 - successful completion $\implies$ detached finalized result publication
 
-A non-nil published `DijkstraResult` therefore means the run completed successfully.
+A non-nil published `Result` therefore means the run completed successfully.
+
+### 5.10.4. Caller-Owned Witness Integrity
+
+`Result.Distances` and `Result.Prev` belong to the caller after publication.
+
+This ownership permits mutation, but mutation can invalidate result invariants.
+
+`PathTo` therefore fails closed:
+
+* every predecessor must exist in `Distances`;
+* every non-source path vertex must have a non-empty predecessor;
+* no predecessor vertex may repeat;
+* the chain must terminate at `SourceID`;
+* no partial path is returned on failure.
+
+Broken, cyclic, or out-of-domain witness state returns `ErrNoPath`.
+
+`Clone()` provides independent map ownership, but cloning does not repair
+semantically invalid caller-created data.
 
 ---
 
 ## 5.11. Pitfalls & Best Practices (Architectural Mastery)
 
-### 1. Do not parse error strings
+### 5.11.0. Operational pitfalls
+* **Do not store `+Inf` as a graph-edge wall.**
+  Store only finite edge weights. Use `WithInfEdgeThreshold` to block finite heavy
+  edges, or omit the relation from topology.
+
+* **Do not reinterpret overflow as unreachable.**
+  `ErrDistanceOverflow` means a representable path cost could not be produced.
+  It is not equivalent to a successful `+Inf` result.
+
+* **Do not mutate `Prev` casually.**
+  It is caller-owned, but `PathTo` will reject cycles, foreign IDs, and broken chains.
+
+### 5.11.1. Do not parse error strings
 Use `errors.Is` with exported sentinels only.
 String matching is not part of the contract.
 
-### 2. Do not run Dijkstra on negative-weight graphs
+### 5.11.2. Do not run Dijkstra on negative-weight graphs
 Finite negative weights are mathematically invalid for Dijkstra and are rejected by the package.
 If the domain allows negative weights, switch algorithms rather than forcing this package to answer the wrong question.
 
-### 3. Do not treat `Prev == nil` as “no path exists”
+### 5.11.3. Do not treat `Prev == nil` as “no path exists”
 `Prev == nil` means path tracking was disabled.
 Reachability must be queried independently through the result surface.
 
-### 4. Do not collapse unknown targets and unreachable targets
+### 5.11.4. Do not collapse unknown targets and unreachable targets
 These are different operational states:
 - missing target -> `ErrTargetNotFound`
 - known unreachable target -> `+Inf` with `nil` error
 
-### 5. Do not simplify mixed or undirected traversal to `edge.To`
+### 5.11.5. Do not simplify mixed or undirected traversal to `edge.To`
 The effective traversable endpoint must be resolved relative to the current vertex.
 Reducing traversal to `edge.To` breaks endpoint correctness on undirected and mixed-edge graphs.
 
-### 6. Use policy gates instead of topology mutation when the problem is operational
+### 5.11.6. Use policy gates instead of topology mutation when the problem is operational
 Use:
 - `WithInfEdgeThreshold(...)` for degraded or impassable links,
 - `WithMaxDistance(...)` for bounded traversal radius or bounded weighted reachability.
 
 Do not mutate graph topology merely to simulate runtime routing policy.
 
-### 7. Keep `+Inf` as semantic data
+### 5.11.7. Keep `+Inf` as semantic data
 Do not rewrite it into synthetic finite sentinels such as `-1` or arbitrary “large” numbers.
 `+Inf` is part of the numeric contract.
 
-### 8. Use convenience wrappers when the consumer only needs a point query
+### 5.11.8. Use convenience wrappers when the consumer only needs a point query
 Use:
 - `DistanceTo(...)` for one-target distance lookup,
 - `ShortestPathTo(...)` when the caller needs one witness and its distance,
 - `Distances(...)` when only the detached distance map is required.
 
-### 9. Keep examples and documentation contract-faithful
+### 5.11.9. Keep examples and documentation contract-faithful
 Examples should:
 - use only current public API,
 - keep graph-construction errors explicit,

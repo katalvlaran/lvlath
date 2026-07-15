@@ -42,7 +42,7 @@ func TestAdjacency_Blueprint(t *testing.T) {
 	// full graph via builder
 	g, err := builder.BuildGraph(
 		[]core.GraphOption{core.WithWeighted(), core.WithMultiEdges(), core.WithLoops()},
-		[]builder.BuilderOption{builder.WithSymbNumb("v")},
+		[]builder.Option{builder.WithSymbNumb("v")},
 		builder.Complete(V),
 	)
 	if err != nil {
@@ -104,11 +104,10 @@ func TestNeighbors_TableDriven(t *testing.T) {
 	}
 
 	for _, sc := range tests {
-		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
 
-			g, err := builder.BuildGraph(sc.graphOpts, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Complete(V))
+			g, err := builder.BuildGraph(sc.graphOpts, []builder.Option{builder.WithSymbNumb("v")}, builder.Complete(V))
 			if err != nil {
 				t.Fatalf("BuildGraph: %v", err)
 			}
@@ -322,7 +321,7 @@ func TestToGraph_RoundTrip_PreserveIDsAndWeights(t *testing.T) {
 func TestAdjacency_Idempotency(t *testing.T) {
 	t.Parallel()
 
-	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Complete(V))
+	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.Option{builder.WithSymbNumb("v")}, builder.Complete(V))
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
@@ -365,7 +364,7 @@ func TestAdjacency_Idempotency(t *testing.T) {
 func TestNeighbors_ErrorCases(t *testing.T) {
 	t.Parallel()
 
-	g, err := builder.BuildGraph([]core.GraphOption{}, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Complete(4))
+	g, err := builder.BuildGraph([]core.GraphOption{}, []builder.Option{builder.WithSymbNumb("v")}, builder.Complete(4))
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}

@@ -613,7 +613,7 @@ func ExampleStressTestFactorModel() {
 //   - Policy-safe: v.Set enforces numeric policy inherited from base Dense.
 //
 // Inputs:
-//   - v: MatrixView window (shared storage, write-through).
+//   - v: View window (shared storage, write-through).
 //   - i,j: view-local coordinates (0-based).
 //   - delta: value to add (must satisfy base numeric policy).
 //
@@ -634,7 +634,7 @@ func ExampleStressTestFactorModel() {
 //
 // AI-Hints:
 //   - Use View + addToView to assemble block contributions without allocating temporary matrices.
-func addToView(v *matrix.MatrixView, i, j int, delta float64) error {
+func addToView(v *matrix.View, i, j int, delta float64) error {
 	current, err := v.At(i, j) // Read the current cell value deterministically.
 	if err != nil {            // Guard: propagate errors without panicking.
 		return err // Return the sentinel-preserving error.

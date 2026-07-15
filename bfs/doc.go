@@ -16,7 +16,7 @@
 //     Deterministic weakly-connected component discovery under an undirected
 //     relation, even when the graph itself is directed.
 //
-// BFSResult is the public traversal artifact. It exposes:
+// Result is the public traversal artifact. It exposes:
 //
 //   - StartID  - the source vertex of the BFS invocation.
 //   - Order    - dequeue and visit order.
@@ -148,7 +148,7 @@
 //
 // Once traversal begins, runtime interruption returns:
 //
-//   - partial *BFSResult
+//   - partial *Result
 //   - plus a non-nil error
 //
 // This applies to:
@@ -330,6 +330,6 @@
 // -- SEE ALSO -----------------------------------------------------------------
 //
 //   - docs/BFS.md  for repository-level tutorial, diagrams, formulas, and recipes.
-//   - package GoDoc on BFS, Components, BFSResult, PathTo, and Option helpers for
+//   - package GoDoc on BFS, Components, Result, PathTo, and Option helpers for
 //     per-symbol contract details.
 package bfs

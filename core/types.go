@@ -473,7 +473,7 @@ func WithID(id string) EdgeOption {
 		e.ID = id
 
 		// If the explicit ID looks like an auto-generated "eN", bump the counter to avoid collisions.
-		if num, ok := matchesAutoIDPattern(e.ID); ok && num >= 0 {
+		if num, ok := matchesAutoIDPattern(e.ID); ok {
 			bumpNextEdgeIDToAtLeast(g, num)
 		}
 

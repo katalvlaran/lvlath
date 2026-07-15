@@ -20,14 +20,16 @@
 
 ---
 
-~~~text
+```text
 ┌─────────────────────────────────┐
 │  o       o            o    o    │
 │  ║ o   o ║   o───╖  o─╫─o  ║    │
 │  ║  \ /  ║   o───╢    ║    ╟──╖ │
 │  ╙o  o   ╙o  ╙───o    ╙o   o  o │
 └─────────────────────────────────┘
-~~~
+```
+---
+
 
 [![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-reference-blue?logo=go)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
 [![Go Report Card](https://goreportcard.com/badge/github.com/katalvlaran/lvlath)](https://goreportcard.com/report/github.com/katalvlaran/lvlath)
@@ -90,7 +92,7 @@ The common failures are familiar:
 
 3. **Every non-trivial algorithm publishes a result artifact**
 
-   `BFSResult`, `DFSResult`, `DijkstraResult`, `MSTResult`, `TSPResult`, DTW `Result`, residual flow graphs, adjacency matrices, incidence matrices, and metric closures are caller-owned artifacts with domain meaning. They are not incidental internal state.
+   BFS `Result`, DFS `Result`, Dijkstra `Result`, MST `Result`, TSP `Result`, DTW `Result`, residual flow graphs, adjacency matrices, incidence matrices, and metric closures are caller-owned artifacts with domain meaning. They are not incidental internal state.
 
 4. **Errors are protocol, not prose**
 
@@ -116,9 +118,9 @@ The common failures are familiar:
 
 ## Installation
 
-~~~bash
+```bash
 go get github.com/katalvlaran/lvlath@latest
-~~~
+```
 
 Requires Go 1.23 or newer. Pure Go. No cgo. No external runtime dependencies.
 
@@ -126,7 +128,7 @@ Requires Go 1.23 or newer. Pure Go. No cgo. No external runtime dependencies.
 
 ## Repository structure
 
-~~~text
+```text
 lvlath/
 ├── core/                  # deterministic graph substrate
 │   └── doc.go             # package-level API contract
@@ -134,7 +136,7 @@ lvlath/
 ├── bfs/                   # unweighted hop traversal and weak components
 ├── dfs/                   # post-order traversal, cycle witnesses, topological sort
 ├── dijkstra/              # weighted single-source shortest paths
-├── mst/          # minimum spanning tree algorithms
+├── mst/                   # minimum spanning tree algorithms
 ├── flow/                  # Ford-Fulkerson, Edmonds-Karp, Dinic
 ├── dtw/                   # dynamic time warping for numeric sequences
 ├── gridgraph/             # 2D lattice graph generation
@@ -162,11 +164,11 @@ lvlath/
 ├── LICENSE
 ├── README.md
 └── go.mod
-~~~
+```
 
 ### Two documentation layers
 
-~~~text
+```text
 lvlath/{package}/doc.go
   ↓
   The implemented API contract:
@@ -176,7 +178,7 @@ lvlath/docs/{PACKAGE}.md
   ↓
   The learning and specification layer:
   mathematics, proofs, pseudocode, diagrams, pitfalls, scenarios, and package selection guidance.
-~~~
+```
 
 ---
 
@@ -189,24 +191,24 @@ lvlath/docs/{PACKAGE}.md
                                       │ directed / weighted / loops / multi  │
                                       └───────────────────┬──────────────────┘
                                                           │
-        ┌───────────────────────────────┬─────────────────┼─────────────────┬───────────────────────────────┐
-        │                               │                 │                 │                               │
-  hop / structure                 weighted cost      connectivity       capacity flow                   dense algebra
-        │                               │                 │                 │                               │
-┌───────▼────────┐              ┌───────▼────────┐ ┌──────▼──────┐ ┌───────▼────────┐               ┌───────▼────────┐
-│ bfs            │              │ dijkstra       │ │ mst         │ │ flow           │               │ matrix         │
-│ hop layers,    │              │ non-negative   │ │ strict MST  │ │ max-flow,      │               │ adjacency,     │
-│ paths, weak    │              │ shortest paths,│ │ explicit    │ │ min-cut,       │               │ incidence,     │
-│ components     │              │ +Inf states    │ │ forest mode │ │ residual graph │               │ APSP, stats    │
-└───────┬────────┘              └───────┬────────┘ └──────┬──────┘ └───────┬────────┘               └───────┬────────┘
-        │                               │                 │                │                                │
-┌───────▼────────┐                      │                 │                │                        ┌───────▼────────┐
-│ dfs            │                      │                 │                │                        │ tsp            │
-│ finish order,  │                      │                 │                │                        │ matrix-backed  │
-│ cycle witness, │                      │                 │                │                        │ tours: exact,  │
-│ topo sort      │                      │                 │                │                        │ approximate,   │
-└────────────────┘                      │                 │                │                        │ local search   │
-                                        │                 │                │                        └────────────────┘
+        ┌───────────────────────────────┬─────────────────┼────────────────┬───────────────────────────────┐
+        │                               │                 │                │                               │
+  hop / structure                 weighted cost      connectivity      capacity flow                   dense algebra
+        │                               │                 │                │                               │
+┌───────▼────────┐              ┌───────▼────────┐ ┌──────▼──────┐ ┌───────▼────────┐              ┌───────▼────────┐
+│ bfs            │              │ dijkstra       │ │ mst         │ │ flow           │              │ matrix         │
+│ hop layers,    │              │ non-negative   │ │ strict MST  │ │ max-flow,      │              │ adjacency,     │
+│ paths, weak    │              │ shortest paths,│ │ explicit    │ │ min-cut,       │              │ incidence,     │
+│ components     │              │ +Inf states    │ │ forest mode │ │ residual graph │              │ APSP, stats    │
+└───────┬────────┘              └───────┬────────┘ └──────┬──────┘ └───────┬────────┘              └───────┬────────┘
+        │                               │                 │                │                               │
+┌───────▼────────┐                      │                 │                │                       ┌───────▼────────┐
+│ dfs            │                      │                 │                │                       │ tsp            │
+│ finish order,  │                      │                 │                │                       │ matrix-backed  │
+│ cycle witness, │                      │                 │                │                       │ tours: exact,  │
+│ topo sort      │                      │                 │                │                       │ approximate,   │
+└────────────────┘                      │                 │                │                       │ local search   │
+                                        │                 │                │                       └────────────────┘
                                         │                 │                │
                            ┌────────────▼──────────┐      │     ┌──────────▼──────────┐
                            │ gridgraph             │      │     │ builder             │
@@ -260,12 +262,12 @@ Composition rule:
 | BFS spec             | [`docs/BFS.md`](docs/BFS.md)                 | Hop-distance math, BFS result semantics, partial results, weak components.                  |
 | DFS spec             | [`docs/DFS.md`](docs/DFS.md)                 | Post-order semantics, cycle witnesses, DFS forest, topological sort.                        |
 | Dijkstra spec        | [`docs/DIJKSTRA.md`](docs/DIJKSTRA.md)       | Weighted routing, `+Inf`, strict improvement, path tracking, wall/cutoff policy.            |
-| MST spec             | [`docs/MST.md`](docs/MST.md)    | Cut/cycle properties, Kruskal/Prim, deterministic MST construction.                         |
+| MST spec             | [`docs/MST.md`](docs/MST.md)                 | Cut/cycle properties, Kruskal/Prim, deterministic MST construction.                         |
 | Flow spec            | [`docs/FLOW.md`](docs/FLOW.md)               | Max-flow/min-cut math, residual networks, Ford-Fulkerson, Edmonds-Karp, Dinic.              |
 | DTW spec             | [`docs/DTW.md`](docs/DTW.md)                 | Dynamic programming alignment, windows, penalties, memory modes, path recovery.             |
 | Grid spec            | [`docs/GRID_GRAPH.md`](docs/GRID_GRAPH.md)   | Grid/lattice graph modeling and pathfinding-oriented construction.                          |
 | Matrix spec          | [`docs/MATRICES.md`](docs/MATRICES.md)       | Dense matrix model, graph adapters, metric closure, zero-shape/statistics/numeric policy.   |
-| TSP spec             | [`docs/TSP.md`](docs/TSP.md)  | Tour optimization, exact vs approximate methods, metric assumptions.                        |
+| TSP spec             | [`docs/TSP.md`](docs/TSP.md)                 | Tour optimization, exact vs approximate methods, metric assumptions.                        |
 | Engineering standard | [`docs/lvlath_UES.md`](docs/lvlath_UES.md)   | Repository engineering standard and quality expectations.                                   |
 | FAQ                  | [`docs/FAQ_&_TIPS.md`](docs/FAQ_%26_TIPS.md) | Troubleshooting, common pitfalls, usage tips.                                               |
 | Contribution guide   | [`CONTRIBUTING.md`](CONTRIBUTING.md)         | Branching, tests, linting, coverage, PR rules.                                              |
@@ -278,7 +280,7 @@ This is the first visual example: a graph is not only “nodes and edges”; it 
 
 The old `lvlath` letter sketch is preserved, but the implementation style is updated to current error-returning constructors and deterministic package contracts.
 
-~~~text
+```text
 Six disconnected glyph components:
 
    l₁            v           l₂            a               t             h
@@ -290,9 +292,9 @@ Six disconnected glyph components:
 
 Expected component count: 6
 Expected cycle count:     1   // the internal cycle in the letter “a”
-~~~
+```
 
-~~~go
+```go
 package main
 
 import (
@@ -410,7 +412,7 @@ func main() {
 		fmt.Printf("degree[%s]=%.0f\n", id, degree[am.VertexIndex[id]])
 	}
 }
-~~~
+```
 
 What this demonstrates:
 
@@ -425,7 +427,7 @@ What this demonstrates:
 
 The classic weighted Hexagram example is the compact demonstration of `lvlath` as a multi-package toolkit: BFS-style shells on an unweighted view, Dijkstra weighted routing, MST backbone extraction, and TSP preparation through a metric matrix.
 
-~~~text
+```text
                                [A]
                               / | \
                   (C-H:9)   3/  |7 \4   (D-F:7)
@@ -443,11 +445,11 @@ The classic weighted Hexagram example is the compact demonstration of `lvlath` a
                   (J-H:7)   2\  |  /3   (K-F:8)
                               \ | /
                                [M]
-~~~
+```
 
 Use this kind of graph when you want one fixture that is complex enough for real algorithms but still small enough to reason about visually.
 
-~~~go
+```go
 package main
 
 import (
@@ -540,7 +542,7 @@ func main() {
 	_ = closure
 	_ = context.Background()
 }
-~~~
+```
 
 ---
 
@@ -548,7 +550,7 @@ func main() {
 
 This is the practical infrastructure example: a directed weighted network where edge weights can represent latency/cost for routing, and another capacity graph can represent throughput for flow analysis.
 
-~~~text
+```text
 Weighted service graph for routing and matrix analysis:
 
  [edge] ────2────▶ [auth] ──1──▶ [profile] ──2──▶ [db]
@@ -566,9 +568,9 @@ Key checks:
   - Matrix: preserve zero-weight db -> backup.
   - Metric closure: publish all-pairs shortest distances.
   - Flow: compute capacity from ingress to storage tier on a related network.
-~~~
+```
 
-~~~go
+```go
 package main
 
 import (
@@ -666,7 +668,7 @@ func main() {
 	fmt.Println("max-flow-ingress-storage:", maxFlow)
 	fmt.Println("residual-vertices:", residual.VertexCount())
 }
-~~~
+```
 
 ---
 
@@ -694,19 +696,19 @@ The purpose is practical: stable examples, golden tests, CI logs, witness paths,
 
 Prefer:
 
-~~~go
+```go
 if errors.Is(err, dijkstra.ErrTargetNotFound) {
 	// unknown target: not the same as known but unreachable
 }
-~~~
+```
 
 Avoid:
 
-~~~go
+```go
 if strings.Contains(err.Error(), "target") {
 	// brittle and not part of the public contract
 }
-~~~
+```
 
 ### Weighted vs unweighted algorithms
 
@@ -744,12 +746,12 @@ Important distinctions:
 
 `matrix` intentionally does not pretend that every dense numeric array means the same thing.
 
-~~~text
+```text
 normal adjacency:       0 can mean “no edge”
 zero-preserving mode:   finite 0 can mean “real zero-cost edge”; +Inf means absence
 metric closure:         cell means shortest-path distance, not an original edge
 incidence matrix:       columns are edge identities, not vertex-pair weights
-~~~
+```
 
 ### Concurrency
 
@@ -790,7 +792,7 @@ incidence matrix:       columns are edge identities, not vertex-pair weights
 | Map-order flakiness in examples/tests                | `core` deterministic surfaces and package tie-break laws.                                             |
 | Invalid topology reaches algorithms                  | Graph capability validation and package-level input validators.                                       |
 | BFS used for weighted routing                        | Separate BFS hop semantics from Dijkstra weighted semantics.                                          |
-| DFS order misread as discovery order                 | `DFSResult.Order` is documented finish order.                                                         |
+| DFS order misread as discovery order                 | DFS `Result.Order` is documented finish order.                                                        |
 | Unknown target treated as unreachable                | Dijkstra keeps target-domain errors separate from `+Inf` distances.                                   |
 | Runtime route policy deletes graph structure         | Dijkstra thresholds/cutoffs model the run without mutating topology.                                  |
 | Disconnected MST silently becomes forest             | `mst.WithForest` is explicit; strict MST returns disconnection.                                       |
@@ -803,7 +805,7 @@ incidence matrix:       columns are edge identities, not vertex-pair weights
 | Metric closure exported as fake topology             | Matrix refuses metric-closure export as ordinary graph topology.                                      |
 | TSP receives sparse unresolved `+Inf` matrix         | Use metric closure only when indirect travel is domain-valid; final kernels need finite completeness. |
 | Christofides ratio claimed with greedy matching      | `tsp.BlossomMatch` is required for the formal `1.5` ratio.                                            |
-| Branch-and-Bound timeout is mistaken for optimality  | Inspect `TSPResult.TimedOut` and `TSPResult.Optimal`.                                                 |
+| Branch-and-Bound timeout is mistaken for optimality  | Inspect TSP `Result.TimedOut` and TSP `Result.Optimal`.                                               |
 | Local-search TSP treated as proof                    | 2-opt/3-opt improve tours; they do not certify global optimum.                                        |
 | Randomized tests/benchmarks drift                    | Use fixed seeds or deterministic `builder` fixtures.                                                  |
 | Docs describe fictional APIs                         | `{package}/doc.go`, `docs/{PACKAGE}.md`, examples, and tests must stay synchronized.                  |

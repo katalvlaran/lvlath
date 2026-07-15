@@ -29,8 +29,6 @@ func buildRegionalUndirectedBackbone(t *testing.T) *core.Graph {
 
 func TestUndirectedBackboneAdaptedAsTwoDirectedCapacityArcs(t *testing.T) {
 	for _, tt := range allAlgorithms() {
-		tt := tt
-
 		t.Run(tt.name, func(t *testing.T) {
 			g := buildRegionalUndirectedBackbone(t)
 

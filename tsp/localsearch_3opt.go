@@ -110,7 +110,7 @@ const defaultRNGSeed int64 = 1
 // Implementation:
 //   - Stage 1: Force the internal algorithm identity to ThreeOptOnly.
 //   - Stage 2: Run threeOptKernel with opts.BestImprovement.
-//   - Stage 3: Publish localSearchResult as TSPResult without IDs or metric-closure metadata.
+//   - Stage 3: Publish localSearchResult as Result without IDs or metric-closure metadata.
 //   - Stage 4: Preserve ErrTimeLimit when a valid current tour exists.
 //
 // Behavior highlights:
@@ -124,7 +124,7 @@ const defaultRNGSeed int64 = 1
 //   - opts: local-search policy.
 //
 // Returns:
-//   - *TSPResult: improved or timeout-current tour result.
+//   - *Result: improved or timeout-current tour result.
 //   - error: nil or sentinel-classified failure.
 //
 // Errors:
@@ -146,7 +146,7 @@ const defaultRNGSeed int64 = 1
 // AI-Hints:
 //   - Do not describe asymmetric mode as full ATSP 3-opt.
 //   - Do not drop timeout results when local.hasTour() is true.
-func threeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResult, error) {
+func threeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*Result, error) {
 	solverOptions := opts
 	solverOptions.Algo = ThreeOptOnly
 
@@ -210,6 +210,12 @@ func threeOptSearch(dist matrix.Matrix, initTour []int, opts Options) (*TSPResul
 // AI-Hints:
 //   - Do not replace the explicit move table with opaque X/Y arrays.
 //   - Do not skip ValidateTour after accepted 3-opt moves.
+//   - WARNING: Performance-critical kernel. 3-opt involves evaluating up to 7
+//     different edge-reconnection scenarios inside nested loops. Keeping this logic
+//     inlined inside a single function is mandatory to allow the compiler to optimize
+//     registers and eliminate non-inlineable function call overhead.
+//
+// nolint:gocyclo
 func threeOptKernel(dist matrix.Matrix, initTour []int, opts Options, bestImprovement bool) (localSearchResult, error) {
 	// Tour shape & invariants (the dispatcher already validated matrix shape).
 	if err := validateOptionsStandalone(opts); err != nil {
@@ -911,6 +917,9 @@ type randLite interface {
 //
 // AI-Hints:
 //   - Do not use rand.Seed or package-level rand.Intn here.
+//   - This is not used for security-sensitive operations or cryptography.
+//
+// nolint:gosec // G404: weak random provider is required for mathematical simulations
 func rngFromSeed(seed int64) *rand.Rand {
 	if seed == 0 {
 		seed = defaultRNGSeed

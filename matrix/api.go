@@ -18,7 +18,6 @@
 //   - Use NewIdentity/NewZeros to build matrices with explicit shape and neutral elements.
 //   - For APSP, call APSPInPlace (delegates to FloydWarshall).
 //   - For graph export, AdjacencyToGraph mirrors GraphFromAdjacency for discoverability.
-
 package matrix
 
 import (

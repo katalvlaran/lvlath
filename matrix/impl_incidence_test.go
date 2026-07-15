@@ -49,7 +49,7 @@ func TestIncidence_Blueprint(t *testing.T) {
 	// complete undirected graph of V vertices
 	g, err := builder.BuildGraph(
 		[]core.GraphOption{core.WithWeighted()}, // weights ignored by incidence, but allowed
-		[]builder.BuilderOption{builder.WithSymbNumb("v")},
+		[]builder.Option{builder.WithSymbNumb("v")},
 		builder.Complete(V),
 	)
 	if err != nil {
@@ -131,12 +131,11 @@ func TestVertexIncidence_TableDriven(t *testing.T) {
 	}
 
 	for _, sc := range tests {
-		sc := sc
 		t.Run(sc.name, func(t *testing.T) {
 			t.Parallel()
 
 			// Build path v0-v1-...-v7
-			g, err := builder.BuildGraph(sc.coreOpts, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Path(V))
+			g, err := builder.BuildGraph(sc.coreOpts, []builder.Option{builder.WithSymbNumb("v")}, builder.Path(V))
 			if err != nil {
 				t.Fatalf("BuildGraph: %v", err)
 			}
@@ -176,7 +175,7 @@ func TestEdgeEndpoints_Cases(t *testing.T) {
 	t.Parallel()
 
 	mOpts, _ := matrix.NewMatrixOptions()
-	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Path(V))
+	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.Option{builder.WithSymbNumb("v")}, builder.Path(V))
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}
@@ -212,7 +211,7 @@ func TestEdgeEndpoints_Cases(t *testing.T) {
 func TestIncidence_Idempotency(t *testing.T) {
 	t.Parallel()
 
-	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.BuilderOption{builder.WithSymbNumb("v")}, builder.Path(V))
+	g, err := builder.BuildGraph([]core.GraphOption{core.WithWeighted()}, []builder.Option{builder.WithSymbNumb("v")}, builder.Path(V))
 	if err != nil {
 		t.Fatalf("BuildGraph: %v", err)
 	}

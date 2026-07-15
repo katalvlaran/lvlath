@@ -15,11 +15,11 @@ import (
 // Implementation:
 //   - Stage 1: Hold immutable graph and traversal policy references.
 //   - Stage 2: Accumulate runtime traversal state and diagnostics.
-//   - Stage 3: Write observable results into DFSResult as vertices are entered and finished.
+//   - Stage 3: Write observable results into Result as vertices are entered and finished.
 //
 // Behavior highlights:
 //   - The struct is internal and per-execution.
-//   - Runtime counters do not leak back into DFSOptions.
+//   - Runtime counters do not leak back into Option.
 //
 // Inputs:
 //   - N/A.
@@ -34,23 +34,23 @@ import (
 //   - Deterministic under deterministic graph order, neighbor order, and callbacks.
 //
 // Complexity:
-//   - Space O(V) through the owned DFSResult maps and slices.
+//   - Space O(V) through the owned Result maps and slices.
 //
 // Notes:
 //   - The struct is intentionally not reused across DFS calls.
 //
 // AI-Hints:
-//   - Keep runtime state here, not inside DFSOptions.
+//   - Keep runtime state here, not inside Option.
 //   - Diagnostics such as skipped-neighbor counts belong to execution state, not configuration.
 type dfsWalker struct {
 	// graph is the traversed graph.
 	graph *core.Graph
 
 	// opts is the finalized traversal policy for this execution.
-	opts DFSOptions
+	opts Options
 
 	// res accumulates the observable traversal result.
-	res *DFSResult
+	res *Result
 
 	// skippedNeighbors counts neighbors rejected by FilterNeighbor during this execution.
 	skippedNeighbors int
@@ -64,7 +64,7 @@ type dfsWalker struct {
 //   - Stage 3: Validate the starting-root policy.
 //   - Stage 4: Allocate deterministic traversal result storage.
 //   - Stage 5: Execute either single-tree traversal or DFS-forest traversal.
-//   - Stage 6: Expose runtime diagnostics in the returned DFSResult.
+//   - Stage 6: Expose runtime diagnostics in the returned Result.
 //
 // Behavior highlights:
 //   - Order is DFS finish order (post-order).
@@ -78,7 +78,7 @@ type dfsWalker struct {
 //   - opts: ordered DFS option builders.
 //
 // Returns:
-//   - *DFSResult: traversal result, including visited flags, tree parents, depths, and finish order.
+//   - *Result: traversal result, including visited flags, tree parents, depths, and finish order.
 //   - error: nil on success, or a traversal/configuration failure.
 //
 // Errors:
@@ -105,14 +105,14 @@ type dfsWalker struct {
 //   - FullTraversal resets tree depth at each new DFS-tree root.
 //   - Mixed-edge traversal must interpret direction per edge, not via edge.To.
 //   - Invalid option input is a configuration failure, not a runtime traversal event.
-func runDFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
+func runDFS(g *core.Graph, startID string, opts ...Option) (*Result, error) {
 	// Reject a nil graph immediately because traversal semantics require a concrete graph instance.
 	if g == nil {
 		return nil, ErrGraphNil
 	}
 
 	// Assemble the canonical DFS configuration before any traversal state is allocated.
-	dopts, err := buildDFSOptions(opts...)
+	dopts, err := buildOption(opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +126,7 @@ func runDFS(g *core.Graph, startID string, opts ...Option) (*DFSResult, error) {
 	vertexCount := g.VertexCount()
 
 	// Preallocate result storage from the stable vertex-count hint.
-	res := &DFSResult{
+	res := &Result{
 		Order:   make([]string, 0, vertexCount),
 		Depth:   make(map[string]int, vertexCount),
 		Parent:  make(map[string]string, vertexCount),

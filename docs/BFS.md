@@ -11,7 +11,7 @@
     - Behaviors described here are part of the public contract.
     - Determinism rules described here are part of the public contract.
     - Error-classification rules described here are part of the public contract.
-    - Result semantics for BFSResult, PathTo, and Components are part of the public contract.
+    - Result semantics for Result, PathTo, and Components are part of the public contract.
     - Any incompatible change must be explicit, documented, and versioned.
 
   Scope:
@@ -55,7 +55,7 @@ Why use `lvlath/bfs` instead of a handwritten queue loop or a generic helper?
 
 3. **Partial Result Is a Valid Outcome**
     *   *Others:* Fail or cancel mid-traversal and throw away useful state.
-    *   *Lvlath:* Returns a partial `BFSResult` plus the error on context cancellation, neighbor enumeration failure, or hook failure.
+    *   *Lvlath:* Returns a partial `Result` plus the error on context cancellation, neighbor enumeration failure, or hook failure.
 
 4. **Queue Retention Is Engineered Away**
     *   *Others:* Use `queue = queue[1:]`, which may retain the backing array and keep old references alive longer than intended.
@@ -204,7 +204,7 @@ This section intentionally combines package entry points, error priority, result
 ### 3.3.1. Public Entry Points
 
 ```go
-func BFS(g *core.Graph, startID string, opts ...Option) (*BFSResult, error)
+func BFS(g *core.Graph, startID string, opts ...Option) (*Result, error)
 func Components(ctx context.Context, g *core.Graph) (*ComponentsResult, error)
 ```
 
@@ -222,10 +222,10 @@ The public `BFS` facade validates in the following order:
 
 This priority is intentional. It keeps diagnosis stable and predictable.
 
-### 3.3.3. BFSResult
+### 3.3.3. Result
 
 ```go
-type BFSResult struct {
+type Result struct {
     StartID string
     Order   []string
     Depth   map[string]int
@@ -249,7 +249,7 @@ type BFSResult struct {
 ### 3.3.4. PathTo
 
 ```go
-func (r *BFSResult) PathTo(dst string) ([]string, error)
+func (r *Result) PathTo(dst string) ([]string, error)
 ```
 
 `PathTo(dst)` reconstructs one shortest path from `StartID` to `dst`.
@@ -278,7 +278,7 @@ Its determinism contract is:
 - the list of components is sorted by a stable key.
 
 ### 3.3.6. Partial-Result Contract
-On any non-nil error returned after traversal begins, BFS returns a non-nil partial `*BFSResult`.
+On any non-nil error returned after traversal begins, BFS returns a non-nil partial `*Result`.
 This is not an implementation accident. It is a documented package guarantee.
 
 > [!IMPORTANT]

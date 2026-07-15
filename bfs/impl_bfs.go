@@ -40,10 +40,10 @@ type walker struct {
 	g *core.Graph
 
 	// o is the already-finalized effective options value.
-	o BFSOptions
+	o Options
 
 	// res is the result object that accumulates output incrementally.
-	res *BFSResult
+	res *Result
 
 	// q is the FIFO frontier queue. Dequeue uses head-index to avoid slice-shift retention.
 	q []queueItem
@@ -64,7 +64,7 @@ type walker struct {
 //   - Determinism: traversal order is deterministic if NeighborIDs is deterministic.
 //   - Visit definition: "visit" happens at dequeue; Order is dequeue/visit order.
 //   - Partial result: on early exit (ctx cancel, neighbor fetch error, hook error),
-//     the current *BFSResult is returned alongside the error.
+//     the current *Result is returned alongside the error.
 //
 // Inputs:
 //   - g: graph instance (assumed non-nil and validated by the facade).
@@ -72,7 +72,7 @@ type walker struct {
 //   - o: finalized options (ctx and callbacks are assumed non-nil).
 //
 // Returns:
-//   - *BFSResult: accumulated result (may be partial if an error is returned).
+//   - *Result: accumulated result (may be partial if an error is returned).
 //   - error: nil on success; otherwise ctx.Err(), ErrNeighbors-wrapped error, or hook error.
 //
 // Errors:
@@ -95,7 +95,7 @@ type walker struct {
 //   - Mark visited on enqueue to guarantee each vertex is enqueued once.
 //   - Use head-index queue + clear slots to avoid memory retention on large traversals.
 //   - Keep hooks allocation-free; they run in hot paths.
-func runBFS(g *core.Graph, startID string, o BFSOptions) (*BFSResult, error) {
+func runBFS(g *core.Graph, startID string, o Options) (*Result, error) {
 	// Stage 2: Allocate Once.
 	//
 	// AI-HINT: VertexCount() is O(1) and avoids sorting costs of Vertices().
@@ -104,7 +104,7 @@ func runBFS(g *core.Graph, startID string, o BFSOptions) (*BFSResult, error) {
 	w := &walker{
 		g: g,
 		o: o,
-		res: &BFSResult{
+		res: &Result{
 			StartID: startID,
 			Order:   make([]string, 0, n),
 			Depth:   make(map[string]int, n),
@@ -208,7 +208,7 @@ func (w *walker) loop() error {
 		w.res.Order = append(w.res.Order, item.id)
 
 		// Hook: visit may stop traversal by returning an error.
-		if err := w.o.onVisit(item.id, item.depth); err != nil {
+		if err := w.o.onVisit(item.id); err != nil {
 			return fmt.Errorf("bfs: OnVisit error at %q: %w", item.id, err)
 		}
 

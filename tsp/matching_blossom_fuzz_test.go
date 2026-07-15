@@ -83,7 +83,7 @@ func FuzzChristofidesBlossomMetricComplete(f *testing.F) {
 		if err != nil {
 			t.Fatalf("first Christofides: %v n=%d seed=%d", err, n, rawSeed)
 		}
-		if err = validateTSPResultForTest(first, n, opts.StartVertex, Christofides); err != nil {
+		if err = validateResultForTest(first, n, opts.StartVertex, Christofides); err != nil {
 			t.Fatalf("first result: %v result=%+v", err, first)
 		}
 
@@ -232,7 +232,7 @@ func internalNearTieMatchingProblem(k int, seed int64) matchingProblem {
 	}
 }
 
-func validateTSPResultForTest(result *TSPResult, n int, start int, algo Algorithm) error {
+func validateResultForTest(result *Result, n int, start int, algo Algorithm) error {
 	if result.Algorithm != algo {
 		return fmt.Errorf("algorithm got %v want %v", result.Algorithm, algo)
 	}

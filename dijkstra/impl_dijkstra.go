@@ -25,8 +25,10 @@ import (
 //
 // Behavior highlights:
 //   - The kernel uses a lazy decrease-key heap strategy.
-//   - Positive infinity remains a valid wall value, not a numeric validation failure.
 //   - Predecessor storage is allocated only when path tracking is enabled.
+//   - Edge weights must be finite and non-negative.
+//   - Positive infinity is reserved for unreachable result distances and unbounded
+//     option values; it is not accepted as graph edge data.
 //
 // Inputs:
 //   - g: the weighted graph to traverse.
@@ -34,13 +36,15 @@ import (
 //   - config: the finalized runtime policy for this execution.
 //
 // Returns:
-//   - *DijkstraResult: the detached shortest-path result for the requested source.
+//   - *Result: the detached shortest-path result for the requested source.
 //
 // Errors:
 //   - Any error returned by validateInputs.
-//   - Any error returned by validateEdgeWeights.
-//   - Any wrapped ErrInvalidWeight or ErrNegativeWeight detected during relaxation.
+//   - ErrInvalidWeight or ErrNegativeWeight, wrapped with edge context, if defensive edge validation fails.
+//   - ErrDistanceOverflow, wrapped with edge and arithmetic context,
+//     if a required candidate sum cannot be represented as finite float64.
 //   - Any graph-surface error returned by g.Neighbors.
+//   - On every error, the function returns nil result.
 //
 // Determinism:
 //   - Deterministic for the same graph state, sourceID, and runtime policy.
@@ -59,11 +63,13 @@ import (
 // AI-Hints:
 //   - Do not reintroduce source lookup through options.
 //   - Do not move endpoint resolution logic out of the canonical helper path or simplify it to edge.To.
-func runDijkstra(g *core.Graph, sourceID string, config DijkstraOptions) (*DijkstraResult, error) {
+//   - Do not remove finite MaxDistance subtraction guard before candidate addition.
+//   - Do not convert ErrDistanceOverflow into +Inf unreachable publication.
+func runDijkstra(g *core.Graph, sourceID string, config Options) (*Result, error) {
 	if err := validateInputs(g, sourceID); err != nil {
 		return nil, err
 	}
-	if err := validateEdgeWeights(g, config); err != nil {
+	if err := validateEdgeWeights(g); err != nil {
 		return nil, err
 	}
 
@@ -98,7 +104,7 @@ func runDijkstra(g *core.Graph, sourceID string, config DijkstraOptions) (*Dijks
 		return nil, err
 	}
 
-	return &DijkstraResult{
+	return &Result{
 		SourceID:  sourceID,
 		Distances: runnerState.distances,
 		Prev:      runnerState.previous,
@@ -143,7 +149,7 @@ func runDijkstra(g *core.Graph, sourceID string, config DijkstraOptions) (*Dijks
 type runner struct {
 	graph     *core.Graph
 	sourceID  string
-	options   DijkstraOptions
+	options   Options
 	distances map[string]float64
 	previous  map[string]string
 	visited   map[string]bool
@@ -293,7 +299,10 @@ func (r *runner) process() error {
 //
 // Errors:
 //   - Wrapped graph-surface errors from g.Neighbors.
-//   - Wrapped ErrInvalidWeight or ErrNegativeWeight with edge context.
+//   - Wrapped ErrInvalidWeight if runtime observation finds NaN or either infinity.
+//   - Wrapped ErrNegativeWeight if runtime observation finds a finite negative weight.
+//   - Wrapped ErrDistanceOverflow if currentDistance + weight cannot be represented
+//     as a finite float64 under the active MaxDistance policy.
 //
 // Determinism:
 //   - Neighbor scanning order follows core.Neighbors(currentID).
@@ -304,7 +313,8 @@ func (r *runner) process() error {
 //   - Extra space is O(1) beyond heap growth for successful relaxations.
 //
 // Notes:
-//   - Positive infinity is treated as an impassable wall through threshold policy and candidate behavior.
+//   - InfEdgeThreshold applies to finite edge weights.
+//   - A threshold of +Inf disables finite-weight wall filtering.
 //   - This method assumes currentID has already been finalized.
 //
 // AI-Hints:
@@ -327,13 +337,43 @@ func (r *runner) relax(currentID string) error {
 
 		weight := edge.Weight
 		if err = classifyWeight(weight); err != nil {
-			return fmt.Errorf("%w: edge %s->%s weight=%g", err, edge.From, edge.To, weight)
+			return fmt.Errorf(
+				"%w: edge_id=%q from=%q to=%q directed=%t weight=%g",
+				err,
+				edge.ID,
+				edge.From,
+				edge.To,
+				edge.Directed,
+				weight,
+			)
 		}
 		if weight >= r.options.InfEdgeThreshold {
 			continue
 		}
 
-		candidateDistance := r.distances[currentID] + weight
+		currentDistance := r.distances[currentID]
+
+		// Apply a finite MaxDistance cutoff before addition. This prevents an
+		// out-of-policy candidate from overflowing even though the candidate
+		// would be discarded by the traversal policy anyway.
+		if !math.IsInf(r.options.MaxDistance, 1) &&
+			weight > r.options.MaxDistance-currentDistance {
+			continue
+		}
+
+		candidateDistance := currentDistance + weight
+		if math.IsInf(candidateDistance, 1) {
+			return fmt.Errorf(
+				"%w: edge_id=%q from=%q to=%q current_distance=%g weight=%g",
+				ErrDistanceOverflow,
+				edge.ID,
+				edge.From,
+				edge.To,
+				currentDistance,
+				weight,
+			)
+		}
+
 		if candidateDistance > r.options.MaxDistance {
 			continue
 		}

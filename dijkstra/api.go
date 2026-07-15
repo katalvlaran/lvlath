@@ -25,7 +25,7 @@ import "github.com/katalvlaran/lvlath/core"
 //   - opts: zero or more functional runtime options.
 //
 // Returns:
-//   - *DijkstraResult: the detached shortest-path result for the requested source.
+//   - *Result: the detached shortest-path result for the requested source.
 //
 // Errors:
 //   - ErrNilGraph if g is nil.
@@ -47,7 +47,7 @@ import "github.com/katalvlaran/lvlath/core"
 // AI-Hints:
 //   - Do not move sourceID back into options.
 //   - Do not place graph validation, heap logic, or relaxation logic into this facade.
-func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*DijkstraResult, error) {
+func Dijkstra(g *core.Graph, sourceID string, opts ...Option) (*Result, error) {
 	if g == nil {
 		return nil, ErrNilGraph
 	}
@@ -113,46 +113,67 @@ func Distances(g *core.Graph, sourceID string, opts ...Option) (map[string]float
 	return clonedDistances, nil
 }
 
-// DistanceTo runs Dijkstra and returns the finalized shortest-path distance
-// to a single requested target vertex.
+// DistanceTo computes single-source shortest paths and returns the finalized
+// distance to one requested target.
+// The wrapper provides point-query ergonomics while preserving the canonical
+// Dijkstra execution and Result lookup contracts.
 //
 // Implementation:
-//   - Stage 1: Validate the target identifier.
-//   - Stage 2: Delegate to Dijkstra.
-//   - Stage 3: Resolve the target distance through the result surface.
+//   - Stage 1: Reject an empty target identifier.
+//   - Stage 2: Delegate graph validation, option assembly, and traversal to Dijkstra.
+//   - Stage 3: Resolve the target through Result.DistanceTo.
+//   - Stage 4: Return the stored finite distance or canonical +Inf value unchanged.
 //
 // Behavior highlights:
-//   - The wrapper does not require path tracking.
-//   - Unknown targets remain explicit errors.
-//   - Reachable and unreachable known targets are distinguished by the returned distance.
+//   - The wrapper does not require predecessor tracking.
+//   - The wrapper does not perform target-directed early termination; it executes
+//     the same full single-source kernel as Dijkstra.
+//   - A known unreachable target returns +Inf with nil error.
+//   - An unknown target returns ErrTargetNotFound.
+//   - Caller-provided options are preserved exactly; passing WithPathTracking is
+//     valid but unnecessary when only a distance is consumed.
 //
 // Inputs:
-//   - g: the weighted graph to traverse.
-//   - sourceID: the source vertex identifier for the traversal.
-//   - targetID: the target vertex identifier to query.
-//   - opts: zero or more functional runtime options.
+//   - g: the weighted graph to traverse; must satisfy the Dijkstra graph contract.
+//   - sourceID: the required source vertex identifier.
+//   - targetID: the required target vertex identifier.
+//   - opts: zero or more runtime policy options.
 //
 // Returns:
-//   - float64: the finalized shortest-path distance to the requested target.
+//   - float64: the finalized target distance when error is nil.
+//   - On error, the returned numeric value is zero and must not be interpreted.
 //
 // Errors:
 //   - ErrEmptyTargetID if targetID is empty.
-//   - Any error returned by Dijkstra.
-//   - Any result-surface error returned by (*DijkstraResult).DistanceTo.
+//   - ErrNilGraph, ErrEmptySourceID, ErrUnweightedGraph, or ErrSourceNotFound
+//     when public input validation fails.
+//   - ErrNilOption, ErrBadMaxDistance, or ErrBadInfEdgeThreshold
+//     when option assembly fails.
+//   - ErrInvalidWeight, ErrNegativeWeight, or ErrDistanceOverflow
+//     when numeric validation or relaxation fails.
+//   - ErrTargetNotFound if targetID is absent from the completed result domain.
+//   - Any preserved graph-surface error returned by the canonical kernel.
 //
 // Determinism:
-//   - The wrapper preserves the deterministic result produced by Dijkstra.
+//   - The wrapper preserves the graph-order, heap tie-break, and strict-improvement
+//     laws of Dijkstra.
+//   - The point lookup itself is deterministic for the completed Result.
 //
 // Complexity:
-//   - Time O(1) after the delegated kernel cost.
-//   - Space O(1) in the wrapper itself.
+//   - Total time equals the delegated Dijkstra cost plus O(1) target lookup.
+//   - Peak space equals the delegated Dijkstra working/result state plus O(1)
+//     wrapper-local storage.
 //
 // Notes:
-//   - A returned +Inf value is a valid canonical outcome for a known but unreachable target.
+//   - +Inf is valid only when error is nil and means “known but unreachable under
+//     the effective traversal policy”.
+//   - Use ShortestPathTo when both the witness and its distance are required.
 //
 // AI-Hints:
-//   - Do not bypass the result method and read the distance map directly in the wrapper.
-//   - Keep target validation explicit instead of silently treating an empty ID as missing.
+//   - Do not advertise this wrapper as an early-exit target-search optimization.
+//   - Do not bypass Result.DistanceTo with direct map access inside the wrapper.
+//   - Do not translate +Inf into ErrNoPath; distance and path-query surfaces have
+//     intentionally different contracts.
 func DistanceTo(g *core.Graph, sourceID, targetID string, opts ...Option) (float64, error) {
 	if targetID == "" {
 		return 0, ErrEmptyTargetID

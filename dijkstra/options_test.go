@@ -7,35 +7,66 @@ import (
 	"math"
 	"testing"
 
+	"github.com/katalvlaran/lvlath/core"
 	"github.com/katalvlaran/lvlath/dijkstra"
 )
 
 // AI-HINTS (file):
-//   - These tests validate option governance only.
-//   - External tests must exercise canonical option assembly through the test-only bridge.
-//   - Use errors.Is protocol checks through mustErrorIs; never compare error strings.
-//   - Keep graph construction out of this file.
-//   - Do not reintroduce panic-based option validation.
+//   - These tests validate exported option constructors and canonical public
+//     option assembly.
+//   - DefaultOptions is public and must be tested directly.
+//   - Built-in Option values may be applied directly to a detached Options value.
+//   - Assembly-only laws such as nil-option rejection and call-order behavior
+//     must be observed through Dijkstra, not through production TestOnly bridges.
+//   - Caller-defined Option implementations must not bypass finalized-state validation.
+//   - Use errors.Is protocol checks through mustErrorIs.
+//   - Do not introduce panic-based option tests or production testing exports.
 
 const (
-	testFirstMaxDistance       = 7.0
-	testSecondMaxDistance      = 3.0
-	testFirstInfEdgeThreshold  = 10.0
-	testSecondInfEdgeThreshold = 4.0
+	// optionTestSourceID is the source vertex for public assembly tests.
+	optionTestSourceID = "options:source"
+
+	// optionTestMiddleID is the intermediate vertex for policy-composition tests.
+	optionTestMiddleID = "options:middle"
+
+	// optionTestTargetID is the final target for policy-composition tests.
+	optionTestTargetID = "options:target"
+
+	// optionTestEdgeWeight is used by both edges in the assembly fixture.
+	optionTestEdgeWeight = 2.0
+
+	// optionTestRestrictiveMaxDistance excludes the first fixture edge.
+	optionTestRestrictiveMaxDistance = 1.0
+
+	// optionTestPermissiveMaxDistance includes the complete two-edge route.
+	optionTestPermissiveMaxDistance = 4.0
+
+	// optionTestRestrictiveThreshold blocks fixture edges at their exact weight.
+	optionTestRestrictiveThreshold = 2.0
+
+	// optionTestPermissiveThreshold allows every fixture edge.
+	optionTestPermissiveThreshold = 3.0
+
+	// optionTestNegativeValue is the canonical finite invalid option value.
+	optionTestNegativeValue = -1.0
+
+	// optionTestZeroValue is the exact zero boundary.
+	optionTestZeroValue = 0.0
 )
 
-// TestDefaultOptions verifies that the canonical default option snapshot matches
-// the documented runtime policy.
+// TestDefaultOptions verifies the complete canonical default policy and confirms
+// that DefaultOptions returns detached values rather than shared mutable state.
 //
 // Implementation:
-//   - Stage 1: Read the default option snapshot through the external test bridge.
-//   - Stage 2: Assert path tracking is disabled by default.
-//   - Stage 3: Assert MaxDistance defaults to +Inf.
-//   - Stage 4: Assert InfEdgeThreshold defaults to +Inf.
+//   - Stage 1: Read the first default Options value.
+//   - Stage 2: Assert all documented default fields.
+//   - Stage 3: Mutate the local value.
+//   - Stage 4: Read another default value and assert that defaults remain intact.
 //
 // Behavior highlights:
-//   - This test locks the public default-policy contract.
-//   - The test does not depend on algorithm execution.
+//   - TrackPaths defaults to false.
+//   - MaxDistance and InfEdgeThreshold default to +Inf.
+//   - Returned Options values are detached scalar snapshots.
 //
 // Inputs:
 //   - None.
@@ -44,7 +75,7 @@ const (
 //   - None.
 //
 // Errors:
-//   - Fatal test failure on any contract mismatch.
+//   - Fatal test failure on any default-policy or ownership mismatch.
 //
 // Determinism:
 //   - Deterministic.
@@ -53,36 +84,73 @@ const (
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - Default policy is part of the package contract and must remain stable.
+//   - Positive infinity here belongs to the runtime-policy domain.
 //
 // AI-Hints:
-//   - Keep +Inf as the canonical default for both distance cutoff and wall threshold.
+//   - Test DefaultOptions directly; no test-only wrapper is justified.
 func TestDefaultOptions(t *testing.T) {
-	config := dijkstra.DefaultOptionsSnapshot_TestOnly()
+	first := dijkstra.DefaultOptions()
 
-	mustEqualBool(t, config.TrackPaths, false, "TrackPaths default mismatch: got=%v want=%v", config.TrackPaths, false)
+	mustEqualBool(
+		t,
+		first.TrackPaths,
+		false,
+		"TrackPaths default: got=%v want=false",
+		first.TrackPaths,
+	)
 
-	if !math.IsInf(config.MaxDistance, 1) {
-		t.Fatalf("MaxDistance default mismatch: got=%v want=+Inf", config.MaxDistance)
+	if !math.IsInf(first.MaxDistance, 1) {
+		t.Fatalf("MaxDistance default: got=%v want=+Inf", first.MaxDistance)
 	}
-	if !math.IsInf(config.InfEdgeThreshold, 1) {
-		t.Fatalf("InfEdgeThreshold default mismatch: got=%v want=+Inf", config.InfEdgeThreshold)
+	if !math.IsInf(first.InfEdgeThreshold, 1) {
+		t.Fatalf(
+			"InfEdgeThreshold default: got=%v want=+Inf",
+			first.InfEdgeThreshold,
+		)
+	}
+
+	first.TrackPaths = true
+	first.MaxDistance = optionTestZeroValue
+	first.InfEdgeThreshold = optionTestPermissiveThreshold
+
+	second := dijkstra.DefaultOptions()
+
+	mustEqualBool(
+		t,
+		second.TrackPaths,
+		false,
+		"detached TrackPaths default: got=%v want=false",
+		second.TrackPaths,
+	)
+
+	if !math.IsInf(second.MaxDistance, 1) {
+		t.Fatalf(
+			"detached MaxDistance default: got=%v want=+Inf",
+			second.MaxDistance,
+		)
+	}
+	if !math.IsInf(second.InfEdgeThreshold, 1) {
+		t.Fatalf(
+			"detached InfEdgeThreshold default: got=%v want=+Inf",
+			second.InfEdgeThreshold,
+		)
 	}
 }
 
-// TestApplyOptions_LastWriterWins verifies that canonical option assembly applies
-// options in call order and that the last writer wins for each mutable field.
+// TestApplyOptions_LastWriterWins verifies canonical option call order through
+// the public Dijkstra facade.
 //
 // Implementation:
-//   - Stage 1: Gather an option snapshot through the external test bridge.
-//   - Stage 2: Apply repeated MaxDistance mutations.
-//   - Stage 3: Apply repeated InfEdgeThreshold mutations.
+//   - Stage 1: Build a deterministic two-edge weighted route.
+//   - Stage 2: Apply restrictive MaxDistance and threshold policies.
+//   - Stage 3: Apply permissive replacements for the same fields.
 //   - Stage 4: Enable path tracking.
-//   - Stage 5: Assert that the final state reflects the last write for each field.
+//   - Stage 5: Assert that the final permissive writers govern traversal.
 //
 // Behavior highlights:
-//   - This test locks the last-writer-wins contract.
-//   - The test validates the canonical assembly path, not ad-hoc field mutation.
+//   - If either first writer incorrectly survived, the target would remain +Inf.
+//   - The exact finite target distance therefore proves both final policies.
+//   - Path reconstruction proves that WithPathTracking was also assembled.
 //
 // Inputs:
 //   - None.
@@ -91,47 +159,86 @@ func TestDefaultOptions(t *testing.T) {
 //   - None.
 //
 // Errors:
-//   - Fatal test failure on any contract mismatch.
-//   - Fatal test failure if option assembly unexpectedly fails.
+//   - Fatal test failure on graph setup, traversal, distance, or path mismatch.
 //
 // Determinism:
-//   - Deterministic.
+//   - Deterministic for the fixed directed graph and option sequence.
 //
 // Complexity:
-//   - Time O(n), Space O(1), where n is the number of options in the test.
+//   - Setup O(1); measured test traversal follows Dijkstra cost for V=3, E=2.
 //
 // Notes:
-//   - Call order is part of the option-governance contract.
+//   - External tests intentionally observe private applyOptions through its
+//     canonical public consumer.
 //
 // AI-Hints:
-//   - Do not weaken this test by checking only one of the repeated fields.
+//   - Do not reintroduce GatherOptionsSnapshotTestOnly for this contract.
 func TestApplyOptions_LastWriterWins(t *testing.T) {
-	config, err := dijkstra.GatherOptionsSnapshot_TestOnly(
-		dijkstra.WithMaxDistance(testFirstMaxDistance),
-		dijkstra.WithMaxDistance(testSecondMaxDistance),
-		dijkstra.WithInfEdgeThreshold(testFirstInfEdgeThreshold),
-		dijkstra.WithInfEdgeThreshold(testSecondInfEdgeThreshold),
+	graph, err := core.NewGraph(
+		core.WithDirected(true),
+		core.WithWeighted(),
+	)
+	if err != nil {
+		t.Fatalf("NewGraph(directed, weighted) failed: %v", err)
+	}
+
+	if _, err = graph.AddEdge(optionTestSourceID, optionTestMiddleID, optionTestEdgeWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", optionTestSourceID, optionTestMiddleID, err)
+	}
+
+	if _, err = graph.AddEdge(optionTestMiddleID, optionTestTargetID, optionTestEdgeWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", optionTestMiddleID, optionTestTargetID, err)
+	}
+
+	result, err := dijkstra.Dijkstra(
+		graph,
+		optionTestSourceID,
+		dijkstra.WithMaxDistance(optionTestRestrictiveMaxDistance),
+		dijkstra.WithInfEdgeThreshold(optionTestRestrictiveThreshold),
+		dijkstra.WithMaxDistance(optionTestPermissiveMaxDistance),
+		dijkstra.WithInfEdgeThreshold(optionTestPermissiveThreshold),
 		dijkstra.WithPathTracking(),
 	)
 	if err != nil {
-		t.Fatalf("GatherOptionsSnapshot_TestOnly(...) error: %v", err)
+		t.Fatalf("Dijkstra(%q) failed: %v", optionTestSourceID, err)
 	}
 
-	mustEqualBool(t, config.TrackPaths, true, "TrackPaths mismatch: got=%v want=%v", config.TrackPaths, true)
-	mustEqualFloat64(t, config.MaxDistance, testSecondMaxDistance, "MaxDistance mismatch: got=%v want=%v", config.MaxDistance, testSecondMaxDistance)
-	mustEqualFloat64(t, config.InfEdgeThreshold, testSecondInfEdgeThreshold, "InfEdgeThreshold mismatch: got=%v want=%v", config.InfEdgeThreshold, testSecondInfEdgeThreshold)
+	mustNilState(t, result, false, "last-writer-wins result")
+	mustNilState(t, result.Prev, false, "last-writer-wins Prev")
+
+	distance, err := result.DistanceTo(optionTestTargetID)
+	if err != nil {
+		t.Fatalf("DistanceTo(%q) failed: %v", optionTestTargetID, err)
+	}
+
+	mustEqualFloat64(
+		t,
+		distance,
+		optionTestPermissiveMaxDistance,
+		"DistanceTo(%q): got=%v want=%v",
+		optionTestTargetID,
+		distance,
+		optionTestPermissiveMaxDistance,
+	)
+
+	path, err := result.PathTo(optionTestTargetID)
+	if err != nil {
+		t.Fatalf("PathTo(%q) failed: %v", optionTestTargetID, err)
+	}
+
+	assertPathEqual(t, path, []string{optionTestSourceID, optionTestMiddleID, optionTestTargetID})
 }
 
-// TestApplyOptions_NilOption verifies that canonical option assembly rejects a nil option
-// through the explicit sentinel protocol.
+// TestApplyOptions_NilOption verifies nil-option rejection through the canonical
+// public assembly path.
 //
 // Implementation:
-//   - Stage 1: Construct a nil functional option.
-//   - Stage 2: Pass it through the canonical option assembly bridge.
-//   - Stage 3: Assert ErrNilOption through errors.Is.
+//   - Stage 1: Build a valid weighted graph with a valid source.
+//   - Stage 2: Pass a nil Option to Dijkstra.
+//   - Stage 3: Assert ErrNilOption and nil result publication.
 //
 // Behavior highlights:
-//   - This test locks explicit nil-option rejection.
+//   - Nil options are explicit errors.
 //   - Panic-based handling is forbidden.
 //
 // Inputs:
@@ -141,7 +248,7 @@ func TestApplyOptions_LastWriterWins(t *testing.T) {
 //   - None.
 //
 // Errors:
-//   - Fatal test failure if the sentinel protocol check fails.
+//   - Fatal test failure on setup, sentinel, or publication mismatch.
 //
 // Determinism:
 //   - Deterministic.
@@ -150,15 +257,119 @@ func TestApplyOptions_LastWriterWins(t *testing.T) {
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - Nil option rejection is part of the public option-governance contract.
+//   - Valid graph/source inputs ensure option assembly is reached.
 //
 // AI-Hints:
-//   - Never replace this with panic-expectation logic.
+//   - Never replace this with a panic expectation.
 func TestApplyOptions_NilOption(t *testing.T) {
+	graph, err := core.NewGraph(core.WithWeighted())
+	if err != nil {
+		t.Fatalf("NewGraph(WithWeighted) failed: %v", err)
+	}
+
+	if err = graph.AddVertex(optionTestSourceID); err != nil {
+		t.Fatalf("AddVertex(%q) failed: %v", optionTestSourceID, err)
+	}
+
 	var nilOption dijkstra.Option
 
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(nilOption)
+	result, err := dijkstra.Dijkstra(graph, optionTestSourceID, nilOption)
+
+	mustNilState(t, result, true, "Dijkstra result after nil option")
 	mustErrorIs(t, err, dijkstra.ErrNilOption)
+}
+
+// TestApplyOptions_RejectsInvalidCustomState verifies that caller-defined options
+// cannot bypass the canonical finalized-state validation barrier.
+//
+// Implementation:
+//   - Stage 1: Build a valid weighted graph with a valid source.
+//   - Stage 2: Define custom options that return nil after publishing invalid state.
+//   - Stage 3: Invoke Dijkstra for every invalid custom state.
+//   - Stage 4: Assert the correct sentinel and nil result publication.
+//
+// Behavior highlights:
+//   - Publicly constructible Option values are treated as untrusted policy input.
+//   - Built-in constructors are not the only numeric safety boundary.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on setup, classification, or publication mismatch.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(c), Space O(1), where c is the fixed number of cases.
+//
+// Notes:
+//   - This is a regression anchor for final option-state validation.
+//
+// AI-Hints:
+//   - Do not remove validateOptions from applyOptions while this public Option
+//     extension surface exists.
+func TestApplyOptions_RejectsInvalidCustomState(t *testing.T) {
+	graph, err := core.NewGraph(core.WithWeighted())
+	if err != nil {
+		t.Fatalf("NewGraph(WithWeighted) failed: %v", err)
+	}
+
+	if err = graph.AddVertex(optionTestSourceID); err != nil {
+		t.Fatalf("AddVertex(%q) failed: %v", optionTestSourceID, err)
+	}
+
+	cases := []struct {
+		name   string
+		option dijkstra.Option
+		target error
+	}{
+		{
+			name: "NaN MaxDistance",
+			option: func(options *dijkstra.Options) error {
+				options.MaxDistance = math.NaN()
+				return nil
+			},
+			target: dijkstra.ErrBadMaxDistance,
+		},
+		{
+			name: "negative infinity MaxDistance",
+			option: func(options *dijkstra.Options) error {
+				options.MaxDistance = math.Inf(-1)
+				return nil
+			},
+			target: dijkstra.ErrBadMaxDistance,
+		},
+		{
+			name: "zero InfEdgeThreshold",
+			option: func(options *dijkstra.Options) error {
+				options.InfEdgeThreshold = optionTestZeroValue
+				return nil
+			},
+			target: dijkstra.ErrBadInfEdgeThreshold,
+		},
+		{
+			name: "NaN InfEdgeThreshold",
+			option: func(options *dijkstra.Options) error {
+				options.InfEdgeThreshold = math.NaN()
+				return nil
+			},
+			target: dijkstra.ErrBadInfEdgeThreshold,
+		},
+	}
+
+	for _, testCase := range cases {
+		t.Run(testCase.name, func(t *testing.T) {
+			result, runErr := dijkstra.Dijkstra(graph, optionTestSourceID, testCase.option)
+
+			mustNilState(t, result, true, "Dijkstra result after invalid custom option")
+			mustErrorIs(t, runErr, testCase.target)
+		})
+	}
 }
 
 // TestWithMaxDistance_RejectsNegative verifies that finite negative distance cutoffs
@@ -193,8 +404,15 @@ func TestApplyOptions_NilOption(t *testing.T) {
 // AI-Hints:
 //   - Keep finite negative rejection separate from NaN and -Inf coverage.
 func TestWithMaxDistance_RejectsNegative(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithMaxDistance(-1))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithMaxDistance(optionTestNegativeValue)(&config)
+
 	mustErrorIs(t, err, dijkstra.ErrBadMaxDistance)
+
+	if !math.IsInf(config.MaxDistance, 1) {
+		t.Fatalf("MaxDistance mutated after rejection: got=%v want=+Inf", config.MaxDistance)
+	}
 }
 
 // TestWithMaxDistance_RejectsNaN verifies that NaN is rejected by the MaxDistance
@@ -229,8 +447,58 @@ func TestWithMaxDistance_RejectsNegative(t *testing.T) {
 // AI-Hints:
 //   - Do not remove NaN coverage; it protects the numeric-policy contract.
 func TestWithMaxDistance_RejectsNaN(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithMaxDistance(math.NaN()))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithMaxDistance(math.NaN())(&config)
+
 	mustErrorIs(t, err, dijkstra.ErrBadMaxDistance)
+
+	if !math.IsInf(config.MaxDistance, 1) {
+		t.Fatalf("MaxDistance mutated after rejection: got=%v want=+Inf", config.MaxDistance)
+	}
+}
+
+// TestWithMaxDistance_RejectsNegativeInfinity verifies that negative infinity is rejected
+// explicitly by the MaxDistance option contract.
+//
+// Implementation:
+//   - Stage 1: Attempt to assemble a configuration with MaxDistance set to -Inf.
+//   - Stage 2: Assert ErrBadMaxDistance through the sentinel protocol.
+//
+// Behavior highlights:
+//   - -Inf is invalid configuration data.
+//   - This test covers a distinct explicit branch in the production code.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure if the sentinel protocol check fails.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - This is a live validation branch and should remain covered.
+//
+// AI-Hints:
+//   - Keep negative-infinity coverage separate from finite negative and NaN coverage.
+func TestWithMaxDistance_RejectsNegativeInfinity(t *testing.T) {
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithMaxDistance(math.Inf(-1))(&config)
+
+	mustErrorIs(t, err, dijkstra.ErrBadMaxDistance)
+
+	if !math.IsInf(config.MaxDistance, 1) {
+		t.Fatalf("MaxDistance mutated after rejection: got=%v want=+Inf", config.MaxDistance)
+	}
 }
 
 // TestWithMaxDistance_AcceptsPositiveInfinity verifies that +Inf is accepted as the
@@ -267,50 +535,35 @@ func TestWithMaxDistance_RejectsNaN(t *testing.T) {
 // AI-Hints:
 //   - Do not weaken this by checking only “no error”; the stored +Inf matters too.
 func TestWithMaxDistance_AcceptsPositiveInfinity(t *testing.T) {
-	config, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithMaxDistance(math.Inf(1)))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithMaxDistance(math.Inf(1))(&config)
 	if err != nil {
-		t.Fatalf("GatherOptionsSnapshot_TestOnly(...) error: %v", err)
+		t.Fatalf("WithMaxDistance(+Inf) failed: %v", err)
 	}
 
 	if !math.IsInf(config.MaxDistance, 1) {
-		t.Fatalf("MaxDistance mismatch: got=%v want=+Inf", config.MaxDistance)
+		t.Fatalf("MaxDistance: got=%v want=+Inf", config.MaxDistance)
 	}
 }
 
-// TestWithMaxDistance_RejectsNegativeInfinity verifies that negative infinity is rejected
-// explicitly by the MaxDistance option contract.
-//
-// Implementation:
-//   - Stage 1: Attempt to assemble a configuration with MaxDistance set to -Inf.
-//   - Stage 2: Assert ErrBadMaxDistance through the sentinel protocol.
-//
-// Behavior highlights:
-//   - -Inf is invalid configuration data.
-//   - This test covers a distinct explicit branch in the production code.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - None.
-//
-// Errors:
-//   - Fatal test failure if the sentinel protocol check fails.
-//
-// Determinism:
-//   - Deterministic.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - This is a live validation branch and should remain covered.
-//
-// AI-Hints:
-//   - Keep negative-infinity coverage separate from finite negative and NaN coverage.
-func TestWithMaxDistance_RejectsNegativeInfinity(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithMaxDistance(math.Inf(-1)))
-	mustErrorIs(t, err, dijkstra.ErrBadMaxDistance)
+// TestWithMaxDistance_AcceptsZero verifies the inclusive zero boundary.
+func TestWithMaxDistance_AcceptsZero(t *testing.T) {
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithMaxDistance(optionTestZeroValue)(&config)
+	if err != nil {
+		t.Fatalf("WithMaxDistance(0) failed: %v", err)
+	}
+
+	mustEqualFloat64(
+		t,
+		config.MaxDistance,
+		optionTestZeroValue,
+		"MaxDistance: got=%v want=%v",
+		config.MaxDistance,
+		optionTestZeroValue,
+	)
 }
 
 // TestWithInfEdgeThreshold_RejectsZero verifies that a zero wall threshold is rejected
@@ -345,8 +598,28 @@ func TestWithMaxDistance_RejectsNegativeInfinity(t *testing.T) {
 // AI-Hints:
 //   - Keep zero-threshold rejection explicit; it protects zero-weight edge semantics.
 func TestWithInfEdgeThreshold_RejectsZero(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithInfEdgeThreshold(0))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithInfEdgeThreshold(optionTestZeroValue)(&config)
+
 	mustErrorIs(t, err, dijkstra.ErrBadInfEdgeThreshold)
+
+	if !math.IsInf(config.InfEdgeThreshold, 1) {
+		t.Fatalf("InfEdgeThreshold mutated after rejection: got=%v want=+Inf", config.InfEdgeThreshold)
+	}
+}
+
+// TestWithInfEdgeThreshold_RejectsNegative verifies finite-negative rejection.
+func TestWithInfEdgeThreshold_RejectsNegative(t *testing.T) {
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithInfEdgeThreshold(optionTestNegativeValue)(&config)
+
+	mustErrorIs(t, err, dijkstra.ErrBadInfEdgeThreshold)
+
+	if !math.IsInf(config.InfEdgeThreshold, 1) {
+		t.Fatalf("InfEdgeThreshold mutated after rejection: got=%v want=+Inf", config.InfEdgeThreshold)
+	}
 }
 
 // TestWithInfEdgeThreshold_RejectsNaN verifies that NaN is rejected by the edge-wall
@@ -381,8 +654,15 @@ func TestWithInfEdgeThreshold_RejectsZero(t *testing.T) {
 // AI-Hints:
 //   - Do not remove NaN coverage; it protects the threshold numeric contract.
 func TestWithInfEdgeThreshold_RejectsNaN(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithInfEdgeThreshold(math.NaN()))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithInfEdgeThreshold(math.NaN())(&config)
+
 	mustErrorIs(t, err, dijkstra.ErrBadInfEdgeThreshold)
+
+	if !math.IsInf(config.InfEdgeThreshold, 1) {
+		t.Fatalf("InfEdgeThreshold mutated after rejection: got=%v want=+Inf", config.InfEdgeThreshold)
+	}
 }
 
 // TestWithInfEdgeThreshold_AcceptsPositiveInfinity verifies that +Inf is accepted as the
@@ -419,13 +699,15 @@ func TestWithInfEdgeThreshold_RejectsNaN(t *testing.T) {
 // AI-Hints:
 //   - Do not weaken this by checking only “no error”; the stored +Inf matters too.
 func TestWithInfEdgeThreshold_AcceptsPositiveInfinity(t *testing.T) {
-	config, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithInfEdgeThreshold(math.Inf(1)))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithInfEdgeThreshold(math.Inf(1))(&config)
 	if err != nil {
-		t.Fatalf("GatherOptionsSnapshot_TestOnly(...) error: %v", err)
+		t.Fatalf("WithInfEdgeThreshold(+Inf) failed: %v", err)
 	}
 
 	if !math.IsInf(config.InfEdgeThreshold, 1) {
-		t.Fatalf("InfEdgeThreshold mismatch: got=%v want=+Inf", config.InfEdgeThreshold)
+		t.Fatalf("InfEdgeThreshold: got=%v want=+Inf", config.InfEdgeThreshold)
 	}
 }
 
@@ -461,8 +743,15 @@ func TestWithInfEdgeThreshold_AcceptsPositiveInfinity(t *testing.T) {
 // AI-Hints:
 //   - Keep negative-infinity coverage separate from zero and NaN coverage.
 func TestWithInfEdgeThreshold_RejectsNegativeInfinity(t *testing.T) {
-	_, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithInfEdgeThreshold(math.Inf(-1)))
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithInfEdgeThreshold(math.Inf(-1))(&config)
+
 	mustErrorIs(t, err, dijkstra.ErrBadInfEdgeThreshold)
+
+	if !math.IsInf(config.InfEdgeThreshold, 1) {
+		t.Fatalf("InfEdgeThreshold mutated after rejection: got=%v want=+Inf", config.InfEdgeThreshold)
+	}
 }
 
 // TestWithPathTracking verifies that the path-tracking option enables predecessor
@@ -499,17 +788,19 @@ func TestWithInfEdgeThreshold_RejectsNegativeInfinity(t *testing.T) {
 // AI-Hints:
 //   - Keep path-tracking enablement narrow; do not let it mutate unrelated fields.
 func TestWithPathTracking(t *testing.T) {
-	config, err := dijkstra.GatherOptionsSnapshot_TestOnly(dijkstra.WithPathTracking())
+	config := dijkstra.DefaultOptions()
+
+	err := dijkstra.WithPathTracking()(&config)
 	if err != nil {
-		t.Fatalf("GatherOptionsSnapshot_TestOnly(...) error: %v", err)
+		t.Fatalf("WithPathTracking() failed: %v", err)
 	}
 
-	mustEqualBool(t, config.TrackPaths, true, "TrackPaths mismatch: got=%v want=%v", config.TrackPaths, true)
+	mustEqualBool(t, config.TrackPaths, true, "TrackPaths: got=%v want=true", config.TrackPaths)
 
 	if !math.IsInf(config.MaxDistance, 1) {
-		t.Fatalf("MaxDistance mismatch: got=%v want=+Inf", config.MaxDistance)
+		t.Fatalf("MaxDistance changed: got=%v want=+Inf", config.MaxDistance)
 	}
 	if !math.IsInf(config.InfEdgeThreshold, 1) {
-		t.Fatalf("InfEdgeThreshold mismatch: got=%v want=+Inf", config.InfEdgeThreshold)
+		t.Fatalf("InfEdgeThreshold changed: got=%v want=+Inf", config.InfEdgeThreshold)
 	}
 }

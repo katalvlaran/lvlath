@@ -350,6 +350,54 @@ func mustEqualString(t *testing.T, got, want string, format string, args ...any)
 	t.Fatalf("string mismatch: got=%q want=%q", got, want)
 }
 
+// mustEqualInt fails the test when got and want differ.
+//
+// Implementation:
+//   - Stage 1: Mark the helper frame.
+//   - Stage 2: Compare integer values directly.
+//   - Stage 3: Emit caller-provided context or a canonical mismatch message.
+//
+// Behavior highlights:
+//   - Supports precise assertions for vertex counts, edge counts, and map sizes.
+//   - Does not use reflection or an external assertion framework.
+//
+// Inputs:
+//   - got: the observed integer value.
+//   - want: the required integer value.
+//   - format: optional failure-message format.
+//   - args: optional failure-message arguments.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on mismatch.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(1), Space O(1).
+//
+// Notes:
+//   - Use this helper only for exact integer contracts.
+//
+// AI-Hints:
+//   - Prefer explicit count assertions over indirect topology assumptions.
+func mustEqualInt(t *testing.T, got, want int, format string, args ...any) {
+	t.Helper()
+
+	if got == want {
+		return
+	}
+
+	if format != "" {
+		t.Fatalf(format, args...)
+	}
+
+	t.Fatalf("int mismatch: got=%d want=%d", got, want)
+}
+
 // mustEqualFloat64 fails the test if got != want.
 // The helper is intended for exact-value checks on deterministic test fixtures
 // that avoid tolerance-based numeric contracts.

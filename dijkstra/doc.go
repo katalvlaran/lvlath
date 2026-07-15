@@ -12,7 +12,7 @@
 //
 //   - Dijkstra(g, sourceID, opts...)
 //     Runs deterministic single-source shortest paths and returns a detached
-//     DijkstraResult.
+//     Result.
 //
 //   - Distances(g, sourceID, opts...)
 //     Convenience wrapper that returns a detached distance map only.
@@ -24,7 +24,7 @@
 //     Convenience wrapper that runs Dijkstra with path tracking enabled and
 //     returns one deterministic shortest-path witness plus its distance.
 //
-// DijkstraResult is the public result artifact. It exposes:
+// Result is the public result artifact. It exposes:
 //
 //   - SourceID  - the source vertex identifier used for the run.
 //   - Distances - finalized shortest-path distances for the known result domain.
@@ -48,7 +48,7 @@
 //
 //   - Explicit Result Surface:
 //     Distances, reachability, and one shortest-path witness are exposed through
-//     DijkstraResult instead of ad-hoc parallel maps returned from the kernel.
+//     Result instead of ad-hoc parallel maps returned from the kernel.
 //
 //   - Policy Without Topology Mutation:
 //     Runtime options such as MaxDistance and InfEdgeThreshold alter traversal
@@ -101,26 +101,64 @@
 // -----------------------------------------------------------------------------
 // -- NUMERIC POLICY -----------------------------------------------------------
 //
-// Numeric semantics are a package-level contract.
+// Numeric semantics are separated by domain and form part of the package contract.
 //
-//   - All distances and weights are float64.
-//   - The canonical unreachable value is math.Inf(1).
-//   - NaN is forbidden.
-//   - Positive infinity is valid input data and participates in wall semantics.
-//   - Negative infinity is invalid numeric input.
+//  1. Graph-edge input domain
 //
-// Weight classification law:
+//     Every consumed Edge.Weight must be a finite float64.
 //
-//   - math.IsNaN(w)      -> ErrInvalidWeight
-//   - math.IsInf(w, -1)  -> ErrInvalidWeight
-//   - w < 0              -> ErrNegativeWeight
-//   - math.IsInf(w, +1)  -> valid numeric input; handled by traversal policy
+//     Accepted:
 //
-// Published distance law:
+//     - finite w >= 0
 //
-//   - A known but unreachable vertex remains present in Distances with value +Inf.
-//   - An unknown target vertex is not represented by a synthetic numeric sentinel;
-//     it is a separate ErrTargetNotFound state.
+//     Rejected:
+//
+//     - math.NaN()
+//     - math.Inf(1)
+//     - math.Inf(-1)
+//     - every finite w < 0
+//
+//  2. Runtime-policy domain
+//
+//     Positive infinity is valid for:
+//
+//     - MaxDistance, where +Inf means “no accumulated-distance cutoff”;
+//     - InfEdgeThreshold, where +Inf means “no finite edge is blocked”.
+//
+//     These option-domain meanings do not authorize +Inf graph-edge weights.
+//
+//  3. Published result domain
+//
+//     Result.Distances contains:
+//
+//     - finite non-negative shortest-path distances for reachable vertices;
+//     - math.Inf(1) for known vertices that are unreachable under the effective
+//     graph and traversal policy.
+//
+//     A missing target is not represented numerically. It is classified through
+//     ErrTargetNotFound.
+//
+// Edge-weight classification law:
+//
+//   - math.IsNaN(w)     -> ErrInvalidWeight
+//   - math.IsInf(w, 0)  -> ErrInvalidWeight
+//   - finite w < 0      -> ErrNegativeWeight
+//   - finite w >= 0     -> accepted
+//
+// Arithmetic-overflow law:
+//
+//   - If two individually valid finite operands produce +Inf, traversal returns
+//     ErrDistanceOverflow.
+//   - Arithmetic overflow is not published as ordinary unreachable state.
+//   - On overflow, the package returns nil result plus error.
+//
+// Published-distance law:
+//
+//   - A known but unreachable vertex remains present in Distances with +Inf.
+//   - A known reachable vertex has a finite non-negative distance.
+//   - An unknown target is classified through ErrTargetNotFound.
+//   - +Inf in Distances is package-owned result state; it is not copied from a
+//     graph-edge weight.
 //
 // -----------------------------------------------------------------------------
 // -- GRAPH POLICY -------------------------------------------------------------
@@ -186,7 +224,7 @@
 // -----------------------------------------------------------------------------
 // -- RESULT CONTRACT ----------------------------------------------------------
 //
-// DijkstraResult is the detached public shortest-path artifact.
+// Result is the detached public shortest-path artifact.
 //
 // Public result semantics:
 //
@@ -213,6 +251,9 @@
 //   - PathTo(targetID)
 //     Requires path tracking to have been enabled.
 //     Returns one deterministic shortest-path witness.
+//     Validates every predecessor against the result domain.
+//     Rejects broken, cyclic, and out-of-domain predecessor state with ErrNoPath.
+//     Never returns a partial witness and never loops indefinitely on malformed Prev.
 //     Does not enumerate all shortest paths.
 //
 // -----------------------------------------------------------------------------
@@ -289,6 +330,7 @@
 //   - ErrBadInfEdgeThreshold
 //   - ErrNegativeWeight
 //   - ErrInvalidWeight
+//   - ErrDistanceOverflow
 //   - ErrPathTrackingDisabled
 //   - ErrNoPath
 //   - ErrEmptyTargetID
@@ -313,20 +355,28 @@
 //
 // Ownership contract:
 //
-//   - The package does not retain a live mutable link from DijkstraResult back
+//   - The package does not retain a live mutable link from Result back
 //     to the graph.
 //   - After return, callers may read, clone, and transform published results.
 //   - Convenience wrappers that return maps publish detached caller-owned copies.
 //
+// Caller-mutation consequence:
+//
+//   - Distances and Prev are caller-owned and therefore mutable after return.
+//   - Mutating them changes the meaning of that Result instance.
+//   - PathTo validates witness-chain safety and fails with ErrNoPath when mutation
+//     leaves the predecessor relation broken, cyclic, or outside Distances.
+//   - Clone creates independent maps but does not validate semantic correctness.
+//
 // Clone law:
 //
-//   - DijkstraResult.Clone returns a deep copy.
+//   - Result.Clone returns a deep copy.
 //   - Prev == nil is preserved exactly and is not rewritten into an empty map.
 //
 // -----------------------------------------------------------------------------
 // -- PARTIAL RESULT LAW -------------------------------------------------------
 //
-// On failure, the package does not publish a partial DijkstraResult.
+// On failure, the package does not publish a partial Result.
 //
 // Publication law:
 //
@@ -381,10 +431,15 @@
 //   - Error Matching:
 //     Never parse error strings. Use errors.Is with exported sentinels only.
 //
-//   - Numeric Policy:
-//     Do not treat NaN as an ordinary large value.
-//     Do not treat -Inf as a valid wall.
-//     Do not replace +Inf unreachable semantics with arbitrary finite sentinels.
+//   - Numeric Domain Separation:
+//     Graph-edge weights must remain finite.
+//     +Inf is valid only in the result domain for unreachability and in the
+//     option domain for unbounded policy.
+//     Do not transfer +Inf semantics implicitly between these domains.
+//
+//   - Arithmetic Overflow:
+//     Do not publish an overflowed candidate as unreachable +Inf.
+//     Preserve ErrDistanceOverflow and suppress partial result publication.
 //
 //   - Endpoint Law:
 //     Never simplify mixed or undirected traversal to edge.To-only logic.
@@ -397,6 +452,19 @@
 //   - Path Tracking:
 //     Prev == nil means path tracking was disabled.
 //     It does not mean that the graph has no reachable paths.
+//
+//   - Path Witness Integrity:
+//     Result.Prev is caller-owned after publication.
+//     Never follow predecessor links without cycle and domain guards.
+//     Broken, cyclic, or out-of-domain witness state must fail with ErrNoPath.
+//
+//   - Numeric Domain Separation:
+//     Graph-edge weights must remain finite.
+//     +Inf is valid only in result and policy domains.
+//
+//   - Custom Options:
+//     Option is publicly constructible.
+//     Canonical assembly must revalidate finalized state after every option.
 //
 //   - Options:
 //     Do not move sourceID back into options.
@@ -414,6 +482,6 @@
 //
 //   - docs/DIJKSTRA.md for repository-level tutorial, formulas, diagrams,
 //     algorithm notes, and operational examples.
-//   - package GoDoc on Dijkstra, DijkstraResult, DijkstraOptions, Option helpers,
+//   - package GoDoc on Dijkstra, Result, Options, Option helpers,
 //     and wrapper APIs for per-symbol contract details.
 package dijkstra

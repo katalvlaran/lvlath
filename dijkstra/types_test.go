@@ -6,16 +6,21 @@ package dijkstra_test
 import (
 	"math"
 	"testing"
+	"time"
 
 	"github.com/katalvlaran/lvlath/dijkstra"
 )
 
 // AI-HINTS (file):
-//   - These tests validate DijkstraResult as a standalone public contract type.
+//   - These tests validate Result as a standalone public contract type.
 //   - Build result fixtures directly; do not run the algorithm here.
 //   - Keep missing-target, unreachable-target, tracking-disabled, and source-path cases separate.
 //   - Use exact path assertions because PathTo is deterministic by contract.
 //   - Use nil-safe checks and panic-safety anchors where receiver safety matters.
+//   - Caller-owned Prev state may be malformed; cyclic reconstruction must terminate.
+//   - Never accept a predecessor vertex absent from Distances.
+//   - A timeout guard is allowed only for the dedicated non-termination regression;
+//     it must not become production timing semantics.
 
 const (
 	resultTestSourceID       = "A"
@@ -27,10 +32,26 @@ const (
 	resultTestDistanceSource = 0.0
 	resultTestDistanceMiddle = 2.0
 	resultTestDistanceTarget = 5.0
+
+	// resultTestCycleLeftID is the first vertex in a malformed predecessor cycle.
+	resultTestCycleLeftID = "cycle:left"
+
+	// resultTestCycleRightID is the second vertex in a malformed predecessor cycle.
+	resultTestCycleRightID = "cycle:right"
+
+	// resultTestCycleTargetID is the finite target whose chain enters the cycle.
+	resultTestCycleTargetID = "cycle:target"
+
+	// resultTestForeignParentID is a predecessor absent from the result domain.
+	resultTestForeignParentID = "foreign:parent"
+
+	// resultTestCycleGuardTimeout prevents an infinite-loop regression from
+	// hanging the complete test process indefinitely.
+	resultTestCycleGuardTimeout = 2 * time.Second
 )
 
-// TestDijkstraResult_IsNil verifies the Nilable contract and nil-receiver safety
-// of DijkstraResult.
+// TestResult_IsNil verifies the Nilable contract and nil-receiver safety
+// of Result.
 //
 // Implementation:
 //   - Stage 1: Evaluate IsNil on a nil receiver under a panic-safety guard.
@@ -39,7 +60,7 @@ const (
 //
 // Behavior highlights:
 //   - Nil receivers are supported safely.
-//   - DijkstraResult participates in the core.Nilable contract.
+//   - Result participates in the core.Nilable contract.
 //
 // Inputs:
 //   - None.
@@ -61,18 +82,18 @@ const (
 //
 // AI-Hints:
 //   - Keep nil-receiver safety explicit for result-surface types.
-func TestDijkstraResult_IsNil(t *testing.T) {
-	var nilResult *dijkstra.DijkstraResult
+func TestResult_IsNil(t *testing.T) {
+	var nilResult *dijkstra.Result
 
 	mustPanicFree(t, func() {
 		mustEqualBool(t, nilResult.IsNil(), true, "nil receiver IsNil mismatch: got=%v want=%v", nilResult.IsNil(), true)
 	})
 
-	nonNilResult := &dijkstra.DijkstraResult{}
+	nonNilResult := &dijkstra.Result{}
 	mustEqualBool(t, nonNilResult.IsNil(), false, "non-nil receiver IsNil mismatch: got=%v want=%v", nonNilResult.IsNil(), false)
 }
 
-// TestDijkstraResult_DistanceTo verifies target lookup semantics for nil receivers,
+// TestResult_DistanceTo verifies target lookup semantics for nil receivers,
 // empty targets, unknown targets, reachable targets, and known unreachable targets.
 //
 // Implementation:
@@ -106,16 +127,16 @@ func TestDijkstraResult_IsNil(t *testing.T) {
 //
 // AI-Hints:
 //   - Do not collapse ErrTargetNotFound and +Inf unreachable into one behavior.
-func TestDijkstraResult_DistanceTo(t *testing.T) {
+func TestResult_DistanceTo(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
-		var result *dijkstra.DijkstraResult
+		var result *dijkstra.Result
 
 		_, err := result.DistanceTo(resultTestTargetID)
 		mustErrorIs(t, err, dijkstra.ErrNilResult)
 	})
 
 	t.Run("empty target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -127,7 +148,7 @@ func TestDijkstraResult_DistanceTo(t *testing.T) {
 	})
 
 	t.Run("target not found", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -139,7 +160,7 @@ func TestDijkstraResult_DistanceTo(t *testing.T) {
 	})
 
 	t.Run("reachable target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -156,7 +177,7 @@ func TestDijkstraResult_DistanceTo(t *testing.T) {
 	})
 
 	t.Run("known unreachable target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -173,7 +194,7 @@ func TestDijkstraResult_DistanceTo(t *testing.T) {
 	})
 }
 
-// TestDijkstraResult_HasPathTo verifies reachability semantics derived from the
+// TestResult_HasPathTo verifies reachability semantics derived from the
 // distance contract rather than from predecessor storage.
 //
 // Implementation:
@@ -208,16 +229,16 @@ func TestDijkstraResult_DistanceTo(t *testing.T) {
 //
 // AI-Hints:
 //   - Keep HasPathTo aligned with DistanceTo semantics.
-func TestDijkstraResult_HasPathTo(t *testing.T) {
+func TestResult_HasPathTo(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
-		var result *dijkstra.DijkstraResult
+		var result *dijkstra.Result
 
 		_, err := result.HasPathTo(resultTestTargetID)
 		mustErrorIs(t, err, dijkstra.ErrNilResult)
 	})
 
 	t.Run("empty target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -229,7 +250,7 @@ func TestDijkstraResult_HasPathTo(t *testing.T) {
 	})
 
 	t.Run("target not found", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -241,7 +262,7 @@ func TestDijkstraResult_HasPathTo(t *testing.T) {
 	})
 
 	t.Run("reachable target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -258,7 +279,7 @@ func TestDijkstraResult_HasPathTo(t *testing.T) {
 	})
 
 	t.Run("known unreachable target", func(t *testing.T) {
-		result := &dijkstra.DijkstraResult{
+		result := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -275,7 +296,7 @@ func TestDijkstraResult_HasPathTo(t *testing.T) {
 	})
 }
 
-// TestDijkstraResult_PathTo_Source verifies that PathTo returns a single-vertex
+// TestResult_PathTo_Source verifies that PathTo returns a single-vertex
 // witness for the source when predecessor tracking is enabled.
 //
 // Implementation:
@@ -307,8 +328,8 @@ func TestDijkstraResult_HasPathTo(t *testing.T) {
 //
 // AI-Hints:
 //   - Keep source-path behavior separate from tracking-disabled behavior.
-func TestDijkstraResult_PathTo_Source(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_Source(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID: resultTestDistanceSource,
@@ -326,7 +347,7 @@ func TestDijkstraResult_PathTo_Source(t *testing.T) {
 	assertPathEqual(t, got, []string{resultTestSourceID})
 }
 
-// TestDijkstraResult_PathTo_TargetNotFound verifies that PathTo rejects a target
+// TestResult_PathTo_TargetNotFound verifies that PathTo rejects a target
 // that does not exist in the result domain.
 //
 // Implementation:
@@ -358,8 +379,8 @@ func TestDijkstraResult_PathTo_Source(t *testing.T) {
 //
 // AI-Hints:
 //   - Do not map missing-target failures to ErrNoPath.
-func TestDijkstraResult_PathTo_TargetNotFound(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_TargetNotFound(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID: resultTestDistanceSource,
@@ -375,7 +396,7 @@ func TestDijkstraResult_PathTo_TargetNotFound(t *testing.T) {
 	mustErrorIs(t, err, dijkstra.ErrTargetNotFound)
 }
 
-// TestDijkstraResult_PathTo_NoPath verifies that PathTo reports ErrNoPath for a
+// TestResult_PathTo_NoPath verifies that PathTo reports ErrNoPath for a
 // known target that is unreachable under the stored distance contract.
 //
 // Implementation:
@@ -407,8 +428,8 @@ func TestDijkstraResult_PathTo_TargetNotFound(t *testing.T) {
 //
 // AI-Hints:
 //   - Keep unreachable-target handling separate from tracking-disabled handling.
-func TestDijkstraResult_PathTo_NoPath(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_NoPath(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID: resultTestDistanceSource,
@@ -424,7 +445,7 @@ func TestDijkstraResult_PathTo_NoPath(t *testing.T) {
 	mustErrorIs(t, err, dijkstra.ErrNoPath)
 }
 
-// TestDijkstraResult_PathTo_TrackingDisabled verifies that PathTo rejects queries
+// TestResult_PathTo_TrackingDisabled verifies that PathTo rejects queries
 // when predecessor tracking was not enabled for the producing run.
 //
 // Implementation:
@@ -456,8 +477,8 @@ func TestDijkstraResult_PathTo_NoPath(t *testing.T) {
 //
 // AI-Hints:
 //   - Do not collapse tracking-disabled and no-path behavior.
-func TestDijkstraResult_PathTo_TrackingDisabled(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_TrackingDisabled(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID: resultTestDistanceSource,
@@ -470,7 +491,7 @@ func TestDijkstraResult_PathTo_TrackingDisabled(t *testing.T) {
 	mustErrorIs(t, err, dijkstra.ErrPathTrackingDisabled)
 }
 
-// TestDijkstraResult_PathTo_Success verifies successful deterministic path
+// TestResult_PathTo_Success verifies successful deterministic path
 // reconstruction from a valid predecessor chain.
 //
 // Implementation:
@@ -502,8 +523,8 @@ func TestDijkstraResult_PathTo_TrackingDisabled(t *testing.T) {
 //
 // AI-Hints:
 //   - Do not weaken this into unordered path comparison.
-func TestDijkstraResult_PathTo_Success(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_Success(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID: resultTestDistanceSource,
@@ -525,7 +546,7 @@ func TestDijkstraResult_PathTo_Success(t *testing.T) {
 	assertPathEqual(t, got, []string{resultTestSourceID, resultTestMiddleID, resultTestTargetID})
 }
 
-// TestDijkstraResult_PathTo_BrokenPredecessorChain verifies that PathTo reports
+// TestResult_PathTo_BrokenPredecessorChain verifies that PathTo reports
 // ErrNoPath when the target is finite but the predecessor chain cannot reach the source.
 //
 // Implementation:
@@ -558,8 +579,8 @@ func TestDijkstraResult_PathTo_Success(t *testing.T) {
 //
 // AI-Hints:
 //   - Keep broken-chain coverage explicit; it protects witness honesty.
-func TestDijkstraResult_PathTo_BrokenPredecessorChain(t *testing.T) {
-	result := &dijkstra.DijkstraResult{
+func TestResult_PathTo_BrokenPredecessorChain(t *testing.T) {
+	result := &dijkstra.Result{
 		SourceID: resultTestSourceID,
 		Distances: map[string]float64{
 			resultTestSourceID:       resultTestDistanceSource,
@@ -575,7 +596,7 @@ func TestDijkstraResult_PathTo_BrokenPredecessorChain(t *testing.T) {
 	mustErrorIs(t, err, dijkstra.ErrNoPath)
 }
 
-// TestDijkstraResult_Clone verifies nil safety, deep-copy semantics, and exact
+// TestResult_Clone verifies nil safety, deep-copy semantics, and exact
 // preservation of nil predecessor state in Clone.
 //
 // Implementation:
@@ -609,16 +630,16 @@ func TestDijkstraResult_PathTo_BrokenPredecessorChain(t *testing.T) {
 //
 // AI-Hints:
 //   - Preserve nil Prev exactly; do not normalize it into an empty map.
-func TestDijkstraResult_Clone(t *testing.T) {
+func TestResult_Clone(t *testing.T) {
 	t.Run("nil receiver", func(t *testing.T) {
-		var result *dijkstra.DijkstraResult
+		var result *dijkstra.Result
 
 		cloned := result.Clone()
 		mustNilState(t, cloned, true, "Clone(nil)")
 	})
 
 	t.Run("deep copy", func(t *testing.T) {
-		original := &dijkstra.DijkstraResult{
+		original := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -642,7 +663,7 @@ func TestDijkstraResult_Clone(t *testing.T) {
 	})
 
 	t.Run("preserves nil Prev", func(t *testing.T) {
-		original := &dijkstra.DijkstraResult{
+		original := &dijkstra.Result{
 			SourceID: resultTestSourceID,
 			Distances: map[string]float64{
 				resultTestSourceID: resultTestDistanceSource,
@@ -654,4 +675,150 @@ func TestDijkstraResult_Clone(t *testing.T) {
 		mustNilState(t, cloned, false, "Clone result")
 		mustNilState(t, cloned.Prev, true, "Clone preserves nil Prev")
 	})
+}
+
+// TestResult_PathTo_CyclicPredecessorChain verifies that PathTo detects a
+// caller-mutated predecessor cycle and terminates with ErrNoPath.
+//
+// Implementation:
+//   - Stage 1: Construct a finite tracked result whose target enters a two-vertex cycle.
+//   - Stage 2: Execute PathTo in a worker and report completion through a buffered channel.
+//   - Stage 3: Guard the test process against an infinite-loop regression.
+//   - Stage 4: Assert nil path and ErrNoPath.
+//
+// Behavior highlights:
+//   - Cyclic Prev state must never hang path reconstruction.
+//   - No partial witness is published.
+//   - The worker never calls testing failure methods.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on panic, timeout, non-nil path, or wrong sentinel.
+//
+// Determinism:
+//   - The expected functional outcome is deterministic.
+//   - The timeout is only a CI safety boundary for non-termination regressions.
+//
+// Complexity:
+//   - Correct implementation completes in O(c), where c is the inspected cycle prefix.
+//   - Space O(c).
+//
+// Notes:
+//   - Result maps are deliberately malformed to exercise defensive public behavior.
+//
+// AI-Hints:
+//   - Do not remove this regression merely because Dijkstra-generated Prev is acyclic.
+//   - Result is caller-owned and publicly constructible.
+func TestResult_PathTo_CyclicPredecessorChain(t *testing.T) {
+	result := &dijkstra.Result{
+		SourceID: resultTestSourceID,
+		Distances: map[string]float64{
+			resultTestSourceID:      resultTestDistanceSource,
+			resultTestCycleLeftID:   1.0,
+			resultTestCycleRightID:  2.0,
+			resultTestCycleTargetID: 3.0,
+		},
+		Prev: map[string]string{
+			resultTestSourceID:      "",
+			resultTestCycleTargetID: resultTestCycleLeftID,
+			resultTestCycleLeftID:   resultTestCycleRightID,
+			resultTestCycleRightID:  resultTestCycleLeftID,
+		},
+	}
+
+	type pathOutcome struct {
+		path       []string
+		err        error
+		panicValue any
+	}
+
+	outcomeChannel := make(chan pathOutcome, 1)
+
+	go func() {
+		outcome := pathOutcome{}
+
+		defer func() {
+			outcome.panicValue = recover()
+			outcomeChannel <- outcome
+		}()
+
+		outcome.path, outcome.err = result.PathTo(resultTestCycleTargetID)
+	}()
+
+	timer := time.NewTimer(resultTestCycleGuardTimeout)
+	defer timer.Stop()
+
+	select {
+	case outcome := <-outcomeChannel:
+		if outcome.panicValue != nil {
+			t.Fatalf("PathTo panicked on cyclic Prev: %v", outcome.panicValue)
+		}
+
+		mustNilState(t, outcome.path, true, "PathTo cyclic predecessor path")
+		mustErrorIs(t, outcome.err, dijkstra.ErrNoPath)
+
+	case <-timer.C:
+		t.Fatalf(
+			"PathTo(%q) did not terminate within %v; cyclic predecessor regression",
+			resultTestCycleTargetID,
+			resultTestCycleGuardTimeout,
+		)
+	}
+}
+
+// TestResult_PathTo_PredecessorOutsideResultDomain verifies that PathTo rejects
+// a predecessor identifier absent from Distances.
+//
+// Implementation:
+//   - Stage 1: Construct a finite target and a predecessor chain that leaves the domain.
+//   - Stage 2: Query PathTo.
+//   - Stage 3: Assert nil path and ErrNoPath.
+//
+// Behavior highlights:
+//   - Prev cannot introduce vertices that are absent from the result domain.
+//   - Finite target distance alone does not authorize witness fabrication.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on non-nil path or wrong sentinel.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time O(k), Space O(k), for the short malformed chain.
+//
+// Notes:
+//   - The foreign parent deliberately has a Prev entry but no Distances entry.
+//
+// AI-Hints:
+//   - Keep domain validation separate from missing-map-entry validation.
+func TestResult_PathTo_PredecessorOutsideResultDomain(t *testing.T) {
+	result := &dijkstra.Result{
+		SourceID: resultTestSourceID,
+		Distances: map[string]float64{
+			resultTestSourceID: resultTestDistanceSource,
+			resultTestTargetID: resultTestDistanceTarget,
+		},
+		Prev: map[string]string{
+			resultTestSourceID:        "",
+			resultTestTargetID:        resultTestForeignParentID,
+			resultTestForeignParentID: resultTestSourceID,
+		},
+	}
+
+	path, err := result.PathTo(resultTestTargetID)
+
+	mustNilState(t, path, true, "PathTo foreign predecessor path")
+	mustErrorIs(t, err, dijkstra.ErrNoPath)
 }

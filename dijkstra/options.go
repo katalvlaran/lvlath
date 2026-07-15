@@ -5,7 +5,7 @@ package dijkstra
 
 import "math"
 
-// DijkstraOptions defines the explicit runtime policy for a single Dijkstra execution.
+// Options defines the explicit runtime policy for a single Dijkstra execution.
 // The structure contains only contract-changing options that affect path tracking,
 // distance cutoffs, and edge-wall interpretation.
 //
@@ -25,7 +25,7 @@ import "math"
 //   - InfEdgeThreshold: treats edges with weight greater than or equal to this threshold as impassable.
 //
 // Returns:
-//   - DijkstraOptions: a detached value object consumed by the API and kernel.
+//   - Options: a detached value object consumed by the API and kernel.
 //
 // Errors:
 //   - Option constructors report configuration errors through their returned Option functions.
@@ -43,13 +43,13 @@ import "math"
 // AI-Hints:
 //   - Do not move sourceID back into options; that weakens the input contract.
 //   - Do not reintroduce MemoryMode or other dormant switches that do not alter real semantics.
-type DijkstraOptions struct {
+type Options struct {
 	TrackPaths       bool
 	MaxDistance      float64
 	InfEdgeThreshold float64
 }
 
-// Option applies a single configuration mutation to DijkstraOptions and may reject
+// Option applies a single configuration mutation to Options and may reject
 // invalid input with a sentinel error.
 //
 // Implementation:
@@ -62,7 +62,7 @@ type DijkstraOptions struct {
 //   - Last writer wins when multiple options target the same field.
 //
 // Inputs:
-//   - *DijkstraOptions: the mutable configuration under construction.
+//   - *Options: the mutable configuration under construction.
 //
 // Returns:
 //   - error: nil on success, or a sentinel configuration error.
@@ -79,11 +79,15 @@ type DijkstraOptions struct {
 //
 // Notes:
 //   - Panic-based option validation is forbidden.
+//   - Positive infinity in MaxDistance or InfEdgeThreshold belongs exclusively
+//     to the runtime-policy domain and does not permit non-finite edge weights.
 //
 // AI-Hints:
 //   - Functional options are part of the public contract; return errors instead of panicking.
 //   - Keep options side-effect free beyond mutating the provided config value.
-type Option func(*DijkstraOptions) error
+//   - Caller-defined Option values are revalidated by canonical assembly.
+//   - Do not add exported TestOnly bridges to observe applyOptions.
+type Option func(*Options) error
 
 // DefaultOptions returns the canonical baseline configuration for a single Dijkstra run.
 //
@@ -100,7 +104,7 @@ type Option func(*DijkstraOptions) error
 //   - None.
 //
 // Returns:
-//   - DijkstraOptions: the canonical default configuration.
+//   - Options: the canonical default configuration.
 //
 // Errors:
 //   - None.
@@ -116,8 +120,8 @@ type Option func(*DijkstraOptions) error
 //
 // AI-Hints:
 //   - Keep +Inf as the explicit "no limit" policy; do not replace it with arbitrary large finite numbers.
-func DefaultOptions() DijkstraOptions {
-	return DijkstraOptions{
+func DefaultOptions() Options {
+	return Options{
 		TrackPaths:       false,
 		MaxDistance:      math.Inf(1),
 		InfEdgeThreshold: math.Inf(1),
@@ -156,234 +160,186 @@ func DefaultOptions() DijkstraOptions {
 //   - Tracking predecessors is a contract-level request and should remain explicit.
 //   - Do not infer it implicitly from wrapper internals except in dedicated wrapper APIs.
 func WithPathTracking() Option {
-	return func(opts *DijkstraOptions) error {
+	return func(opts *Options) error {
 		opts.TrackPaths = true
 		return nil
 	}
 }
 
-// WithMaxDistance limits exploration to shortest paths whose distance does not
-// exceed the provided bound.
+// WithMaxDistance sets an inclusive upper bound for published finite
+// shortest-path distances.
+// The option limits traversal by total accumulated path cost and does not alter
+// the graph or classify individual edges as invalid.
 //
 // Implementation:
-//   - Stage 1: Validate the numeric input.
-//   - Stage 2: Store the accepted bound in the config.
+//   - Stage 1: Reject NaN, negative infinity, and finite negative values.
+//   - Stage 2: Accept finite non-negative values or positive infinity.
+//   - Stage 3: Store the accepted value as the execution MaxDistance policy.
 //
 // Behavior highlights:
-//   - Positive infinity means "no distance cutoff".
-//   - Distances beyond the cutoff remain +Inf in the final result.
+//   - The bound is inclusive: a candidate distance equal to max remains admissible.
+//   - A candidate distance greater than max is not relaxed.
+//   - When the minimum frontier item exceeds max, traversal terminates.
+//   - Positive infinity means “no distance cutoff”.
+//   - Vertices excluded by the cutoff remain known in Result.Distances with +Inf.
 //
 // Inputs:
-//   - max: the maximum allowed shortest-path distance.
+//   - max: the inclusive maximum accumulated path distance.
+//     Valid domain: finite max >= 0 or +Inf.
 //
 // Returns:
-//   - Option: a functional option that updates MaxDistance.
+//   - Option: a deterministic functional option that updates MaxDistance.
 //
 // Errors:
-//   - ErrBadMaxDistance if max is NaN, negative, or negative infinity.
+//   - ErrBadMaxDistance if max is NaN, -Inf, or a finite negative value.
 //
 // Determinism:
-//   - The accepted value is applied exactly as provided.
+//   - The accepted value is stored exactly.
+//   - Repeated MaxDistance options follow call order and last-writer-wins semantics.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - Zero is valid and keeps only the source at finite distance unless zero-cost edges extend reachability.
+//   - Zero is valid. It allows the source and any vertices reachable exclusively
+//     through zero-weight paths to retain finite distance.
+//   - Positive infinity belongs to the option domain and does not permit +Inf
+//     graph-edge weights.
 //
 // AI-Hints:
-//   - Do not reject +Inf; it is the canonical "no cutoff" value.
-//   - Do not silently clamp bad values; reject them explicitly.
+//   - Do not replace +Inf with an arbitrary large finite constant.
+//   - Do not silently clamp invalid input.
+//   - Do not confuse MaxDistance with InfEdgeThreshold: MaxDistance governs total
+//     path cost, while InfEdgeThreshold governs each individual edge.
 func WithMaxDistance(max float64) Option {
-	return func(opts *DijkstraOptions) error {
-		switch {
-		case math.IsNaN(max):
-			return ErrBadMaxDistance
-		case math.IsInf(max, -1):
-			return ErrBadMaxDistance
-		case max < 0:
-			return ErrBadMaxDistance
-		default:
-			opts.MaxDistance = max
-			return nil
+	return func(options *Options) error {
+		if err := validateMaxDistance(max); err != nil {
+			return err
 		}
+
+		options.MaxDistance = max
+
+		return nil
 	}
 }
 
-// WithInfEdgeThreshold defines the edge weight at or above which edges are treated
-// as impassable walls by the traversal kernel.
+// WithInfEdgeThreshold sets an inclusive edge-local wall threshold.
+// Every valid finite edge whose weight is greater than or equal to threshold
+// is skipped during relaxation without mutating graph topology.
 //
 // Implementation:
-//   - Stage 1: Validate the numeric threshold.
-//   - Stage 2: Store the accepted threshold in the config.
+//   - Stage 1: Reject NaN, negative infinity, zero, and finite negative values.
+//   - Stage 2: Accept a finite strictly positive threshold or positive infinity.
+//   - Stage 3: Store the accepted value as the execution wall policy.
 //
 // Behavior highlights:
-//   - Positive infinity means "no finite edge is blocked by threshold".
-//   - Finite edges with weight >= threshold are skipped during relaxation.
+//   - The comparison is inclusive: weight == threshold is blocked.
+//   - Positive infinity means that no valid finite edge is blocked.
+//   - The option changes edge admissibility, not edge validity.
+//   - Blocking every route to a known vertex leaves its published distance at +Inf.
 //
 // Inputs:
-//   - threshold: the minimum weight treated as a wall.
+//   - threshold: the minimum finite edge weight treated as impassable.
+//     Valid domain: finite threshold > 0 or +Inf.
 //
 // Returns:
-//   - Option: a functional option that updates InfEdgeThreshold.
+//   - Option: a deterministic functional option that updates InfEdgeThreshold.
 //
 // Errors:
-//   - ErrBadInfEdgeThreshold if threshold is NaN, non-positive, or negative infinity.
+//   - ErrBadInfEdgeThreshold if threshold is NaN, -Inf, zero,
+//     or a finite negative value.
 //
 // Determinism:
-//   - The accepted threshold is applied exactly as provided.
+//   - The accepted value is stored exactly.
+//   - Repeated threshold options follow call order and last-writer-wins semantics.
 //
 // Complexity:
 //   - Time O(1), Space O(1).
 //
 // Notes:
-//   - A zero threshold would incorrectly classify zero-weight edges as impassable and is therefore invalid.
+//   - Positive infinity is a policy-domain sentinel meaning “disable finite-edge
+//     wall filtering”; it is not a valid core.Edge.Weight.
+//   - Threshold policy is independent of MaxDistance.
+//   - Zero is invalid because valid zero-weight edges must remain traversable.
 //
 // AI-Hints:
-//   - Keep this policy explicit; do not hide wall semantics behind undocumented heuristics.
-//   - Do not collapse this option into MaxDistance; they govern different stages of the algorithm.
+//   - Do not reinterpret this option as permission to store +Inf edge weights.
+//   - Keep the wall comparison as weight >= threshold.
+//   - Do not merge this option with MaxDistance; one is edge-local and the other
+//     governs accumulated path cost.
 func WithInfEdgeThreshold(threshold float64) Option {
-	return func(opts *DijkstraOptions) error {
-		switch {
-		case math.IsNaN(threshold):
-			return ErrBadInfEdgeThreshold
-		case math.IsInf(threshold, -1):
-			return ErrBadInfEdgeThreshold
-		case threshold <= 0:
-			return ErrBadInfEdgeThreshold
-		default:
-			opts.InfEdgeThreshold = threshold
-			return nil
+	return func(options *Options) error {
+		if err := validateInfEdgeThreshold(threshold); err != nil {
+			return err
 		}
+
+		options.InfEdgeThreshold = threshold
+
+		return nil
 	}
 }
 
-// applyOptions builds the finalized Dijkstra configuration from the canonical defaults
-// and the provided functional options.
+// applyOptions builds the finalized Dijkstra configuration from the canonical
+// defaults and the provided functional options.
+// The assembler validates both option-returned errors and the complete state
+// produced by every option.
 //
 // Implementation:
 //   - Stage 1: Start from DefaultOptions.
-//   - Stage 2: Apply each option in call order.
-//   - Stage 3: Stop on the first configuration failure.
+//   - Stage 2: Reject nil option functions.
+//   - Stage 3: Apply each option in caller-provided order.
+//   - Stage 4: Revalidate the complete config after every option.
+//   - Stage 5: Publish the finalized detached value.
 //
 // Behavior highlights:
 //   - Nil options are rejected explicitly.
-//   - Last writer wins when multiple options target the same field.
+//   - Last writer wins when repeated valid options target the same field.
+//   - Caller-defined options cannot bypass numeric invariants.
+//   - Assembly stops at the first option or finalized-state failure.
 //
 // Inputs:
 //   - opts: zero or more functional options.
 //
 // Returns:
-//   - DijkstraOptions: the finalized runtime policy.
-//   - error: a sentinel configuration error when option assembly fails.
+//   - Options: the finalized runtime policy.
+//   - error: nil on success or the first option/configuration failure.
 //
 // Errors:
 //   - ErrNilOption if a nil option is encountered.
-//   - Any error returned by an individual option.
+//   - ErrBadMaxDistance if an option leaves MaxDistance invalid.
+//   - ErrBadInfEdgeThreshold if an option leaves InfEdgeThreshold invalid.
+//   - Any error returned directly by an option.
 //
 // Determinism:
-//   - Option application order is stable and equals the caller-provided order.
+//   - Option application and validation follow exact caller-provided order.
 //
 // Complexity:
 //   - Time O(n), Space O(1), where n is the number of options.
 //
 // Notes:
-//   - This function performs configuration assembly only; it does not inspect the graph.
+//   - This function performs configuration assembly only.
+//   - It does not inspect graph topology or allocate traversal state.
 //
 // AI-Hints:
-//   - Keep all option finalization centralized here instead of scattering it across API entry points.
-//   - Do not add hidden default-repair logic that silently changes caller intent.
-func applyOptions(opts ...Option) (DijkstraOptions, error) {
+//   - Keep this helper unexported.
+//   - Do not create production TestOnly bridges around it.
+//   - Do not remove finalized-state validation merely because built-in options
+//     already validate their own payloads.
+func applyOptions(opts ...Option) (Options, error) {
 	config := DefaultOptions()
 
-	for _, opt := range opts {
-		if opt == nil {
-			return DijkstraOptions{}, ErrNilOption
+	for _, option := range opts {
+		if option == nil {
+			return Options{}, ErrNilOption
 		}
-		if err := opt(&config); err != nil {
-			return DijkstraOptions{}, err
+
+		if err := option(&config); err != nil {
+			return Options{}, err
+		}
+		if err := validateOptions(config); err != nil {
+			return Options{}, err
 		}
 	}
 
 	return config, nil
-}
-
-//////////////////////////////////////////////////////////////////////
-//
-//  Everything below is strictly for testing purposes. !! TEST ONLY !!
-//
-//////////////////////////////////////////////////////////////////////
-
-// DefaultOptionsSnapshot_TestOnly returns the canonical default option snapshot
-// for external contract tests.
-//
-// Implementation:
-//   - Stage 1: Delegate to DefaultOptions.
-//   - Stage 2: Return the detached snapshot unchanged.
-//
-// Behavior highlights:
-//   - This helper exposes the documented default configuration to external tests.
-//   - The helper does not mutate package state.
-//
-// Inputs:
-//   - None.
-//
-// Returns:
-//   - DijkstraOptions: the canonical default option snapshot.
-//
-// Errors:
-//   - None.
-//
-// Determinism:
-//   - Always returns the same value for the same package version.
-//
-// Complexity:
-//   - Time O(1), Space O(1).
-//
-// Notes:
-//   - This helper exists only to support external test-package contract verification.
-//
-// AI-Hints:
-//   - Keep this helper as a thin bridge to the canonical default constructor.
-//   - Do not add hidden normalization or extra policy changes here.
-func DefaultOptionsSnapshot_TestOnly() DijkstraOptions {
-	return DefaultOptions()
-}
-
-// GatherOptionsSnapshot_TestOnly applies functional options through the canonical
-// internal assembly path and returns the finalized option snapshot for external tests.
-//
-// Implementation:
-//   - Stage 1: Delegate directly to applyOptions.
-//   - Stage 2: Return the finalized snapshot or the assembly error unchanged.
-//
-// Behavior highlights:
-//   - This helper exposes the real option assembly semantics to external tests.
-//   - Last-writer-wins and nil-option behavior remain exactly those of applyOptions.
-//
-// Inputs:
-//   - opts: zero or more functional options.
-//
-// Returns:
-//   - DijkstraOptions: the finalized option snapshot.
-//   - error: any canonical option-assembly error.
-//
-// Errors:
-//   - ErrNilOption if a nil option is encountered.
-//   - Any error returned by an individual option.
-//
-// Determinism:
-//   - Deterministic for the same option sequence.
-//
-// Complexity:
-//   - Time O(n), Space O(1), where n is the number of options.
-//
-// Notes:
-//   - This helper exists only to support external test-package contract verification.
-//
-// AI-Hints:
-//   - Keep this helper a direct bridge to applyOptions.
-//   - Do not fork option-assembly logic for tests.
-func GatherOptionsSnapshot_TestOnly(opts ...Option) (DijkstraOptions, error) {
-	return applyOptions(opts...)
 }

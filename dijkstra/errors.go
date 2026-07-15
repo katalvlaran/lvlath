@@ -60,22 +60,43 @@ var (
 	//   - Never replace this with panic-based configuration handling.
 	ErrNilOption = errors.New("dijkstra: nil option")
 
-	// ErrBadMaxDistance reports that MaxDistance violates the public option contract.
-	// Valid values are finite non-negative numbers or positive infinity.
-	// This error originates during option application.
+	// ErrBadMaxDistance reports that MaxDistance violates the option-domain contract.
+	// Valid values are finite non-negative numbers and positive infinity.
+	// The error originates during option assembly before traversal allocation begins.
 	//
 	// AI-Hints:
-	//   - NaN and negative infinity are invalid here.
-	//   - Positive infinity is allowed and means "no distance cutoff".
+	//   - NaN, negative infinity, and finite negative values are invalid.
+	//   - Positive infinity is a policy-domain value meaning “no distance cutoff”.
+	//   - Positive infinity here does not authorize +Inf graph-edge weights.
 	ErrBadMaxDistance = errors.New("dijkstra: max distance must be >= 0 and not NaN")
 
-	// ErrBadInfEdgeThreshold reports that InfEdgeThreshold violates the public option
-	// contract. Valid values are strictly positive numbers or positive infinity.
-	// This error originates during option application.
+	// ErrDistanceOverflow reports that a shortest-path candidate cannot be represented
+	// as a finite float64 even though both the finalized current distance and the
+	// traversed edge weight are individually valid finite values.
+	// The error originates during relaxation before candidate state is published.
+	//
+	// Behavior highlights:
+	//   - The overflowed candidate is not converted into an unreachable +Inf result.
+	//   - The package returns nil result plus this error because partial shortest-path
+	//     state is not part of the public contract.
 	//
 	// AI-Hints:
-	//   - A zero threshold would incorrectly classify zero-weight edges as walls.
-	//   - Positive infinity is allowed and preserves the default "no wall threshold" mode.
+	//   - Preserve this sentinel with %w when attaching edge and distance context.
+	//   - Do not collapse arithmetic overflow into ErrInvalidWeight; the input edge
+	//     itself may be completely valid.
+	//   - Do not publish +Inf for an overflowed reachable route; +Inf is reserved for
+	//     known vertices with no admissible representable path.
+	ErrDistanceOverflow = errors.New("dijkstra: distance overflow")
+
+	// ErrBadInfEdgeThreshold reports that InfEdgeThreshold violates the option-domain
+	// contract. Valid values are finite strictly positive numbers and positive infinity.
+	// The error originates during option assembly before traversal allocation begins.
+	//
+	// AI-Hints:
+	//   - Zero is invalid because the comparison uses weight >= threshold and would
+	//     therefore block valid zero-weight edges.
+	//   - Positive infinity means that no finite edge is blocked by threshold policy.
+	//   - Positive infinity here is a policy-domain sentinel, not a valid edge weight.
 	ErrBadInfEdgeThreshold = errors.New("dijkstra: inf edge threshold must be > 0 and not NaN")
 
 	// ErrNegativeWeight reports that a finite negative edge weight was encountered.
@@ -87,13 +108,15 @@ var (
 	//   - Do not merge negative finite weights with NaN or -Inf into one vague error class.
 	ErrNegativeWeight = errors.New("dijkstra: negative edge weight encountered")
 
-	// ErrInvalidWeight reports that an edge weight is numerically invalid for this
-	// package, such as NaN or negative infinity. This error originates during
-	// numeric validation before the invalid value can poison heap ordering or distances.
+	// ErrInvalidWeight reports that an edge weight is non-finite.
+	// This includes NaN, positive infinity, and negative infinity.
+	// The error originates during defensive numeric validation before an invalid
+	// value can affect heap ordering, distance arithmetic, or result semantics.
 	//
 	// AI-Hints:
 	//   - Preserve this sentinel when wrapping with edge context.
-	//   - Positive infinity is not classified here when the package treats it as a wall.
+	//   - Positive infinity is valid for result distances and unbounded options,
+	//     but it is not a valid core edge weight.
 	ErrInvalidWeight = errors.New("dijkstra: invalid non-finite edge weight")
 
 	// ErrPathTrackingDisabled reports that the caller requested path reconstruction
@@ -105,13 +128,20 @@ var (
 	//   - Keep this distinct from ErrNoPath.
 	ErrPathTrackingDisabled = errors.New("dijkstra: path tracking disabled")
 
-	// ErrNoPath reports that the requested target vertex is known to the result,
-	// but no path exists from the source under the effective traversal policy.
-	// This error originates from result-surface methods such as PathTo.
+	// ErrNoPath reports that a known target has no reconstructable path witness
+	// under the stored result state.
+	// The error originates from Result.PathTo when path tracking is enabled but a
+	// valid source-anchored predecessor chain cannot be produced.
+	//
+	// Behavior highlights:
+	//   - A known target with distance +Inf has no path under the effective policy.
+	//   - A finite target with a broken, out-of-domain, or cyclic caller-mutated
+	//     predecessor chain also has no publishable witness.
 	//
 	// AI-Hints:
-	//   - Unreachable is a normal shortest-path outcome, not a validation failure.
+	//   - Unreachable is a normal shortest-path outcome.
 	//   - Keep this distinct from ErrTargetNotFound and ErrPathTrackingDisabled.
+	//   - Do not let malformed Prev state produce a partial path or infinite loop.
 	ErrNoPath = errors.New("dijkstra: no path")
 
 	// ErrEmptyTargetID reports that the caller passed an empty target vertex ID.
@@ -124,11 +154,11 @@ var (
 	ErrEmptyTargetID = errors.New("dijkstra: target vertex id is empty")
 
 	// ErrNilResult reports that a result-surface method was called on a nil
-	// *DijkstraResult receiver. This error originates from result helper methods
+	// *Result receiver. This error originates from result helper methods
 	// and prevents nil-pointer panics from leaking into the public API.
 	//
 	// AI-Hints:
-	//   - DijkstraResult implements core.Nilable, but methods must still remain safe on nil receivers.
+	//   - Result implements core.Nilable, but methods must still remain safe on nil receivers.
 	//   - Do not replace this with a panic or with ErrTargetNotFound.
 	ErrNilResult = errors.New("dijkstra: result is nil")
 )

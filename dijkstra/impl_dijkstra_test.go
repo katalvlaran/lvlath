@@ -20,6 +20,11 @@ import (
 //   - Prefer exact assertions when the contract guarantees exact deterministic output.
 //   - Regression anchors must stay narrow and mathematically honest.
 //   - Do not weaken deterministic predecessor/path checks into unordered comparisons.
+//   - Non-finite edge tests must corrupt an already published edge deliberately;
+//     core.AddEdge itself must reject non-finite input.
+//   - Distance overflow must return nil Result and ErrDistanceOverflow.
+//   - A finite MaxDistance must prune an already out-of-policy overflowing
+//     candidate before addition.
 
 const (
 	// testVertexSource is the canonical source vertex used in most fixtures.
@@ -220,55 +225,131 @@ func TestDijkstra_NegativeWeight_PreScan(t *testing.T) {
 	mustErrorIs(t, err, dijkstra.ErrNegativeWeight)
 }
 
-// TestDijkstra_NaNWeight_PreScan verifies that NaN edge weights are rejected
-// before they can poison frontier ordering or distances.
+// TestDijkstra_NaNWeight_PreScan verifies that defensive numeric validation
+// rejects a graph whose published edge was corrupted to contain NaN.
 //
 // Implementation:
-//   - Stage 1: Construct a weighted graph with one NaN edge.
-//   - Stage 2: Call Dijkstra from a valid source.
-//   - Stage 3: Assert ErrInvalidWeight through the sentinel protocol.
+//   - Stage 1: Construct a valid weighted graph with a finite edge.
+//   - Stage 2: Obtain the published edge and deliberately violate core's
+//     edge-immutability convention by assigning NaN.
+//   - Stage 3: Run Dijkstra from the valid source.
+//   - Stage 4: Assert ErrInvalidWeight and nil result publication.
 //
 // Behavior highlights:
-//   - NaN is invalid numeric input for the package.
+//   - core.AddEdge itself rejects NaN, so corruption is deliberate.
+//   - Dijkstra preserves an independent defensive numeric boundary.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on fixture construction, lookup, wrong sentinel,
+//     or non-nil result publication.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time dominated by deterministic edge pre-scan; Space O(V+E) for the fixture.
+//
+// Notes:
+//   - This is not a valid public graph-construction pattern.
+//   - The test intentionally simulates caller-visible edge corruption.
 //
 // AI-Hints:
-//   - Keep NaN coverage explicit because it is a live classifier branch.
+//   - Do not replace the finite setup edge with AddEdge(..., math.NaN());
+//     core must reject that call before Dijkstra can be tested.
 func TestDijkstra_NaNWeight_PreScan(t *testing.T) {
-	graph, _ := core.NewGraph(core.WithWeighted())
-
-	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.NaN()); err != nil {
-		t.Fatalf("AddEdge(%q,%q,NaN) failed: %v", testVertexSource, testVertexMiddle, err)
+	graph, err := core.NewGraph(core.WithWeighted())
+	if err != nil {
+		t.Fatalf("NewGraph(WithWeighted) failed: %v", err)
 	}
+
+	edgeID, err := graph.AddEdge(
+		testVertexSource,
+		testVertexMiddle,
+		testWeightOne,
+	)
+	if err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", testVertexSource, testVertexMiddle, err)
+	}
+
+	edge, err := graph.GetEdge(edgeID)
+	if err != nil {
+		t.Fatalf("GetEdge(%q) failed: %v", edgeID, err)
+	}
+
+	edge.Weight = math.NaN()
 
 	result, err := dijkstra.Dijkstra(graph, testVertexSource)
 
-	mustNilState(t, result, true, "Dijkstra(NaN weight) result")
+	mustNilState(t, result, true, "Dijkstra result after NaN edge corruption")
 	mustErrorIs(t, err, dijkstra.ErrInvalidWeight)
 }
 
-// TestDijkstra_NegativeInfinityWeight_PreScan verifies that negative infinity
-// edge weights are rejected before traversal begins.
+// TestDijkstra_NegativeInfinityWeight_PreScan verifies that defensive numeric
+// validation rejects a graph whose published edge was corrupted to contain -Inf.
 //
 // Implementation:
-//   - Stage 1: Construct a weighted graph with one -Inf edge.
-//   - Stage 2: Call Dijkstra from a valid source.
-//   - Stage 3: Assert ErrInvalidWeight through the sentinel protocol.
+//   - Stage 1: Construct a valid weighted graph with a finite edge.
+//   - Stage 2: Deliberately replace the published edge weight with -Inf.
+//   - Stage 3: Run Dijkstra from the valid source.
+//   - Stage 4: Assert ErrInvalidWeight and nil result publication.
 //
 // Behavior highlights:
-//   - -Inf is invalid numeric input for the package.
+//   - -Inf belongs to the invalid non-finite class, not the finite-negative class.
+//   - The package must not misclassify this corruption as ErrNegativeWeight.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on fixture construction, lookup, wrong sentinel,
+//     or non-nil result publication.
+//
+// Determinism:
+//   - Deterministic.
+//
+// Complexity:
+//   - Time dominated by deterministic edge pre-scan; Space O(V+E) for the fixture.
+//
+// Notes:
+//   - The test intentionally violates core's published-edge immutability convention.
 //
 // AI-Hints:
-//   - Keep -Inf coverage explicit because it is distinct from finite negative weights.
+//   - Preserve the ErrInvalidWeight classification for both infinities.
+//   - Do not construct the invalid value through core.AddEdge.
 func TestDijkstra_NegativeInfinityWeight_PreScan(t *testing.T) {
-	graph, _ := core.NewGraph(core.WithWeighted())
-
-	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.Inf(-1)); err != nil {
-		t.Fatalf("AddEdge(%q,%q,-Inf) failed: %v", testVertexSource, testVertexMiddle, err)
+	graph, err := core.NewGraph(core.WithWeighted())
+	if err != nil {
+		t.Fatalf("NewGraph(WithWeighted) failed: %v", err)
 	}
+
+	edgeID, err := graph.AddEdge(
+		testVertexSource,
+		testVertexMiddle,
+		testWeightOne,
+	)
+	if err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", testVertexSource, testVertexMiddle, err)
+	}
+
+	edge, err := graph.GetEdge(edgeID)
+	if err != nil {
+		t.Fatalf("GetEdge(%q) failed: %v", edgeID, err)
+	}
+
+	edge.Weight = math.Inf(-1)
 
 	result, err := dijkstra.Dijkstra(graph, testVertexSource)
 
-	mustNilState(t, result, true, "Dijkstra(-Inf weight) result")
+	mustNilState(t, result, true, "Dijkstra result after -Inf edge corruption")
 	mustErrorIs(t, err, dijkstra.ErrInvalidWeight)
 }
 
@@ -571,7 +652,7 @@ func TestDijkstra_MaxDistanceCutoff(t *testing.T) {
 //   - Heavy finite edges may be legal graph data yet intentionally non-traversable.
 //
 // AI-Hints:
-//   - Keep threshold-wall coverage separate from +Inf-edge wall coverage.
+//   - Keep finite threshold-wall policy separate from non-finite edge validation.
 func TestDijkstra_InfEdgeThresholdWall(t *testing.T) {
 	graph, _ := core.NewGraph(core.WithWeighted())
 
@@ -745,36 +826,210 @@ func TestDijkstra_TieBreakEqualShortestPaths(t *testing.T) {
 	assertPathEqual(t, path, []string{testVertexSource, testVertexMiddle, testVertexTarget})
 }
 
-// TestDijkstra_PrevNilWhenPathTrackingDisabled verifies that predecessor storage
-// stays absent unless path tracking is requested explicitly.
+// TestDijkstra_PrevNilWhenPathTrackingDisabled verifies that disabling
+// predecessor tracking affects only witness storage and does not weaken
+// shortest-distance or reachability semantics.
 //
 // Implementation:
-//   - Stage 1: Construct a weighted graph.
+//   - Stage 1: Build a directed weighted graph with seven edges, competing routes,
+//     and one explicitly isolated vertex.
 //   - Stage 2: Run Dijkstra without WithPathTracking.
-//   - Stage 3: Assert that Prev remains nil.
-//   - Stage 4: Assert that PathTo fails with ErrPathTrackingDisabled.
+//   - Stage 3: Assert exact distance-domain size and all expected distances.
+//   - Stage 4: Assert reachable and unreachable HasPathTo outcomes.
+//   - Stage 5: Assert Prev remains nil.
+//   - Stage 6: Assert PathTo reports ErrPathTrackingDisabled for a reachable target.
 //
 // Behavior highlights:
-//   - Path tracking is explicit and opt-in.
-//   - Distances remain usable without predecessor storage.
+//   - Distance computation remains complete without predecessor allocation.
+//   - Strict improvements still replace inferior tentative distances.
+//   - Known unreachable vertices remain represented by +Inf.
+//   - Path reconstruction remains explicitly unavailable.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on fixture construction, unexpected traversal error,
+//     wrong distance, reachability mismatch, or path-tracking contract violation.
+//
+// Determinism:
+//   - Deterministic for the fixed directed topology and exact finite weights.
+//
+// Complexity:
+//   - Test traversal follows Dijkstra complexity for V=6 and E=7.
+//   - Test assertions are O(V).
+//
+// Notes:
+//   - This test protects the independence of distance and predecessor surfaces.
 //
 // AI-Hints:
-//   - Do not infer path tracking implicitly in the base API.
+//   - Do not allocate an empty Prev map when tracking is disabled.
+//   - Do not infer that nil Prev invalidates Distances or HasPathTo.
 func TestDijkstra_PrevNilWhenPathTrackingDisabled(t *testing.T) {
-	graph, _ := core.NewGraph(core.WithWeighted())
+	var (
+		sourceID   = "untracked:source"
+		northID    = "untracked:north"
+		southID    = "untracked:south"
+		mergeID    = "untracked:merge"
+		targetID   = "untracked:target"
+		isolatedID = "untracked:isolated"
 
-	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, testWeightOne); err != nil {
-		t.Fatalf("AddEdge(%q,%q,1) failed: %v", testVertexSource, testVertexMiddle, err)
-	}
+		sourceToNorthWeight = 4.0
+		sourceToSouthWeight = 2.0
+		southToNorthWeight  = 1.0
+		northToMergeWeight  = 2.0
+		southToMergeWeight  = 6.0
+		mergeToTargetWeight = 3.0
+		southToTargetWeight = 10.0
 
-	result, err := dijkstra.Dijkstra(graph, testVertexSource)
+		expectedVertexCount = 6
+		expectedEdgeCount   = 7
+
+		expectedNorthDistance  = 3.0
+		expectedSouthDistance  = 2.0
+		expectedMergeDistance  = 5.0
+		expectedTargetDistance = 8.0
+	)
+
+	graph, err := core.NewGraph(
+		core.WithDirected(true),
+		core.WithWeighted(),
+	)
 	if err != nil {
-		t.Fatalf("Dijkstra(%q) failed: %v", testVertexSource, err)
+		t.Fatalf("NewGraph(directed, weighted) failed: %v", err)
 	}
 
-	mustNilState(t, result.Prev, true, "Prev when path tracking disabled")
+	if _, err = graph.AddEdge(sourceID, northID, sourceToNorthWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, northID, err)
+	}
+	if _, err = graph.AddEdge(sourceID, southID, sourceToSouthWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, southID, err)
+	}
+	if _, err = graph.AddEdge(southID, northID, southToNorthWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", southID, northID, err)
+	}
+	if _, err = graph.AddEdge(northID, mergeID, northToMergeWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", northID, mergeID, err)
+	}
+	if _, err = graph.AddEdge(southID, mergeID, southToMergeWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", southID, mergeID, err)
+	}
+	if _, err = graph.AddEdge(mergeID, targetID, mergeToTargetWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", mergeID, targetID, err)
+	}
+	if _, err = graph.AddEdge(southID, targetID, southToTargetWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", southID, targetID, err)
+	}
+	if err = graph.AddVertex(isolatedID); err != nil {
+		t.Fatalf("AddVertex(%q) failed: %v", isolatedID, err)
+	}
 
-	_, err = result.PathTo(testVertexMiddle)
+	mustEqualInt(
+		t,
+		graph.VertexCount(),
+		expectedVertexCount,
+		"VertexCount: got=%d want=%d",
+		graph.VertexCount(),
+		expectedVertexCount,
+	)
+	mustEqualInt(
+		t,
+		graph.EdgeCount(),
+		expectedEdgeCount,
+		"EdgeCount: got=%d want=%d",
+		graph.EdgeCount(),
+		expectedEdgeCount,
+	)
+
+	result, err := dijkstra.Dijkstra(graph, sourceID)
+	if err != nil {
+		t.Fatalf("Dijkstra(%q) failed: %v", sourceID, err)
+	}
+
+	mustNilState(t, result, false, "untracked Dijkstra result")
+	mustNilState(t, result.Prev, true, "Prev when path tracking is disabled")
+	mustEqualString(
+		t,
+		result.SourceID,
+		sourceID,
+		"SourceID: got=%q want=%q",
+		result.SourceID,
+		sourceID,
+	)
+	mustEqualInt(
+		t,
+		len(result.Distances),
+		expectedVertexCount,
+		"Distances size: got=%d want=%d",
+		len(result.Distances),
+		expectedVertexCount,
+	)
+
+	expectedDistances := []struct {
+		vertexID string
+		want     float64
+	}{
+		{vertexID: sourceID, want: 0.0},
+		{vertexID: northID, want: expectedNorthDistance},
+		{vertexID: southID, want: expectedSouthDistance},
+		{vertexID: mergeID, want: expectedMergeDistance},
+		{vertexID: targetID, want: expectedTargetDistance},
+	}
+
+	for _, expected := range expectedDistances {
+		got, distanceErr := result.DistanceTo(expected.vertexID)
+		if distanceErr != nil {
+			t.Fatalf("DistanceTo(%q) failed: %v", expected.vertexID, distanceErr)
+		}
+
+		mustEqualFloat64(
+			t,
+			got,
+			expected.want,
+			"DistanceTo(%q): got=%v want=%v",
+			expected.vertexID,
+			got,
+			expected.want,
+		)
+	}
+
+	isolatedDistance, err := result.DistanceTo(isolatedID)
+	if err != nil {
+		t.Fatalf("DistanceTo(%q) failed: %v", isolatedID, err)
+	}
+	assertInfDistance(t, isolatedDistance)
+
+	targetReachable, err := result.HasPathTo(targetID)
+	if err != nil {
+		t.Fatalf("HasPathTo(%q) failed: %v", targetID, err)
+	}
+	mustEqualBool(
+		t,
+		targetReachable,
+		true,
+		"HasPathTo(%q): got=%v want=true",
+		targetID,
+		targetReachable,
+	)
+
+	isolatedReachable, err := result.HasPathTo(isolatedID)
+	if err != nil {
+		t.Fatalf("HasPathTo(%q) failed: %v", isolatedID, err)
+	}
+	mustEqualBool(
+		t,
+		isolatedReachable,
+		false,
+		"HasPathTo(%q): got=%v want=false",
+		isolatedID,
+		isolatedReachable,
+	)
+
+	path, err := result.PathTo(targetID)
+	mustNilState(t, path, true, "PathTo with tracking disabled")
 	mustErrorIs(t, err, dijkstra.ErrPathTrackingDisabled)
 }
 
@@ -835,37 +1090,169 @@ func TestDijkstra_PathTrackingEnabled(t *testing.T) {
 	assertPathEqual(t, path, []string{testVertexSource, testVertexMiddle, testVertexAlternative})
 }
 
-// TestDijkstra_InfiniteWeightActsAsWall verifies that +Inf edge weights are treated
-// as impassable walls rather than as invalid numeric input.
+// TestDijkstra_PositiveInfinityWeight_DefensivePreScan verifies that Dijkstra
+// rejects a corrupted graph containing a positive-infinity edge weight.
 //
-// Implementation:
-//   - Stage 1: Construct a weighted graph with one +Inf edge.
-//   - Stage 2: Run Dijkstra from the finite source.
-//   - Stage 3: Assert that the +Inf target remains unreachable with no validation error.
-//
-// Behavior highlights:
-//   - +Inf is valid graph data under this package contract.
-//   - Unreachable known targets remain present in the result domain with +Inf distance.
-//
-// AI-Hints:
-//   - Keep +Inf wall coverage separate from NaN and -Inf invalid-weight coverage.
-func TestDijkstra_InfiniteWeightActsAsWall(t *testing.T) {
-	graph, _ := core.NewGraph(core.WithWeighted())
-
-	if _, err := graph.AddEdge(testVertexSource, testVertexMiddle, math.Inf(1)); err != nil {
-		t.Fatalf("AddEdge(%q,%q,+Inf) failed: %v", testVertexSource, testVertexMiddle, err)
+// The test deliberately violates core's published-edge immutability law to
+// anchor Dijkstra's defensive validation boundary.
+func TestDijkstra_PositiveInfinityWeight_DefensivePreScan(t *testing.T) {
+	graph, err := core.NewGraph(core.WithWeighted())
+	if err != nil {
+		t.Fatalf("NewGraph() failed: %v", err)
 	}
+
+	edgeID, err := graph.AddEdge(testVertexSource, testVertexMiddle, 1)
+	if err != nil {
+		t.Fatalf(
+			"AddEdge(%q,%q,1) failed: %v",
+			testVertexSource,
+			testVertexMiddle,
+			err,
+		)
+	}
+
+	edge, err := graph.GetEdge(edgeID)
+	if err != nil {
+		t.Fatalf("GetEdge(%q) failed: %v", edgeID, err)
+	}
+
+	// Deliberate contract corruption:
+	// published core.Edge fields are immutable by convention.
+	edge.Weight = math.Inf(1)
 
 	result, err := dijkstra.Dijkstra(graph, testVertexSource)
+	mustErrorIs(t, err, dijkstra.ErrInvalidWeight)
+	mustNilState(t, result, true, "Dijkstra result after +Inf edge corruption")
+}
+
+// TestDijkstra_DistanceOverflow verifies that a required candidate sum exceeding
+// the finite float64 range is classified explicitly and never published as +Inf.
+//
+// Implementation:
+//   - Stage 1: Build a directed graph with a normal finite routing region.
+//   - Stage 2: Add a separate branch containing two individually valid
+//     math.MaxFloat64 edge weights.
+//   - Stage 3: Run Dijkstra without a finite MaxDistance cutoff.
+//   - Stage 4: Allow the finite region to be processed before the huge branch.
+//   - Stage 5: Trigger overflow while relaxing hugeNode -> overflowTarget.
+//   - Stage 6: Assert ErrDistanceOverflow and nil result publication.
+//
+// Behavior highlights:
+//   - Every stored edge weight is finite and valid.
+//   - The failure originates from accumulated-distance arithmetic, not edge validation.
+//   - Successfully processed internal state remains unpublished on error.
+//   - Overflow is not misreported as ordinary unreachability.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on graph construction, topology mismatch,
+//     wrong sentinel classification, or partial result publication.
+//
+// Determinism:
+//   - Deterministic for the fixed directed topology and heap-order contract.
+//
+// Complexity:
+//   - Test traversal follows Dijkstra complexity for the fixed V/E fixture.
+//   - The test intentionally reaches the late overflow branch.
+//
+// Notes:
+//   - math.MaxFloat64 is finite and therefore valid as an individual edge weight.
+//   - math.MaxFloat64 + math.MaxFloat64 overflows to positive infinity.
+//
+// AI-Hints:
+//   - Do not replace the finite operands with an invalid +Inf edge.
+//   - Keep the normal branch so this test also protects partial-result suppression
+//     after substantial successful internal work.
+func TestDijkstra_DistanceOverflow(t *testing.T) {
+	var (
+		sourceID         = "overflow:source"
+		fastAID          = "overflow:fast-a"
+		fastBID          = "overflow:fast-b"
+		alternativeID    = "overflow:alternative"
+		targetID         = "overflow:target"
+		tailID           = "overflow:tail"
+		hugeNodeID       = "overflow:huge-node"
+		overflowTargetID = "overflow:target-beyond-range"
+
+		sourceToFastAWeight     = 1.0
+		fastAToFastBWeight      = 2.0
+		fastBToTargetWeight     = 3.0
+		sourceToAlternative     = 4.0
+		alternativeToTarget     = 4.0
+		targetToTailWeight      = 1.0
+		fastBToTailWeight       = 10.0
+		representableHugeWeight = math.MaxFloat64
+
+		expectedEdgeCount = 9
+	)
+
+	graph, err := core.NewGraph(
+		core.WithDirected(true),
+		core.WithWeighted(),
+	)
 	if err != nil {
-		t.Fatalf("Dijkstra(%q) failed: %v", testVertexSource, err)
+		t.Fatalf("NewGraph(directed, weighted) failed: %v", err)
 	}
 
-	got, err := result.DistanceTo(testVertexMiddle)
-	if err != nil {
-		t.Fatalf("DistanceTo(%q) failed: %v", testVertexMiddle, err)
+	if _, err = graph.AddEdge(sourceID, fastAID, sourceToFastAWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, fastAID, err)
 	}
-	assertInfDistance(t, got)
+	if _, err = graph.AddEdge(fastAID, fastBID, fastAToFastBWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", fastAID, fastBID, err)
+	}
+	if _, err = graph.AddEdge(fastBID, targetID, fastBToTargetWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", fastBID, targetID, err)
+	}
+	if _, err = graph.AddEdge(sourceID, alternativeID, sourceToAlternative); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, alternativeID, err)
+	}
+	if _, err = graph.AddEdge(alternativeID, targetID, alternativeToTarget); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", alternativeID, targetID, err)
+	}
+	if _, err = graph.AddEdge(targetID, tailID, targetToTailWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", targetID, tailID, err)
+	}
+	if _, err = graph.AddEdge(fastBID, tailID, fastBToTailWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", fastBID, tailID, err)
+	}
+	if _, err = graph.AddEdge(
+		sourceID,
+		hugeNodeID,
+		representableHugeWeight,
+	); err != nil {
+		t.Fatalf("AddEdge(%q,%q,MaxFloat64) failed: %v", sourceID, hugeNodeID, err)
+	}
+	if _, err = graph.AddEdge(
+		hugeNodeID,
+		overflowTargetID,
+		representableHugeWeight,
+	); err != nil {
+		t.Fatalf(
+			"AddEdge(%q,%q,MaxFloat64) failed: %v",
+			hugeNodeID,
+			overflowTargetID,
+			err,
+		)
+	}
+
+	mustEqualInt(
+		t,
+		graph.EdgeCount(),
+		expectedEdgeCount,
+		"EdgeCount: got=%d want=%d",
+		graph.EdgeCount(),
+		expectedEdgeCount,
+	)
+
+	result, err := dijkstra.Dijkstra(graph, sourceID)
+
+	mustNilState(t, result, true, "Dijkstra result after distance overflow")
+	mustErrorIs(t, err, dijkstra.ErrDistanceOverflow)
 }
 
 // TestDijkstra_SourceToSelf_ZeroDistance verifies that the source remains at zero
@@ -1002,5 +1389,241 @@ func TestDijkstra_UnreachableRemainsInf(t *testing.T) {
 	mustEqualBool(t, hasPath, false, "HasPathTo(%q): got=%v want=false", testVertexUnreachable, hasPath)
 
 	_, err = result.PathTo(testVertexUnreachable)
+	mustErrorIs(t, err, dijkstra.ErrNoPath)
+}
+
+// TestDijkstra_MaxDistanceSkipsOverflowingOutOfPolicyCandidate verifies that a
+// finite MaxDistance cutoff is applied before arithmetic that would otherwise
+// overflow on an already excluded candidate.
+//
+// Implementation:
+//   - Stage 1: Build a directed weighted graph with an exact-boundary route,
+//     an out-of-radius continuation, a normal target route, and one huge branch.
+//   - Stage 2: Run Dijkstra with MaxDistance=10 and path tracking enabled.
+//   - Stage 3: Assert that the exact-boundary vertex remains reachable.
+//   - Stage 4: Assert that beyond-boundary and huge-branch targets remain +Inf.
+//   - Stage 5: Assert that no ErrDistanceOverflow is produced.
+//   - Stage 6: Reconstruct and validate the normal target path.
+//
+// Behavior highlights:
+//   - MaxDistance is inclusive.
+//   - An out-of-policy candidate is rejected before overflowing addition.
+//   - Known excluded vertices remain present with +Inf.
+//   - Valid in-radius routes remain fully usable.
+//
+// Inputs:
+//   - None.
+//
+// Returns:
+//   - None.
+//
+// Errors:
+//   - Fatal test failure on graph construction, unexpected traversal error,
+//     wrong distance, reachability mismatch, or path mismatch.
+//
+// Determinism:
+//   - Deterministic for the fixed directed topology and package tie-break law.
+//
+// Complexity:
+//   - Test traversal follows Dijkstra complexity for V=9 and E=8.
+//   - Assertion work is O(V).
+//
+// Notes:
+//   - The huge edge is individually finite and valid.
+//   - The active cutoff makes the overflowing candidate semantically irrelevant.
+//
+// AI-Hints:
+//   - Keep this test separate from TestDijkstra_DistanceOverflow.
+//   - The pair protects both arithmetic-failure and cutoff-before-addition branches.
+func TestDijkstra_MaxDistanceSkipsOverflowingOutOfPolicyCandidate(t *testing.T) {
+	var (
+		sourceID         = "cutoff:source"
+		nearAID          = "cutoff:near-a"
+		nearBID          = "cutoff:near-b"
+		boundaryID       = "cutoff:boundary"
+		beyondID         = "cutoff:beyond"
+		branchID         = "cutoff:branch"
+		targetID         = "cutoff:target"
+		hugeNodeID       = "cutoff:huge-node"
+		overflowTargetID = "cutoff:overflow-target"
+
+		sourceToNearAWeight  = 2.0
+		nearAToNearBWeight   = 2.0
+		nearBToBoundary      = 6.0
+		boundaryToBeyond     = 1.0
+		sourceToBranchWeight = 3.0
+		branchToTargetWeight = 4.0
+		sourceToHugeWeight   = 4.0
+		hugeOutgoingWeight   = math.MaxFloat64
+
+		maxDistance = 10.0
+
+		expectedVertexCount = 9
+		expectedEdgeCount   = 8
+
+		expectedNearADistance    = 2.0
+		expectedNearBDistance    = 4.0
+		expectedBoundaryDistance = 10.0
+		expectedBranchDistance   = 3.0
+		expectedTargetDistance   = 7.0
+		expectedHugeDistance     = 4.0
+	)
+
+	graph, err := core.NewGraph(
+		core.WithDirected(true),
+		core.WithWeighted(),
+	)
+	if err != nil {
+		t.Fatalf("NewGraph(directed, weighted) failed: %v", err)
+	}
+
+	if _, err = graph.AddEdge(sourceID, nearAID, sourceToNearAWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, nearAID, err)
+	}
+	if _, err = graph.AddEdge(nearAID, nearBID, nearAToNearBWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", nearAID, nearBID, err)
+	}
+	if _, err = graph.AddEdge(nearBID, boundaryID, nearBToBoundary); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", nearBID, boundaryID, err)
+	}
+	if _, err = graph.AddEdge(boundaryID, beyondID, boundaryToBeyond); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", boundaryID, beyondID, err)
+	}
+	if _, err = graph.AddEdge(sourceID, branchID, sourceToBranchWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, branchID, err)
+	}
+	if _, err = graph.AddEdge(branchID, targetID, branchToTargetWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", branchID, targetID, err)
+	}
+	if _, err = graph.AddEdge(sourceID, hugeNodeID, sourceToHugeWeight); err != nil {
+		t.Fatalf("AddEdge(%q,%q) failed: %v", sourceID, hugeNodeID, err)
+	}
+	if _, err = graph.AddEdge(
+		hugeNodeID,
+		overflowTargetID,
+		hugeOutgoingWeight,
+	); err != nil {
+		t.Fatalf(
+			"AddEdge(%q,%q,MaxFloat64) failed: %v",
+			hugeNodeID,
+			overflowTargetID,
+			err,
+		)
+	}
+
+	mustEqualInt(
+		t,
+		graph.VertexCount(),
+		expectedVertexCount,
+		"VertexCount: got=%d want=%d",
+		graph.VertexCount(),
+		expectedVertexCount,
+	)
+	mustEqualInt(
+		t,
+		graph.EdgeCount(),
+		expectedEdgeCount,
+		"EdgeCount: got=%d want=%d",
+		graph.EdgeCount(),
+		expectedEdgeCount,
+	)
+
+	result, err := dijkstra.Dijkstra(
+		graph,
+		sourceID,
+		dijkstra.WithMaxDistance(maxDistance),
+		dijkstra.WithPathTracking(),
+	)
+	if err != nil {
+		t.Fatalf("Dijkstra(%q, MaxDistance=%v) failed: %v", sourceID, maxDistance, err)
+	}
+
+	mustNilState(t, result, false, "cutoff-aware Dijkstra result")
+	mustNilState(t, result.Prev, false, "tracked predecessor map")
+	mustEqualInt(
+		t,
+		len(result.Distances),
+		expectedVertexCount,
+		"Distances size: got=%d want=%d",
+		len(result.Distances),
+		expectedVertexCount,
+	)
+
+	expectedDistances := []struct {
+		vertexID string
+		want     float64
+	}{
+		{vertexID: sourceID, want: 0.0},
+		{vertexID: nearAID, want: expectedNearADistance},
+		{vertexID: nearBID, want: expectedNearBDistance},
+		{vertexID: boundaryID, want: expectedBoundaryDistance},
+		{vertexID: branchID, want: expectedBranchDistance},
+		{vertexID: targetID, want: expectedTargetDistance},
+		{vertexID: hugeNodeID, want: expectedHugeDistance},
+	}
+
+	for _, expected := range expectedDistances {
+		got, distanceErr := result.DistanceTo(expected.vertexID)
+		if distanceErr != nil {
+			t.Fatalf("DistanceTo(%q) failed: %v", expected.vertexID, distanceErr)
+		}
+
+		mustEqualFloat64(
+			t,
+			got,
+			expected.want,
+			"DistanceTo(%q): got=%v want=%v",
+			expected.vertexID,
+			got,
+			expected.want,
+		)
+	}
+
+	beyondDistance, err := result.DistanceTo(beyondID)
+	if err != nil {
+		t.Fatalf("DistanceTo(%q) failed: %v", beyondID, err)
+	}
+	assertInfDistance(t, beyondDistance)
+
+	overflowTargetDistance, err := result.DistanceTo(overflowTargetID)
+	if err != nil {
+		t.Fatalf("DistanceTo(%q) failed: %v", overflowTargetID, err)
+	}
+	assertInfDistance(t, overflowTargetDistance)
+
+	boundaryReachable, err := result.HasPathTo(boundaryID)
+	if err != nil {
+		t.Fatalf("HasPathTo(%q) failed: %v", boundaryID, err)
+	}
+	mustEqualBool(
+		t,
+		boundaryReachable,
+		true,
+		"HasPathTo(%q): got=%v want=true",
+		boundaryID,
+		boundaryReachable,
+	)
+
+	overflowTargetReachable, err := result.HasPathTo(overflowTargetID)
+	if err != nil {
+		t.Fatalf("HasPathTo(%q) failed: %v", overflowTargetID, err)
+	}
+	mustEqualBool(
+		t,
+		overflowTargetReachable,
+		false,
+		"HasPathTo(%q): got=%v want=false",
+		overflowTargetID,
+		overflowTargetReachable,
+	)
+
+	path, err := result.PathTo(targetID)
+	if err != nil {
+		t.Fatalf("PathTo(%q) failed: %v", targetID, err)
+	}
+	assertPathEqual(t, path, []string{sourceID, branchID, targetID})
+
+	overflowPath, err := result.PathTo(overflowTargetID)
+	mustNilState(t, overflowPath, true, "PathTo overflow target")
 	mustErrorIs(t, err, dijkstra.ErrNoPath)
 }

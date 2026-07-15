@@ -21,6 +21,9 @@ import (
 //   - Keep graph construction errors explicit; never ignore AddEdge / AddVertex failures.
 //   - Path examples must enable WithPathTracking explicitly.
 //   - +Inf in examples is a valid data outcome, not an error protocol.
+//   - Graph-edge weights in examples must be finite.
+//   - Never use a +Inf edge to model failure; use a finite threshold or omit the edge.
+//   - Examples consume unmodified Result values and must not demonstrate malformed Prev state.
 //
 //   - We DELIBERATELY ignore the error, since this is a test example and the data is predetermined! DON'T DO THAT!
 

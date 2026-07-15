@@ -9,7 +9,7 @@ import (
 	"github.com/katalvlaran/lvlath/core"
 )
 
-// DijkstraResult stores the detached, queryable outcome of a single-source
+// Result stores the detached, queryable outcome of a single-source
 // shortest-path run over a weighted graph.
 // The result keeps the source identifier, the finalized distance map, and
 // the optional predecessor map used for path reconstruction.
@@ -30,7 +30,7 @@ import (
 //   - Prev: the optional predecessor map for path reconstruction.
 //
 // Returns:
-//   - DijkstraResult: a detached contract type for post-run queries.
+//   - Result: a detached contract type for post-run queries.
 //
 // Errors:
 //   - Result helper methods may return ErrNilResult, ErrEmptyTargetID,
@@ -44,21 +44,26 @@ import (
 //   - Path reconstruction is O(k), where k is the number of vertices on the returned path.
 //
 // Notes:
-//   - The result does not retain a live link to the source graph.
-//   - A present vertex with distance +Inf is distinct from an unknown target vertex.
+//   - Distances and Prev are caller-owned after publication.
+//   - Direct mutation changes this Result and may invalidate witness invariants.
+//   - PathTo defensively rejects broken, out-of-domain, and cyclic predecessor state.
 //
 // AI-Hints:
 //   - Do not treat Prev == nil as "there is no path"; it means path tracking was disabled.
+//   - Exported result maps are mutable by the caller; query methods must fail
+//     safely when caller mutation invalidates witness state.
 //   - Do not collapse unknown-target and unreachable-target semantics into one branch.
-type DijkstraResult struct {
+//   - Caller-owned Prev state must never be followed without cycle and
+//     result-domain validation.
+type Result struct {
 	SourceID  string
 	Distances map[string]float64
 	Prev      map[string]string
 }
 
-// Ensure that DijkstraResult satisfies core.Nilable without requiring callers
+// Ensure that Result satisfies core.Nilable without requiring callers
 // to know the concrete result implementation type.
-var _ core.Nilable = (*DijkstraResult)(nil)
+var _ core.Nilable = (*Result)(nil)
 
 // IsNil reports whether the result receiver itself is nil.
 // This method exists to satisfy core.Nilable and to let callers perform safe
@@ -91,7 +96,7 @@ var _ core.Nilable = (*DijkstraResult)(nil)
 // AI-Hints:
 //   - Prefer IsNil over ad-hoc interface assertions when working with core.Nilable.
 //   - Nil receiver safety here does not remove the need for safe checks in other methods.
-func (r *DijkstraResult) IsNil() bool {
+func (r *Result) IsNil() bool {
 	return r == nil
 }
 
@@ -131,7 +136,7 @@ func (r *DijkstraResult) IsNil() bool {
 // AI-Hints:
 //   - Do not replace +Inf with zero or another synthetic sentinel value.
 //   - Do not treat a missing key as equivalent to an unreachable known vertex.
-func (r *DijkstraResult) DistanceTo(vertexID string) (float64, error) {
+func (r *Result) DistanceTo(vertexID string) (float64, error) {
 	if r == nil {
 		return 0, ErrNilResult
 	}
@@ -183,7 +188,7 @@ func (r *DijkstraResult) DistanceTo(vertexID string) (float64, error) {
 // AI-Hints:
 //   - Reachability is derived from the distance contract, not from the presence of Prev.
 //   - Do not treat missing-target errors as a simple false result.
-func (r *DijkstraResult) HasPathTo(vertexID string) (bool, error) {
+func (r *Result) HasPathTo(vertexID string) (bool, error) {
 	distance, err := r.DistanceTo(vertexID)
 	if err != nil {
 		return false, err
@@ -194,45 +199,60 @@ func (r *DijkstraResult) HasPathTo(vertexID string) (bool, error) {
 
 // PathTo reconstructs one deterministic shortest-path witness from the source
 // to the requested target using the stored predecessor map.
-// The method requires path tracking to have been enabled when the result was produced.
+// The method requires path tracking and defensively validates predecessor-chain
+// integrity before publishing a witness.
 //
 // Implementation:
-//   - Stage 1: Validate the receiver, target identifier, and target presence.
+//   - Stage 1: Validate the receiver, target identifier, and target membership.
 //   - Stage 2: Reject disabled path tracking and unreachable known targets.
-//   - Stage 3: Follow Prev backward from the target to the source.
-//   - Stage 4: Reverse the collected sequence in place and return it.
+//   - Stage 3: Follow Prev backward while validating result-domain membership.
+//   - Stage 4: Detect repeated vertices and reject cyclic predecessor state.
+//   - Stage 5: Reject missing or empty predecessor links before the source.
+//   - Stage 6: Reverse the validated chain in place and publish the forward path.
 //
 // Behavior highlights:
 //   - Path tracking is explicit and never inferred.
-//   - Unknown targets, unreachable targets, and disabled tracking remain distinct cases.
-//   - The source queried against itself returns a single-vertex path.
+//   - Unknown, unreachable, tracking-disabled, and malformed-witness states remain distinct.
+//   - The source queried against itself returns a single-vertex witness.
+//   - Caller-mutated cyclic Prev state cannot cause an infinite loop.
+//   - No partial path is returned on reconstruction failure.
 //
 // Inputs:
 //   - vertexID: the target vertex identifier to reconstruct.
 //
 // Returns:
-//   - []string: the reconstructed shortest-path witness from source to target.
+//   - []string: one validated shortest-path witness from SourceID to vertexID.
+//   - On error, the returned slice is nil.
 //
 // Errors:
 //   - ErrNilResult if the receiver is nil.
 //   - ErrEmptyTargetID if vertexID is empty.
-//   - ErrTargetNotFound if the target does not exist in the result domain.
-//   - ErrPathTrackingDisabled if the result was produced without predecessor tracking.
-//   - ErrNoPath if the target is known but unreachable or if the predecessor chain cannot reach the source.
+//   - ErrTargetNotFound if vertexID is absent from Distances.
+//   - ErrPathTrackingDisabled if Prev is nil.
+//   - ErrNoPath if the target distance is +Inf.
+//   - ErrNoPath if the predecessor chain is missing, empty before SourceID,
+//     leaves the result domain, or contains a cycle.
 //
 // Determinism:
-//   - Reconstruction is deterministic for the same stored predecessor map.
+//   - Reconstruction follows the exact stored Prev relation.
+//   - The same SourceID, Distances, and Prev state produces the same path or error.
 //
 // Complexity:
-//   - Time O(k), Space O(k), where k is the number of vertices on the returned path.
+//   - Time O(k), where k is the number of predecessor vertices inspected.
+//   - Space O(k) for the reversed path and cycle-detection set.
 //
 // Notes:
-//   - This method returns one shortest-path witness, not an exhaustive set of shortest paths.
+//   - A Result returned unchanged by Dijkstra satisfies predecessor invariants.
+//   - Defensive chain validation protects direct struct construction and
+//     caller-owned mutation after publication.
+//   - This method returns one witness, not all shortest paths.
 //
 // AI-Hints:
-//   - Do not silently return an empty slice when Prev is nil; that hides a contract violation.
-//   - Do not fabricate a path when the predecessor chain is broken or unreachable.
-func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
+//   - Do not remove the cycle-detection set as a “redundant optimization”.
+//   - Do not trust exported Prev state blindly.
+//   - Do not return a partially reconstructed path on failure.
+//   - Keep ErrPathTrackingDisabled distinct from ErrNoPath.
+func (r *Result) PathTo(vertexID string) ([]string, error) {
 	if r == nil {
 		return nil, ErrNilResult
 	}
@@ -258,10 +278,20 @@ func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
 		return []string{r.SourceID}, nil
 	}
 
-	path := make([]string, 0, 4)
+	path := make([]string, 0)
+	seenIDs := make(map[string]struct{})
 	currentID := vertexID
+	var known, repeated bool
 
 	for {
+		if _, known = r.Distances[currentID]; !known {
+			return nil, ErrNoPath
+		}
+		if _, repeated = seenIDs[currentID]; repeated {
+			return nil, ErrNoPath
+		}
+
+		seenIDs[currentID] = struct{}{}
 		path = append(path, currentID)
 
 		if currentID == r.SourceID {
@@ -276,8 +306,14 @@ func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
 		currentID = parentID
 	}
 
-	for leftIndex, rightIndex := 0, len(path)-1; leftIndex < rightIndex; leftIndex, rightIndex = leftIndex+1, rightIndex-1 {
+	leftIndex := 0
+	rightIndex := len(path) - 1
+
+	for leftIndex < rightIndex {
 		path[leftIndex], path[rightIndex] = path[rightIndex], path[leftIndex]
+
+		leftIndex++
+		rightIndex--
 	}
 
 	return path, nil
@@ -301,7 +337,7 @@ func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
 //   - None.
 //
 // Returns:
-//   - *DijkstraResult: a deep copy of the receiver, or nil when the receiver is nil.
+//   - *Result: a deep copy of the receiver, or nil when the receiver is nil.
 //
 // Errors:
 //   - None.
@@ -318,12 +354,12 @@ func (r *DijkstraResult) PathTo(vertexID string) ([]string, error) {
 // AI-Hints:
 //   - Preserve Prev == nil exactly; do not rewrite it into an empty map.
 //   - Do not shallow-copy maps here; callers must receive isolated ownership.
-func (r *DijkstraResult) Clone() *DijkstraResult {
+func (r *Result) Clone() *Result {
 	if r == nil {
 		return nil
 	}
 
-	clonedResult := &DijkstraResult{
+	clonedResult := &Result{
 		SourceID:  r.SourceID,
 		Distances: make(map[string]float64, len(r.Distances)),
 		Prev:      nil,

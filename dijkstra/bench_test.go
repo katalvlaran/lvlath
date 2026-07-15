@@ -70,7 +70,7 @@ const (
 )
 
 // benchmarkResultSink prevents accidental dead-code elimination of benchmark results.
-var benchmarkResultSink *dijkstra.DijkstraResult
+var benchmarkResultSink *dijkstra.Result
 
 // benchmarkFixture stores one fully built deterministic benchmark topology together
 // with its workload metadata.

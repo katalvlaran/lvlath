@@ -40,7 +40,7 @@ func TestWeightFnConstructors(t *testing.T) {
 // TestWeightFnBehavior covers the runtime behavior of each WeightFn:
 //   - DefaultWeightFn always returns DefaultEdgeWeight.
 //   - ConstantWeightFn returns the fixed value.
-//   - UniformWeightFn returns DefaultEdgeWeight on nil RNG, and uniform in [min,max].
+//   - UniformWeightFn returns DefaultEdgeWeight on nil RNG, and uniform in [minWeight,maxWeight].
 //   - From1To100WeightFn returns values in [1,100].
 //   - NormalWeightFn returns DefaultEdgeWeight on nil RNG and non-negative samples.
 //   - ExponentialWeightFn returns DefaultEdgeWeight on nil RNG and non-negative samples.
@@ -68,15 +68,15 @@ func TestWeightFnBehavior(t *testing.T) {
 		t.Errorf("ConstantWeightFn(rng): expected %g, got %g", constVal, w)
 	}
 
-	// UniformWeightFn: nil RNG -> default; equal min==max yields that value when RNG present
-	min, max := 3.0, 3.0
-	wfnUni := builder.UniformWeightFn(min, max)
+	// UniformWeightFn: nil RNG -> default; equal minWeight==maxWeight yields that value when RNG present
+	minWeight, maxWeight := 3.0, 3.0
+	wfnUni := builder.UniformWeightFn(minWeight, maxWeight)
 	if w := wfnUni(nil); w != builder.DefaultEdgeWeight {
 		t.Errorf("UniformWeightFn(nil RNG): expected default %g, got %g", builder.DefaultEdgeWeight, w)
 	}
-	// with RNG and min==max, always min
-	if w := wfnUni(rng); w != min {
-		t.Errorf("UniformWeightFn(3,3): expected %g, got %g", min, w)
+	// with RNG and minWeight==maxWeight, always minWeight
+	if w := wfnUni(rng); w != minWeight {
+		t.Errorf("UniformWeightFn(3,3): expected %g, got %g", minWeight, w)
 	}
 
 	// From1To100WeightFn: always in [1,100]

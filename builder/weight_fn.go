@@ -36,31 +36,31 @@ func ConstantWeightFn(value float64) WeightFn {
 	}
 }
 
-// UniformWeightFn returns a WeightFn sampling uniformly in [min, max] inclusive.
-// Panics if min < 0 or max < min.
+// UniformWeightFn returns a WeightFn sampling uniformly in [minW, maxW] inclusive.
+// Panics if minW < 0 or maxW < minW.
 // If rng is nil, yields DefaultEdgeWeight to maintain deterministic fallback.
 // Complexity: O(1) time, O(1) space.
-func UniformWeightFn(min, max float64) WeightFn {
-	if min < 0 || max < min {
-		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ min ≤ max, got min=%g, max=%g", min, max))
+func UniformWeightFn(minW, maxW float64) WeightFn {
+	if minW < 0 || maxW < minW {
+		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ minWeight ≤ max, got minWeight=%g, max=%g", minW, maxW))
 	}
 
-	if min < 0 || max < min {
-		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ min ≤ max, got min=%g, max=%g", min, max))
+	if minW < 0 || maxW < minW {
+		panic(fmt.Sprintf("UniformWeightFn: require 0 ≤ minWeight ≤ max, got minWeight=%g, max=%g", minW, maxW))
 	}
 	return func(rng *rand.Rand) float64 {
 		if rng == nil {
 			return DefaultEdgeWeight
 		}
 
-		if max == min {
+		if maxW == minW {
 			// Degenerate interval: constant
-			return min
+			return minW
 		}
-		// Continuous uniform on [min, max) (Float64() returns [0,1))
-		span := max - min
+		// Continuous uniform on [minW, maxW) (Float64() returns [0,1))
+		span := maxW - minW
 
-		return min + rng.Float64()*span
+		return minW + rng.Float64()*span
 	}
 }
 
@@ -123,10 +123,10 @@ func WithConstantWeight(w float64) Option {
 	return WithWeightFn(ConstantWeightFn(w))
 }
 
-// WithUniformWeight sets weights ∼ U[min,max] via UniformWeightFn.
+// WithUniformWeight sets weights ∼ U[minWeight,maxWeight] via UniformWeightFn.
 // Complexity: O(1).
-func WithUniformWeight(min, max float64) Option {
-	return WithWeightFn(UniformWeightFn(min, max))
+func WithUniformWeight(minWeight, maxWeight float64) Option {
+	return WithWeightFn(UniformWeightFn(minWeight, maxWeight))
 }
 
 // WithNormalWeight sets weights ∼ N(mean,stddev) via NormalWeightFn.

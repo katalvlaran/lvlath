@@ -211,13 +211,13 @@ func WithPathTracking() Option {
 //   - Do not silently clamp invalid input.
 //   - Do not confuse MaxDistance with InfEdgeThreshold: MaxDistance governs total
 //     path cost, while InfEdgeThreshold governs each individual edge.
-func WithMaxDistance(max float64) Option {
+func WithMaxDistance(distance float64) Option {
 	return func(options *Options) error {
-		if err := validateMaxDistance(max); err != nil {
+		if err := validateMaxDistance(distance); err != nil {
 			return err
 		}
 
-		options.MaxDistance = max
+		options.MaxDistance = distance
 
 		return nil
 	}

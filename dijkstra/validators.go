@@ -206,7 +206,7 @@ func validateEdgeWeights(g *core.Graph) error {
 //   - Zero is valid and preserves zero-cost reachability.
 //
 // Inputs:
-//   - max: the candidate inclusive maximum path distance.
+//   - distance: the candidate inclusive maximum path distance.
 //
 // Returns:
 //   - error: nil when max belongs to the valid option domain.
@@ -227,13 +227,13 @@ func validateEdgeWeights(g *core.Graph) error {
 // AI-Hints:
 //   - Keep public constructors and final option assembly on this same validator.
 //   - Do not authorize +Inf graph-edge weights through this option-domain rule.
-func validateMaxDistance(max float64) error {
+func validateMaxDistance(distance float64) error {
 	switch {
-	case math.IsNaN(max):
+	case math.IsNaN(distance):
 		return ErrBadMaxDistance
-	case math.IsInf(max, -1):
+	case math.IsInf(distance, -1):
 		return ErrBadMaxDistance
-	case max < 0:
+	case distance < 0:
 		return ErrBadMaxDistance
 	default:
 		return nil

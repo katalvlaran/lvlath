@@ -51,7 +51,7 @@ import (
 //   - Do not mutate w after construction; kernels treat it as read-only.
 type weightBuffer struct {
 	// n is the square matrix order.
-	// Every valid index must be in [0,n).
+	// Every valid index must be in [0,n].
 	n int
 
 	// w stores detached row-major weights.

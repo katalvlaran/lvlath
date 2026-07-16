@@ -169,7 +169,10 @@ func heldKarp(dist matrix.Matrix, opts Options) (*Result, error) {
 //     subset bitmasks and state transitions. Fragmenting this function would obscure
 //     the mathematical precision of the dynamic programming state updates.
 //
-// nolint:gocyclo
+// nolint:gocyclo,gosec // Gocyclo: Kept monolithic for raw performance and math layout consistency.
+//
+//	// Gosec (G115): Integer conversions to uint for bitwise operations are safely bounded
+//	   because N is restricted by exact-solver memory limits (N <= 31).
 func heldKarpDP(weights weightBuffer, opts Options) ([]int, float64, error) {
 
 	// Use the shared detached weight buffer so exact DP preserves the same

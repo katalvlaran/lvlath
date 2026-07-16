@@ -104,8 +104,8 @@ func TestRNGOptions(t *testing.T) {
 func TestWeightFnOptions(t *testing.T) {
 	t.Parallel() // allow parallel execution
 
-	const constVal = 9.0
-	const min, max = 2.0, 4.0
+	constVal := 9.0
+	minW, maxW := 2.0, 4.0
 	rng := rand.New(rand.NewSource(1))
 
 	// 1. Default configuration: weightFn should be DefaultWeightFn
@@ -124,22 +124,22 @@ func TestWeightFnOptions(t *testing.T) {
 	}
 
 	// 3. WithUniformWeight should override to uniform sampler
-	cfgUni := newBuilderConfig(WithUniformWeight(min, max))
+	cfgUni := newBuilderConfig(WithUniformWeight(minW, maxW))
 	// nil rng yields default
 	if w := cfgUni.weightFn(nil); w != DefaultEdgeWeight {
 		t.Errorf("WithUniformWeight(nil rng): expected default %g, got %g", DefaultEdgeWeight, w)
 	}
-	// seeded rng yields value in [min,max]
+	// seeded rng yields value in [minW,maxW]
 	val := cfgUni.weightFn(rng)
-	if val < min || val > max {
-		t.Errorf("WithUniformWeight(rng): expected in [%g,%g], got %g", min, max, val)
+	if val < minW || val > maxW {
+		t.Errorf("WithUniformWeight(rng): expected in [%g,%g], got %g", minW, maxW, val)
 	}
 
 	// 4. Override order: last option wins
-	cfgOverride := newBuilderConfig(WithConstantWeight(1), WithUniformWeight(min, max))
+	cfgOverride := newBuilderConfig(WithConstantWeight(1), WithUniformWeight(minW, maxW))
 	val2 := cfgOverride.weightFn(rng)
-	if val2 < min || val2 > max {
-		t.Errorf("override order: expected uniform in [%g,%g], got %g", min, max, val2)
+	if val2 < minW || val2 > maxW {
+		t.Errorf("override order: expected uniform in [%g,%g], got %g", minW, maxW, val2)
 	}
 
 	// 5. WithWeightFn(nil) MUST panic (fail-fast)

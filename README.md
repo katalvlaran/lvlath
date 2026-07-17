@@ -28,14 +28,14 @@
 │  ╙o  o   ╙o  ╙───o    ╙o   o  o │
 └─────────────────────────────────┘
 ```
+
 ---
 
-
-[![pkg.go.dev](https://img.shields.io/badge/pkg.go.dev-reference-blue?logo=go)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
-[![Go Report Card](https://goreportcard.com/badge/github.com/katalvlaran/lvlath)](https://goreportcard.com/report/github.com/katalvlaran/lvlath)
-[![Go version](https://img.shields.io/badge/go-%3E%3D1.23-blue)](https://golang.org)
-[![License: AGPL-3.0-only](https://img.shields.io/badge/license-AGPL--3.0--only-green.svg)](LICENSE)
-[![CI](https://github.com/katalvlaran/lvlath/actions/workflows/go.yml/badge.svg)](https://github.com/katalvlaran/lvlath/actions)
+[![Go Reference](https://pkg.go.dev/badge/github.com/katalvlaran/lvlath.svg)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
+[![CI](https://github.com/katalvlaran/lvlath/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/katalvlaran/lvlath/actions/workflows/go.yml)
+[![Coverage](https://codecov.io/gh/katalvlaran/lvlath/branch/main/graph/badge.svg)](https://app.codecov.io/gh/katalvlaran/lvlath)
+[![Go version](https://img.shields.io/badge/Go-%3E%3D1.23.4-00ADD8?logo=go&logoColor=white)](https://go.dev/)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](LICENSE)
 
 ---
 

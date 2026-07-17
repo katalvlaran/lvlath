@@ -2,9 +2,9 @@ name: CI
 
 on:
   # Run the workflow on push to main or any version tags (like v1.0.0)
-push:
-  branches: [main]
-  tags: ['v*']
+  push:
+    branches: [main]
+    tags: ['v*']
   # Run the workflow on any pull request targeting the main branch
   pull_request:
     branches: [ main ]

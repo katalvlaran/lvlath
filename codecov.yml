@@ -33,4 +33,5 @@ comment:
   hide_project_coverage: false
 
 ignore:
-  - "examples"
+  - "examples" # complex use cases (similar to tests)
+  - "builder" # additional functionality for constructing various graphs (still covered by tests)

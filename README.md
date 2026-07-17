@@ -33,7 +33,7 @@
 
 [![Go Reference](https://pkg.go.dev/badge/github.com/katalvlaran/lvlath.svg)](https://pkg.go.dev/github.com/katalvlaran/lvlath)
 [![CI](https://github.com/katalvlaran/lvlath/actions/workflows/go.yml/badge.svg?branch=main)](https://github.com/katalvlaran/lvlath/actions/workflows/go.yml)
-[![Coverage](https://codecov.io/gh/katalvlaran/lvlath/branch/main/graph/badge.svg)](https://app.codecov.io/gh/katalvlaran/lvlath)
+[![Codecov](https://codecov.io/github/katalvlaran/lvlath/graph/badge.svg?token=QMUZPAO34Y)](https://codecov.io/github/katalvlaran/lvlath)
 [![Go version](https://img.shields.io/badge/Go-%3E%3D1.23.4-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](LICENSE)
 

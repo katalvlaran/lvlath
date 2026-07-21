@@ -1,5 +1,7 @@
 ![img.png](img.png)
 
+(moved to [https://github.com/lvlath/go](https://github.com/lvlath/go))
+
 ---
 # lvlath
 
